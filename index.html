@@ -7639,6 +7639,10 @@ ${weightLine}هدف تقریبی کالری/پروتئین امروز بر اس�
       })
     });
     const data = await response.json();
+    if(!response.ok){
+      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      return;
+    }
     const rawText = data.reply || '';
     const clean = rawText.replace(/```json|```/g,'').trim();
     const parsed = JSON.parse(clean);
@@ -7650,7 +7654,7 @@ ${weightLine}هدف تقریبی کالری/پروتئین امروز بر اس�
     showToast('تحلیل امشب آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('مشکلی پیش اومد، دوباره امتحان کن', 'error');
+    showToast('پاسخ نامعتبر بود، دوباره امتحان کن', 'error');
   }finally{
     btn.disabled = false;
     btn.textContent = entry.nightReview ? '🔄 دوباره تحلیل کن' : '✅ تایید و تحلیل امشب';
@@ -9886,6 +9890,10 @@ ${prevSummary ? 'جمع‌بندی هفته‌ی قبل این بود: "'+prevSu
       body: JSON.stringify({ feature: "weeklyReview", max_tokens:1000, system: sys, messages:[{role:"user", content:prompt}] })
     });
     const data = await response.json();
+    if(!response.ok){
+      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      return;
+    }
     const rawText = data.reply || '';
     const parsed = JSON.parse(rawText.replace(/```json|```/g,'').trim());
     storeData.weeklyReview = { generatedAt: new Date().toISOString(), data: parsed };
@@ -9895,7 +9903,7 @@ ${prevSummary ? 'جمع‌بندی هفته‌ی قبل این بود: "'+prevSu
     showToast('گزارش هفتگی آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('مشکلی پیش اومد، دوباره امتحان کن', 'error');
+    showToast('پاسخ نامعتبر بود، دوباره امتحان کن', 'error');
   }finally{
     btn.disabled=false;
     btn.textContent = storeData.weeklyReview ? '🔄 دوباره تحلیل کن' : 'تحلیل هفته اخیر';
@@ -9954,6 +9962,10 @@ ${prevSummary ? 'جمع‌بندی هفته‌ی قبل این بود: "'+prevSu
       body: JSON.stringify({ feature: "lessonsReview", max_tokens:1000, system: sys, messages:[{role:"user", content:prompt}] })
     });
     const data = await response.json();
+    if(!response.ok){
+      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      return;
+    }
     const rawText = data.reply || '';
     const parsed = JSON.parse(rawText.replace(/```json|```/g,'').trim());
     storeData.lessonsReview = { generatedAt: new Date().toISOString(), data: parsed };
@@ -9963,7 +9975,7 @@ ${prevSummary ? 'جمع‌بندی هفته‌ی قبل این بود: "'+prevSu
     showToast('جمع‌بندی درس‌های هفته آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('مشکلی پیش اومد، دوباره امتحان کن', 'error');
+    showToast('پاسخ نامعتبر بود، دوباره امتحان کن', 'error');
   }finally{
     btn.disabled=false;
     btn.textContent = storeData.lessonsReview ? '🔄 دوباره جمع‌بندی کن' : 'جمع‌بندی درس‌های این هفته';
@@ -10012,6 +10024,10 @@ ${prevSummary ? 'جمع‌بندی ماه قبل این بود: "'+prevSummary+'
       body: JSON.stringify({ feature: "monthlyReview", max_tokens:1000, system: sys, messages:[{role:"user", content:prompt}] })
     });
     const data = await response.json();
+    if(!response.ok){
+      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      return;
+    }
     const rawText = data.reply || '';
     const parsed = JSON.parse(rawText.replace(/```json|```/g,'').trim());
     storeData.monthlyReview = { generatedAt: new Date().toISOString(), data: parsed };
@@ -10021,7 +10037,7 @@ ${prevSummary ? 'جمع‌بندی ماه قبل این بود: "'+prevSummary+'
     showToast('گزارش ماهانه آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('مشکلی پیش اومد، دوباره امتحان کن', 'error');
+    showToast('پاسخ نامعتبر بود، دوباره امتحان کن', 'error');
   }finally{
     btn.disabled=false;
     btn.textContent = storeData.monthlyReview ? '🔄 دوباره تحلیل کن' : 'تحلیل ماه اخیر';
@@ -10070,6 +10086,10 @@ async function generateLetter(){
       body: JSON.stringify({ feature: "letter", max_tokens:600, system: sys, messages:[{role:"user", content:prompt}] })
     });
     const data = await response.json();
+    if(!response.ok){
+      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      return;
+    }
     const rawText = (data.reply || '').trim();
     storeData.futureLetter = rawText;
     saveData();
@@ -10160,6 +10180,10 @@ ${daysText}
       body: JSON.stringify({ feature: "lifeAnalyzer", max_tokens:1000, system: sys, messages:[{role:"user", content:prompt}] })
     });
     const data = await response.json();
+    if(!response.ok){
+      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      return;
+    }
     const rawText = data.reply || '';
     const parsed = JSON.parse(rawText.replace(/```json|```/g,'').trim());
     storeData.lifeAnalyzerReport = { generatedAt: new Date().toISOString(), data: parsed };
@@ -10169,7 +10193,7 @@ ${daysText}
     showToast('الگوهای زندگیت آماده شد ✨', 'success');
   }catch(err){
     console.error(err);
-    showToast('مشکلی پیش اومد، دوباره امتحان کن', 'error');
+    showToast('پاسخ نامعتبر بود، دوباره امتحان کن', 'error');
   }finally{
     btn.disabled = false;
     btn.textContent = storeData.lifeAnalyzerReport ? '🔄 دوباره تحلیل کن' : '🔍 کشف الگوهای زندگیت';
@@ -13307,6 +13331,10 @@ document.getElementById('libDeepBtn').addEventListener('click', async ()=>{
       body: JSON.stringify({ feature: "libDeep", max_tokens:700, system: sys, messages:[{role:"user", content:prompt}] })
     });
     const data = await response.json();
+    if(!response.ok){
+      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      return;
+    }
     const rawText = (data.reply || '').trim();
     storeData.libraryDeepDive[currentPhase.key] = rawText;
     saveData();
