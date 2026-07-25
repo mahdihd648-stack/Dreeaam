@@ -689,6 +689,12 @@
   .item.checked span.label{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line);}
   .item.avoid.checked .box{background:var(--avoid);border-color:var(--avoid);}
   .item span.label{font-size:14px;flex:1;transition:color .2s;}
+  .item-edit-btn{flex-shrink:0;width:26px;height:26px;border-radius:50%;border:none;background:transparent;
+    color:var(--muted);font-size:13px;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+  .item-edit-btn:hover{background:var(--card-2);color:var(--accent);}
+  .item-add-row{border:1.5px dashed var(--line);}
+  .item-add-row .item-add-plus{border-style:dashed;color:var(--accent);font-size:16px;font-weight:700;}
+  .item-add-row span.label{color:var(--muted);}
 
   /* ---- focus / situation modes (حالت) ---- */
   .focus-mode-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:4px 14px 18px;}
@@ -948,6 +954,11 @@
     cursor:pointer;background:linear-gradient(135deg,var(--accent-2),var(--accent));color:var(--accent-text);}
   .exit-leave-btn{border:none;background:transparent;border-radius:14px;padding:9px;font-family:inherit;
     font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;}
+
+  /* ---- item-text-modal: themed edit/add-task dialog (replaces native prompt()) ---- */
+  .item-text-modal-card{text-align:right;}
+  .item-text-modal-title{font-size:14.5px;font-weight:800;color:var(--text);margin-bottom:14px;text-align:center;}
+  .item-text-modal-input{margin-bottom:16px;text-align:right;}
 
 
   .narration-play-btn{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:8px 14px;
@@ -1689,38 +1700,14 @@
     cursor:pointer;box-shadow:0 2px 8px rgba(99,60,220,.35);}
   .chat-report-btn:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:grayscale(.5);}
   .chat-media-btn{background:linear-gradient(135deg,#0891b2,#0d9488);box-shadow:0 2px 8px rgba(8,145,178,.35);}
-  .chat-voice-btn{background:linear-gradient(135deg,#e11d5e,#f97316);box-shadow:0 2px 8px rgba(225,29,94,.35);font-size:16px;}
-  .chat-voice-btn.recording{animation:chatVoiceBtnPulse 1.1s ease-in-out infinite;}
-  @keyframes chatVoiceBtnPulse{0%,100%{box-shadow:0 0 0 0 rgba(225,29,94,.45);}50%{box-shadow:0 0 0 8px rgba(225,29,94,0);}}
   .chat-report-hint{padding:0 14px 12px;font-size:10.5px;color:var(--muted);text-align:center;}
-  /* ---- Voice message recording bar: swaps in for the normal send row while recording,
-     so the fixed-size mic/attach/send buttons never have to share space with it — avoids
-     the row overflowing on narrow screens instead of trying to cram one more icon in. ---- */
-  .chat-voice-record-row{display:none;align-items:center;gap:8px;padding:10px 14px 14px;}
-  .chat-voice-record-row.show{display:flex;}
-  .chat-voice-record-info{flex:1;min-width:0;display:flex;align-items:center;gap:8px;background:var(--card-2);
-    border:1px solid var(--line);border-radius:20px;padding:10px 14px;font-size:12.5px;color:var(--text);}
-  .chat-voice-rec-dot{flex-shrink:0;width:9px;height:9px;border-radius:50%;background:#e11d5e;animation:chatVoiceDotBlink 1s ease-in-out infinite;}
-  @keyframes chatVoiceDotBlink{0%,100%{opacity:1;}50%{opacity:.25;}}
-  #chatVoiceTimer{flex-shrink:0;font-variant-numeric:tabular-nums;font-weight:700;}
-  .chat-voice-record-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);}
-  .chat-voice-cancel-btn{background:var(--card-2);color:var(--muted);border:1px solid var(--line);box-shadow:none;}
-  .chat-voice-send-btn{background:linear-gradient(135deg,#0891b2,#0d9488);box-shadow:0 2px 8px rgba(8,145,178,.35);}
-  /* ---- Voice message bubble: lightweight custom player (play/pause + progress + time),
-     driven off a hidden <audio> element — duration/position come straight from the audio
-     file's own metadata, so no extra DB column is needed to store it. ---- */
-  .cm-voice{display:flex;align-items:center;gap:8px;min-width:calc(190px * var(--chat-zoom,1));padding:2px 2px 2px 0;}
-  .cm-voice-btn{flex-shrink:0;width:32px;height:32px;border-radius:50%;border:none;background:var(--accent);
-    color:var(--accent-text);font-size:13px;display:flex;align-items:center;justify-content:center;cursor:pointer;}
-  .cm-voice-track{flex:1;min-width:0;height:5px;border-radius:6px;background:var(--line);position:relative;overflow:hidden;cursor:pointer;}
-  .cm-voice-fill{position:absolute;inset:0 auto 0 0;width:0%;background:var(--accent);border-radius:6px;}
-  .cm-voice-time{flex-shrink:0;font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:30px;text-align:left;}
   /* Media bubble: GIF/image messages. max-width keeps large images from blowing up the
      bubble past the normal 80% chat width; the placeholder covers the daily-purge case
      where the DB row still exists but the file itself was already removed from Storage. */
   .cm-media{margin:2px 0 4px;max-width:calc(220px * var(--chat-zoom,1));border-radius:10px;overflow:hidden;line-height:0;position:relative;}
   .cm-media img,.cm-media video{display:block;width:100%;height:auto;max-height:calc(260px * var(--chat-zoom,1));object-fit:cover;border-radius:10px;}
   .cm-media.cm-media-expired{padding:14px 10px;font-size:11px;line-height:1.6;color:var(--muted);text-align:center;background:var(--card-2);}
+  .cm-voice-retired{padding:8px 12px;font-size:11.5px;line-height:1.6;color:var(--muted);background:var(--card-2);border-radius:12px;}
   /* Telegram-style "silent video plays like a GIF": no controls, autoplay+loop+muted, with a
      small badge so it's clear (to sender and recipients) that it's being treated as an animation. */
   .cm-media.cm-gifvideo video{pointer-events:none;}
@@ -1763,11 +1750,15 @@
   .chat-user-filter-banner .cuf-text b{color:var(--accent);}
   .chat-user-filter-banner .cuf-clear{flex-shrink:0;background:var(--accent);color:var(--accent-text);border:none;
     padding:6px 12px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;}
-  /* Pinned message: sits right under the chat header, tap to jump to it, owner can unpin */
-  .chat-pinned-banner{display:none;align-items:center;gap:8px;margin:0 14px 8px;padding:8px 10px;
+  /* Pinned messages: sit right under the chat header, tap one to jump to it, admins can unpin
+     each individually. Multiple messages can be pinned at once, so the banner is a stack of
+     rows rather than a single line. */
+  .chat-pinned-banner{display:none;flex-direction:column;gap:6px;margin:0 14px 8px;
+    max-height:132px;overflow-y:auto;}
+  .chat-pinned-banner.show{display:flex;}
+  .chat-pinned-banner .cpin-row{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:8px 10px;
     border-radius:12px;background:var(--card-2);border:1px solid var(--line);
     border-inline-start:3px solid var(--accent);cursor:pointer;}
-  .chat-pinned-banner.show{display:flex;}
   .chat-pinned-banner .cpin-icon{flex-shrink:0;font-size:14px;}
   .chat-pinned-banner .cpin-body{flex:1;min-width:0;}
   .chat-pinned-banner .cpin-name{font-size:10px;font-weight:800;color:var(--accent);}
@@ -1891,6 +1882,24 @@
   .prem-feature-free.locked{text-decoration:none;}
   .prem-feature-arrow{color:var(--line);}
   .prem-feature-pro{color:#0b8a52;background:rgba(63,184,127,.16);padding:2px 9px;border-radius:20px;}
+
+  /* ---- رایگان/پرمیوم comparison table: replaces the old one-card-per-feature list so the
+     most important differences are scannable at a glance without the page running long.
+     Secondary/minor perks are NOT in this table — they stay in the pill grid below it. ---- */
+  .prem-compare-wrap{margin:16px 0;border-radius:18px;overflow:hidden;
+    background:var(--pc-glass-strong);border:1px solid var(--pc-border);
+    box-shadow:0 10px 24px -18px var(--pc-shadow);}
+  .prem-compare-table{width:100%;border-collapse:collapse;font-size:11.5px;}
+  .prem-compare-table thead th{padding:10px 8px;font-size:10.5px;font-weight:800;color:var(--muted);
+    background:var(--pc-glass);border-bottom:1px solid var(--pc-border-soft);text-align:center;white-space:nowrap;}
+  .prem-compare-table thead th.pct-feature{text-align:right;padding-right:12px;color:var(--text);}
+  .prem-compare-table thead th.pct-pro{color:var(--accent);}
+  .prem-compare-table tbody td{padding:11px 8px;border-bottom:1px solid var(--pc-border-soft);
+    text-align:center;font-weight:700;vertical-align:middle;}
+  .prem-compare-table tbody tr:last-child td{border-bottom:none;}
+  .prem-compare-table td.pct-name{text-align:right;color:var(--text);font-weight:800;padding-right:12px;line-height:1.5;}
+  .prem-compare-table td.pct-no{color:var(--muted);}
+  .prem-compare-table td.pct-yes{color:#0b8a52;background:rgba(63,184,127,.1);}
 
   /* ---- exclusive perks pill grid ---- */
   .prem-perks-title{font-size:12.5px;font-weight:800;color:var(--text);margin:2px 4px 10px;}
@@ -2257,12 +2266,7 @@
     box-shadow:0 4px 14px -6px var(--pc-shadow);
   }
   #tab-chat .chat-media-btn{color:#0d9488;}
-  #tab-chat .chat-voice-btn{color:#e11d5e;}
   #tab-chat .chat-report-hint{padding:0 18px 14px;font-size:10px;}
-  #tab-chat .chat-voice-record-row{gap:10px;padding:12px 16px 16px;border-top:1px solid var(--pc-border-soft);}
-  #tab-chat .chat-voice-record-info{background:var(--pc-glass-strong);border:1px solid var(--pc-border);}
-  #tab-chat .chat-voice-cancel-btn,
-  #tab-chat .chat-voice-send-btn{width:46px;height:46px;}
 
   /* ---- glass back button ---- */
   #tab-chat .settings-back-btn.chat-back-fab{
@@ -2437,9 +2441,17 @@ box-shadow:0 6px 18px -8px var(--pc-shadow);width:34px;height:34px;
   @keyframes lbSpin{to{transform:rotate(360deg);}}
   .lb-empty{text-align:center;padding:34px 16px;color:var(--muted);font-size:12.5px;line-height:1.9;}
 
-  /* --- Podium (top 3) --- */
-  .lb-podium{display:flex;align-items:flex-end;justify-content:center;gap:8px;margin:6px 0 22px;padding:0 4px;}
-  .lb-podium-item{flex:1;max-width:112px;display:flex;flex-direction:column;align-items:center;border-radius:16px 16px 10px 10px;
+  /* --- Podium (all ranks) ---
+     Horizontally scrollable strip so every rank uses the same round card
+     style. The container is forced to direction:ltr so rank #1 is always
+     the left-most card regardless of the page's RTL direction, while each
+     card resets back to direction:rtl so its own Persian text still reads
+     normally. */
+  .lb-podium{display:flex;align-items:flex-end;justify-content:flex-start;gap:8px;margin:6px 0 22px;padding:2px 4px 10px;
+    direction:ltr;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;}
+  .lb-podium::-webkit-scrollbar{height:4px;}
+  .lb-podium::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
+  .lb-podium-item{flex:0 0 auto;width:96px;direction:rtl;scroll-snap-align:center;display:flex;flex-direction:column;align-items:center;border-radius:16px 16px 10px 10px;
     padding:0 6px 12px;position:relative;text-align:center;animation:lbPopIn .5s ease backwards;}
   .lb-podium-item .lb-crown{font-size:18px;position:absolute;top:-20px;left:50%;transform:translateX(-50%);}
   .lb-podium-item .lb-p-avatar{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;
@@ -2450,11 +2462,17 @@ box-shadow:0 6px 18px -8px var(--pc-shadow);width:34px;height:34px;
   .lb-podium-item .lb-p-days{font-size:13px;font-weight:800;color:#fff;margin-top:4px;}
   .lb-podium-item .lb-p-days-label{font-size:9.5px;font-weight:600;opacity:.85;margin-right:2px;}
   .lb-podium-item .lb-medal{font-size:20px;margin-top:6px;}
-  .lb-podium-item.gold{order:2;background:linear-gradient(160deg,#ffd76a,#e8a020);height:172px;padding-top:6px;
+  .lb-podium-item.gold{background:linear-gradient(160deg,#ffd76a,#e8a020);height:172px;padding-top:6px;
     box-shadow:0 10px 26px rgba(232,160,32,.4);z-index:2;animation-delay:.05s;}
-  .lb-podium-item.silver{order:1;background:linear-gradient(160deg,#e3e9f0,#a9b4c2);height:146px;box-shadow:0 8px 20px rgba(140,150,165,.35);animation-delay:.15s;}
-  .lb-podium-item.bronze{order:3;background:linear-gradient(160deg,#e3a879,#b9743f);height:130px;box-shadow:0 8px 20px rgba(180,110,55,.35);animation-delay:.25s;}
+  .lb-podium-item.silver{background:linear-gradient(160deg,#e3e9f0,#a9b4c2);height:146px;box-shadow:0 8px 20px rgba(140,150,165,.35);animation-delay:.15s;}
+  .lb-podium-item.bronze{background:linear-gradient(160deg,#e3a879,#b9743f);height:130px;box-shadow:0 8px 20px rgba(180,110,55,.35);animation-delay:.25s;}
   .lb-podium-item.gold .lb-p-avatar{width:60px;height:60px;font-size:22px;}
+  /* rank 4+ : same round-card shape as the podium, plain (non-medal) styling */
+  .lb-podium-item.plain{background:var(--card);border:1px solid var(--line);height:118px;box-shadow:0 4px 14px rgba(0,0,0,.07);}
+  .lb-podium-item.plain .lb-p-name,.lb-podium-item.plain .lb-p-days{color:var(--text);}
+  .lb-podium-item.plain .lb-p-days-label{color:var(--muted);}
+  .lb-podium-item.plain .lb-medal{font-size:12.5px;font-weight:800;color:var(--muted);}
+  .lb-podium-item.plain .lb-chip{background:var(--accent-soft);color:var(--accent);}
   .lb-podium-item.me{box-shadow:0 0 0 3px #fff, 0 10px 26px rgba(0,0,0,.28);}
   @keyframes lbPopIn{from{opacity:0;transform:translateY(18px) scale(.9);}to{opacity:1;transform:translateY(0) scale(1);}}
 
@@ -2654,7 +2672,7 @@ overflow:hidden;
 
   #tab-leaderboard .lb-podium{gap:12px;margin:10px 0 30px;}
   #tab-leaderboard .lb-podium-item{
-    max-width:132px;border-radius:26px 26px 16px 16px;
+    flex:0 0 auto;width:104px;border-radius:26px 26px 16px 16px;
     background:var(--pc-incoming);
     border:1px solid var(--pc-border-soft);
     box-shadow:0 16px 32px -18px var(--pc-shadow), 0 0 26px -12px var(--pc-glow-b);
@@ -2666,6 +2684,7 @@ overflow:hidden;
   }
   #tab-leaderboard .lb-podium-item.silver{height:176px;box-shadow:0 0 28px -14px var(--pc-border), 0 14px 30px -18px var(--pc-shadow);}
   #tab-leaderboard .lb-podium-item.bronze{height:157px;box-shadow:0 0 28px -14px var(--pc-glow-b), 0 14px 30px -18px var(--pc-shadow);}
+  #tab-leaderboard .lb-podium-item.plain{height:150px;}
   #tab-leaderboard .lb-podium-item .lb-p-avatar{width:62px;height:62px;font-size:22px;
     border:3px solid color-mix(in srgb, var(--card) 60%, white 20%);box-shadow:0 6px 18px -10px var(--pc-shadow);}
   #tab-leaderboard .lb-podium-item.gold .lb-p-avatar{width:74px;height:74px;font-size:26px;}
@@ -3474,6 +3493,21 @@ overflow:hidden;
     <div class="exit-actions">
       <button class="exit-stay-btn" id="authGateSignupBtn">✨ ساخت حساب رایگان</button>
       <button class="exit-leave-btn" id="authGateCloseBtn">بعداً</button>
+    </div>
+  </div>
+</div>
+
+<!-- Themed replacement for the browser's native prompt() when editing/adding a checklist
+     task — the native prompt looked like a raw system dialog (wrong font, ugly title,
+     no theme colors) and broke the app's visual consistency. Reused across both the
+     pencil-edit action and the "add new task" row via showItemTextModal(). -->
+<div class="exit-overlay" id="itemTextModal">
+  <div class="exit-card item-text-modal-card">
+    <div class="item-text-modal-title" id="itemTextModalTitle">ویرایش کار</div>
+    <input type="text" class="onboard-input item-text-modal-input" id="itemTextModalInput" placeholder="متن کار رو بنویس...">
+    <div class="exit-actions">
+      <button class="exit-stay-btn" id="itemTextModalSaveBtn">ذخیره</button>
+      <button class="exit-leave-btn" id="itemTextModalCancelBtn">انصراف</button>
     </div>
   </div>
 </div>
@@ -4609,18 +4643,8 @@ overflow:hidden;
           <button id="sendReportBtn" class="chat-report-btn" title="ارسال گزارش تسک‌های امروز"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5" width="13" height="16" rx="2.3"/><rect x="9" y="3" width="6" height="3.4" rx="1.2"/><path d="M8.5 11.5h7M8.5 15h7M8.5 18h4.5"/></svg></span></button>
           <button id="chatAttachBtn" class="chat-report-btn chat-media-btn" type="button" title="افزودن عکس، ویدیو یا گیف" aria-label="افزودن عکس، ویدیو یا گیف"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></button>
           <input type="file" id="chatMediaInput" accept="image/gif,image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" style="display:none;">
-          <button id="chatVoiceBtn" class="chat-report-btn chat-voice-btn" type="button" title="ضبط پیام صوتی" aria-label="ضبط پیام صوتی"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21M9 21h6"/></svg></span></button>
           <input type="text" id="chatInput" placeholder="پیامتو بنویس...">
           <button id="chatSendBtn">ارسال</button>
-        </div>
-        <div class="chat-voice-record-row" id="chatVoiceRecordRow">
-          <button id="chatVoiceCancelBtn" class="chat-report-btn chat-voice-cancel-btn" type="button" title="لغو ضبط" aria-label="لغو ضبط"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14"/><path d="M9.5 7V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v2"/><path d="M6.5 7l1 12.2A2 2 0 0 0 9.5 21h5a2 2 0 0 0 2-1.8L17.5 7"/><path d="M10 11v6M14 11v6"/></svg></span></button>
-          <div class="chat-voice-record-info">
-            <span class="chat-voice-rec-dot"></span>
-            <span id="chatVoiceTimer">۰۰:۰۰</span>
-            <span class="chat-voice-record-label">در حال ضبط ویس...</span>
-          </div>
-          <button id="chatVoiceSendBtn" class="chat-report-btn chat-voice-send-btn" type="button" title="ارسال ویس" aria-label="ارسال ویس"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12L19.5 4.5 13 19.5l-2-6.4-6.5-1.1z"/></svg></span></button>
         </div>
         <div class="cm-action-menu-backdrop" id="chatAttachMenuBackdrop"></div>
         <div class="cm-action-menu" id="chatAttachMenu">
@@ -4757,151 +4781,66 @@ overflow:hidden;
       <span>بدون خرید پرمیوم، این امکانات به‌هیچ‌وجه در دسترس نیستن:</span>
     </div>
 
-    <div class="prem-feature-list">
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">🌙</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">تحلیل شب</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free">فقط یک‌بار</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">نامحدود</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">💬</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">گفتگو با کوچ</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free">فقط یک‌بار</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">نامحدود</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">📊</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">گزارش هفتگی/ماهانه و جمع‌بندی درس‌ها</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free">فقط یک‌بار</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">نامحدود</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">📚</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">کتابخونه‌ی عمیق و تب کتابخانه</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">قفل 🔒</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">✉️</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">نامه‌ی آینده و دفترچه هوشمند</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free">فقط یک‌بار</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">نامحدود</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">🎨</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">همه‌ی تم‌ها</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">فقط اصلی و سبز</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">همه باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">🤝</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">هم‌مسیر</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">قفل 🔒</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">🧘</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">مدیتیشن نعمت‌ها و اسکن بدن</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">قفل 🔒</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">⚖️</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">سبک برنامه‌ی روزانه</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">فقط سبک</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">متوسط و سنگین هم</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">📅</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">طول برنامه</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">فقط ۶۰ روزه</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">همه‌ی مدت‌ها</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">💬</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">پیام در چت عمومی</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free">روزی ۱۰ پیام</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">نامحدود</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">📋</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">ارسال گزارش کار</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free">فقط یک‌بار</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">نامحدود</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">📌</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">روز خاص و درس امروز</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">قفل 🔒</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">🏆</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">مشاهده‌ی لیدربورد</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free">باز برای همه</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">📣</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">گروه انجمن</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">قفل 🔒</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">⏰</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">چک‌لیست و یادآورها</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">قفل 🔒</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">🌙</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">برنامه‌ریزی فردا</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">قفل 🔒</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">🎯</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">سیستم اهداف</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">قفل 🔒</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">📋</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">کپی متن پیام در چت</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">قفل 🔒</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
-      <div class="prem-feature-card">
-        <div class="prem-feature-ic">😀</div>
-        <div class="prem-feature-body">
-          <div class="prem-feature-name">ری‌اکشن روی پیام‌های چت</div>
-          <div class="prem-feature-compare"><span class="prem-feature-free locked">قفل 🔒</span><span class="prem-feature-arrow">←</span><span class="prem-feature-pro">باز</span></div>
-        </div>
-      </div>
+    <div class="prem-compare-wrap">
+      <table class="prem-compare-table">
+        <thead>
+          <tr>
+            <th class="pct-feature">امکان</th>
+            <th>رایگان</th>
+            <th class="pct-pro">پرمیوم</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="pct-name">📚 کتابخونه‌ی عمیق و تب کتابخانه</td>
+            <td class="pct-no">❌</td>
+            <td class="pct-yes">✅</td>
+          </tr>
+          <tr>
+            <td class="pct-name">🤝 هم‌مسیر</td>
+            <td class="pct-no">❌</td>
+            <td class="pct-yes">✅</td>
+          </tr>
+          <tr>
+            <td class="pct-name">⏰ یادآورها و برنامه‌ریزی فردا</td>
+            <td class="pct-no">❌</td>
+            <td class="pct-yes">✅</td>
+          </tr>
+          <tr>
+            <td class="pct-name">🎯 سیستم اهداف و روز خاص</td>
+            <td class="pct-no">❌</td>
+            <td class="pct-yes">✅</td>
+          </tr>
+          <tr>
+            <td class="pct-name">🎨 همه‌ی تم‌ها</td>
+            <td class="pct-no">فقط ۲ تم</td>
+            <td class="pct-yes">✅ همه</td>
+          </tr>
+          <tr>
+            <td class="pct-name">📅 طول و شدت برنامه</td>
+            <td class="pct-no">فقط ۶۰ روزه / سبک</td>
+            <td class="pct-yes">✅ همه گزینه‌ها</td>
+          </tr>
+          <tr>
+            <td class="pct-name">🌙 تحلیل شب، گفتگو با کوچ و گزارش‌ها</td>
+            <td class="pct-no">فقط یک‌بار</td>
+            <td class="pct-yes">✅ نامحدود</td>
+          </tr>
+          <tr>
+            <td class="pct-name">💬 پیام در چت عمومی</td>
+            <td class="pct-no">روزی ۱۰ پیام</td>
+            <td class="pct-yes">✅ نامحدود</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="prem-perks-title">و بیشتر از این...</div>
     <div class="prem-perks-grid">
+      <div class="prem-perk-pill"><span class="emoji">📣</span>گروه انجمن</div>
+      <div class="prem-perk-pill"><span class="emoji">🧘</span>مدیتیشن نعمت‌ها و اسکن بدن</div>
+      <div class="prem-perk-pill"><span class="emoji">📋</span>کپی متن پیام در چت</div>
+      <div class="prem-perk-pill"><span class="emoji">😀</span>ری‌اکشن روی پیام‌های چت</div>
       <div class="prem-perk-pill"><span class="emoji">☁️</span>فضای ذخیره‌سازی ابری</div>
       <div class="prem-perk-pill"><span class="emoji">🎨</span>شخصی‌سازی کامل</div>
       <div class="prem-perk-pill"><span class="emoji">📑</span>گزارش‌های اختصاصی</div>
@@ -5065,10 +5004,7 @@ overflow:hidden;
 
     <div id="lbContent" style="display:none">
       <div class="lb-podium" id="lbPodium"></div>
-      <div class="lb-list-head">
-        <span>رتبه</span><span style="flex:1"></span><span>روز</span>
-      </div>
-      <div class="lb-list" id="lbList"></div>
+      <div class="lb-list" id="lbList" style="display:none"></div>
       <div class="lb-gender-stats" id="lbGenderStats"></div>
 
       <!-- ---- Extra aggregate community stats (all opt-in / non-sensitive fields only —
@@ -6451,26 +6387,43 @@ function getDoItems(){
   const phaseIdx = Math.max(0, phases.findIndex(p=>p.key===currentPhase.key));
   const fullPool = getPersonalizedPhaseItems(currentPhase, phaseIdx);
   const extra = (entry && entry.extraDoItems) || [];
+  let items;
   if(getActiveSpecialDay()){
     const { lightDoCount } = getLightModeCounts(fullPool.length, getAvoidFullPool().length);
-    return fullPool.slice(0, Math.min(lightDoCount, fullPool.length)).concat(extra);
+    items = fullPool.slice(0, Math.min(lightDoCount, fullPool.length)).concat(extra);
+  } else {
+    const { doCount } = revealCounts(programDay());
+    items = fullPool.slice(0, Math.min(doCount, fullPool.length)).concat(storeData.customItems || []).concat(extra);
   }
-  const { doCount } = revealCounts(programDay());
-  return fullPool.slice(0, Math.min(doCount, fullPool.length)).concat(storeData.customItems || []).concat(extra);
+  return applyItemOverrides(items, entry && entry.doOverrides);
 }
 function getMomentItems(){ return BASE_MOMENT_ITEMS; }
 function getAvoidItems(){
   const fullPool = getAvoidFullPool();
   const extra = (entry && entry.extraAvoidItems) || [];
+  let items;
   if(getActiveSpecialDay()){
     const phases = scaledPhases();
     const phaseIdx = Math.max(0, phases.findIndex(p=>p.key===currentPhase.key));
     const doFullLen = getPersonalizedPhaseItems(currentPhase, phaseIdx).length;
     const { lightAvoidCount } = getLightModeCounts(doFullLen, fullPool.length);
-    return fullPool.slice(0, Math.min(lightAvoidCount, fullPool.length)).concat(extra);
+    items = fullPool.slice(0, Math.min(lightAvoidCount, fullPool.length)).concat(extra);
+  } else {
+    const { avoidCount } = revealCounts(programDay());
+    items = fullPool.slice(0, Math.min(avoidCount, fullPool.length)).concat(storeData.customAvoidItems || []).concat(extra);
   }
-  const { avoidCount } = revealCounts(programDay());
-  return fullPool.slice(0, Math.min(avoidCount, fullPool.length)).concat(extra);
+  return applyItemOverrides(items, entry && entry.avoidOverrides);
+}
+/* ---- Per-day text edits: the user can rename any task shown today (whether it's an
+   auto-generated program item or a custom one) via the pencil icon in renderList(). The
+   edit is keyed by that item's position in today's list and stored on the day's entry
+   (entry.doOverrides / entry.avoidOverrides), so it only affects today — exactly like
+   entry.done — and both getDoItems/getAvoidItems apply it last, which means the daily
+   report (getTaskReportData, which reads these same two functions) always shows whatever
+   text is currently on screen, edited or not. ---- */
+function applyItemOverrides(items, overrides){
+  if(!overrides) return items;
+  return items.map((label, idx)=> (overrides[idx] !== undefined ? overrides[idx] : label));
 }
 /* ---- «برنامه فردا»: پیش‌نمایش آیتم‌هایی که فردا به‌صورت خودکار (بر اساس فاز/روز برنامه)
    تو چک‌لیست ظاهر می‌شن. برای روزهای خاص (روز خاص) این پیش‌نمایش دقیق نیست چون وضعیت
@@ -6757,7 +6710,7 @@ function defaultProfile(){
 }
 function defaultStoreData(){
   return { entries:{}, startDate:null, startTimestamp:null, peakCelebrated:false, profile:defaultProfile(), whyText:"", urgeLog:[],
-    theme:"brand", programLength:90, intensity:"medium", customItems:[], customTasks:[], customTaskNotifSeq:0, badges:{}, maxStreak:0, maxPhaseIndex:0, selfieCount:0,
+    theme:"brand", programLength:90, intensity:"medium", customItems:[], customAvoidItems:[], customTasks:[], customTaskNotifSeq:0, badges:{}, maxStreak:0, maxPhaseIndex:0, selfieCount:0,
     reminder:{enabled:false, morning:"08:00", night:"22:30"}, smartReminder:{enabled:false, offsetMinutes:20}, streakMilestonesHit:{}, libraryDeepDive:{}, chatHistory:[],
     customCounters:[], customCounterMilestonesHit:{},
     supportContact:{name:"", phone:""}, lastModified:null,
@@ -6987,7 +6940,7 @@ function hideAIGate(){ document.getElementById('aiGateOverlay').classList.remove
 
 let entry = { done:{}, avoidDone:{}, momentDone:{}, note:"", milestonesHit:{}, total:0,
   phoneHours:null, meals:{b:"",l:"",d:"",snacks:""}, nightReview:null, mood:null, energy:null, weight:null, symptoms:{},
-  extraDoItems:[], extraAvoidItems:[] };
+  extraDoItems:[], extraAvoidItems:[], doOverrides:{}, avoidOverrides:{} };
 let currentPhase = PHASES[0];
 
 /* ---------------- "Why" motivation card ---------------- */
@@ -8017,6 +7970,8 @@ function checkDayRollover(){
   if(!entry.symptoms) entry.symptoms = {};
   if(!entry.extraDoItems) entry.extraDoItems = [];
   if(!entry.extraAvoidItems) entry.extraAvoidItems = [];
+  if(!entry.doOverrides) entry.doOverrides = {};
+  if(!entry.avoidOverrides) entry.avoidOverrides = {};
 
   const noteArea = document.getElementById('noteArea'); if(noteArea) noteArea.value = entry.note||'';
   const lessonArea = document.getElementById('lessonArea'); if(lessonArea) lessonArea.value = entry.lesson||'';
@@ -8696,6 +8651,47 @@ function updateSpeechCoach(){
   avatarEl.dataset.mood = 'cheer';
   avatarEl.dataset.gender = genderSp;
 }
+/* ---- Themed replacement for the browser's native prompt(): used for both editing an
+   existing checklist task's text and adding a brand-new custom task. Keeping this as one
+   shared helper (instead of two near-identical prompt() calls) means both dialogs always
+   look and behave the same, and any future tweak (styling, validation, RTL handling) only
+   needs to happen in one place. ---- */
+function showItemTextModal({title, value, placeholder, onSave}){
+  const overlay = document.getElementById('itemTextModal');
+  const titleEl = document.getElementById('itemTextModalTitle');
+  const input = document.getElementById('itemTextModalInput');
+  const saveBtn = document.getElementById('itemTextModalSaveBtn');
+  const cancelBtn = document.getElementById('itemTextModalCancelBtn');
+  if(!overlay || !input) return;
+  titleEl.textContent = title || '';
+  input.value = value || '';
+  input.placeholder = placeholder || '';
+  overlay.classList.add('show');
+  setTimeout(()=>{ input.focus(); input.select(); }, 60);
+
+  function close(){
+    overlay.classList.remove('show');
+    saveBtn.removeEventListener('click', onSaveClick);
+    cancelBtn.removeEventListener('click', onCancelClick);
+    overlay.removeEventListener('click', onBackdropClick);
+    input.removeEventListener('keydown', onKeydown);
+  }
+  function onSaveClick(){
+    const trimmed = input.value.trim();
+    close();
+    if(trimmed) onSave(trimmed);
+  }
+  function onCancelClick(){ close(); }
+  function onBackdropClick(e){ if(e.target === overlay) close(); }
+  function onKeydown(e){
+    if(e.key === 'Enter'){ e.preventDefault(); onSaveClick(); }
+    else if(e.key === 'Escape'){ onCancelClick(); }
+  }
+  saveBtn.addEventListener('click', onSaveClick);
+  cancelBtn.addEventListener('click', onCancelClick);
+  overlay.addEventListener('click', onBackdropClick);
+  input.addEventListener('keydown', onKeydown);
+}
 /* ---------------- Rendering ---------------- */
 function renderList(containerId, items, stateObj, avoid){
   const container=document.getElementById(containerId);
@@ -8703,8 +8699,10 @@ function renderList(containerId, items, stateObj, avoid){
   items.forEach((label,idx)=>{
     const row=document.createElement('div');
     row.className='item'+(avoid?' avoid':'')+(stateObj[idx]?' checked':'');
-    row.innerHTML=`<div class="box">${CHECK_SVG}</div><span class="label">${label}</span>`;
-    row.addEventListener('click',()=>{
+    row.innerHTML=`<div class="box">${CHECK_SVG}</div><span class="label">${label}</span>
+      <button type="button" class="item-edit-btn" aria-label="ویرایش این کار">✏️</button>`;
+    row.addEventListener('click',(e)=>{
+      if(e.target.closest('.item-edit-btn')) return; // handled by its own listener below
       const wasStarted = !!storeData.startDate;
       const turningOn=!stateObj[idx];
       stateObj[idx]=turningOn;
@@ -8726,8 +8724,47 @@ function renderList(containerId, items, stateObj, avoid){
       updateMountain();
       saveData();
     });
+    row.querySelector('.item-edit-btn').addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const plain = String(label).replace(/<[^>]+>/g,'');
+      showItemTextModal({
+        title: 'متن این کار رو ویرایش کن',
+        value: plain,
+        onSave: (trimmed)=>{
+          const overrides = avoid ? entry.avoidOverrides : entry.doOverrides;
+          overrides[idx] = trimmed;
+          saveData();
+          render();
+          showToast('کار ویرایش شد ✏️');
+        }
+      });
+    });
     container.appendChild(row);
   });
+  const addRow = document.createElement('div');
+  addRow.className = 'item item-add-row';
+  addRow.innerHTML = `<div class="box item-add-plus">+</div><span class="label">افزودن کار ${avoid ? 'انجام‌ندادنی' : 'انجام‌دادنی'} جدید</span>`;
+  addRow.addEventListener('click', ()=>{
+    showItemTextModal({
+      title: `متن کار ${avoid ? 'انجام‌ندادنی' : 'انجام‌دادنی'} جدید رو بنویس`,
+      value: '',
+      placeholder: 'مثلاً: ۱۰ دقیقه پیاده‌روی',
+      onSave: (trimmed)=>{
+        if(avoid){
+          if(!storeData.customAvoidItems) storeData.customAvoidItems = [];
+          storeData.customAvoidItems.push(trimmed);
+        } else {
+          if(!storeData.customItems) storeData.customItems = [];
+          storeData.customItems.push(trimmed);
+        }
+        saveData();
+        render();
+        if(typeof renderCustomList === 'function') renderCustomList();
+        showToast('کار جدید اضافه شد ➕');
+      }
+    });
+  });
+  container.appendChild(addRow);
 }
 
 let saveTimeout=null;
@@ -8800,6 +8837,7 @@ function normalizeAndRenderStoreData(){
   if(!storeData.programLength) storeData.programLength = 90;
   if(!storeData.intensity) storeData.intensity = 'medium';
   if(!storeData.customItems) storeData.customItems = [];
+  if(!storeData.customAvoidItems) storeData.customAvoidItems = [];
   if(!storeData.customTasks) storeData.customTasks = [];
   if(!storeData.focusSessions) storeData.focusSessions = {};
   if(storeData.customTaskNotifSeq===undefined) storeData.customTaskNotifSeq = 0;
@@ -8849,6 +8887,8 @@ function normalizeAndRenderStoreData(){
   if(!entry.symptoms) entry.symptoms = {};
   if(!entry.extraDoItems) entry.extraDoItems = [];
   if(!entry.extraAvoidItems) entry.extraAvoidItems = [];
+  if(!entry.doOverrides) entry.doOverrides = {};
+  if(!entry.avoidOverrides) entry.avoidOverrides = {};
 
   // Onboarding gate: block the app behind a mandatory account. The profile wizard
   // after it is optional — user can skip it (obSkipBtn -> skipOnboarding()) and
@@ -14855,13 +14895,20 @@ async function loadLeaderboard(){
       return;
     }
 
+    // همه‌ی رتبه‌ها (نه فقط ۳ نفر اول) با همون استایل کارت گرد پودیوم رندر می‌شن،
+    // توی یه نوار افقی قابل اسکرول — نفر اول همیشه سمت چپ‌ترین کارته و به ترتیب
+    // رتبه به سمت راست ادامه پیدا می‌کنه (لیست مستطیلیِ قبلی حذف شد).
     const podiumEl = document.getElementById('lbPodium');
     const medals = ['🥇','🥈','🥉'];
     const classes = ['gold','silver','bronze'];
-    podiumEl.innerHTML = list.slice(0,3).map((u,i)=> lbPodiumHtml(i+1, u, classes[i], medals[i], {buddy:true})).join('');
+    podiumEl.innerHTML = list.map((u,i)=>{
+      const cls = i < 3 ? classes[i] : 'plain';
+      const medal = i < 3 ? medals[i] : ('رتبه '+toFa(i+1));
+      return lbPodiumHtml(i+1, u, cls, medal, {buddy:true});
+    }).join('');
 
     const listEl = document.getElementById('lbList');
-    listEl.innerHTML = list.slice(3).map((u,i)=> lbRowHtml(i+4, u, {buddy:true})).join('');
+    if(listEl) listEl.innerHTML = '';
 
     contentEl.style.display = 'block';
 
@@ -15469,7 +15516,7 @@ function chatMsgContentParts(m){
         : m.media_type === 'gifvideo'
         ? `<div class="cm-media cm-gifvideo"><video src="${escapeHtml(mediaSrc)}" autoplay loop muted playsinline preload="auto" onerror="${mediaExpiredJs}"></video><span class="cm-gif-badge">GIF</span>${saveBtnHtml}</div>`
         : m.media_type === 'voice'
-        ? `<div class="cm-voice"><button type="button" class="cm-voice-btn">▶</button><div class="cm-voice-track"><div class="cm-voice-fill"></div></div><span class="cm-voice-time">۰۰:۰۰</span><audio class="cm-voice-audio" src="${escapeHtml(mediaSrc)}" preload="metadata" onerror="${mediaExpiredJs}"></audio></div>`
+        ? `<div class="cm-voice-retired">${ci('hourglass')} پیام صوتی (این قابلیت دیگه در دسترس نیست)</div>`
         : `<div class="cm-media"><img src="${escapeHtml(mediaSrc)}" alt="${m.media_type==='gif'?'گیف':'تصویر'}" loading="lazy" onerror="${mediaExpiredJs}">${m.media_type==='gif'?saveBtnHtml:''}</div>`)
     : '';
   return { isBot, isGroupStreak, isGroupWeekly, isReport, replyInfo, rawContent, reportTag, textHtml, replyQuoteHtml, mediaHtml, hasMedia };
@@ -15488,8 +15535,8 @@ function publicChatMsgHtml(m, grouped){
   // Telegram-style frameless media: a message that's ONLY a photo/gif/video (no caption,
   // no reply-quote, not a bot/report/streak card) drops the bubble's padding/background/
   // border entirely so just the media's own rounded corners show — the time is overlaid
-  // on the media itself instead of sitting in the padded row below it. Voice messages keep
-  // their normal pill bubble (they're not really "media" visually).
+  // on the media itself instead of sitting in the padded row below it. Old voice messages
+  // (retired feature) keep their normal pill bubble (they're not really "media" visually).
   const isMediaOnly = hasMedia && !textHtml && !replyQuoteHtml && !isBot && !isReport && !isGroupStreak && !isGroupWeekly && m.media_type !== 'voice';
   const mediaHtmlFinal = (isMediaOnly && mediaHtml.endsWith('</div>'))
     ? mediaHtml.slice(0, -'</div>'.length) + `<span class="cm-media-time">${time}</span></div>`
@@ -15924,38 +15971,71 @@ async function loadGroupStreakBanner(){
   }catch(err){ console.error('group streak banner error', err); }
 }
 
-/* ---------------- Pinned message (owner-only) ----------------
-   A single pinned message shown right under the chat header for everyone — for chat rules or
-   an important announcement. Stored denormalized (text + sender name copied at pin time) in a
-   one-row `chat_pinned` table, so the banner still renders even if the original message later
-   scrolls out of the loaded window or gets purged. Only the owner (matched server-side by email
-   via RLS, same pattern as the rest of this file's moderation actions — see chat-pin-supabase-
-   schema.sql) can actually change it; every signed-in user can read + jump to it. */
-let chatPinnedMsgId = null;
+/* ---------------- Pinned messages (owner + admins) ----------------
+   Pin state lives directly on the `messages` row itself (is_pinned + pinned_at
+   columns — see chat-pin-supabase-schema.sql), instead of a separate one-row
+   `chat_pinned` table. That old table needed a pre-seeded row for its `update()`
+   call to ever affect anything — if that row was never created, the update
+   silently matched zero rows (no error, no toast, nothing saved), which is why
+   pinning looked completely broken. Storing the flag on the message itself
+   removes that failure mode entirely, and — unlike the old single-slot design —
+   any number of messages can be pinned at the same time; pinning a new one
+   never touches the others. isChatAdmin already covers both the owner and any
+   admin granted via set_chat_admin_by_email, so both can pin/unpin here with no
+   extra permission check needed. The banner is loaded with its own targeted
+   query (is_pinned=true), so every pinned message renders correctly even if
+   it's scrolled out of the loaded 150-row window. */
+let chatPinnedMsgs = []; // [{id, content, username}]
 let chatPinnedChannel = null;
-function renderChatPinnedBanner(data){
+function renderChatPinnedBanner(){
   const box = document.getElementById('chatPinnedBanner');
   if(!box) return;
-  if(!chatPinnedMsgId){ box.classList.remove('show'); box.innerHTML = ''; return; }
-  const text = (data && data.message_text) || '';
-  const username = (data && data.username) || 'کاربر';
-  box.innerHTML = `<div class="cpin-icon">📌</div>
-    <div class="cpin-body"><div class="cpin-name">${escapeHtml(username)}</div><div class="cpin-text">${escapeHtml(text)}</div></div>
-    ${isChatAdmin ? '<button type="button" class="cpin-unpin" id="chatPinnedUnpinBtn" aria-label="برداشتن پین">✕</button>' : ''}`;
+  // Defensive de-dupe by id — Supabase can hand back a numeric id while the DOM's
+  // data-msg-id is always a string, so without normalizing here the same message
+  // could otherwise get pushed into the array twice (once locally, once from the
+  // realtime echo) and render as two identical rows.
+  const seen = new Set();
+  const unique = chatPinnedMsgs.filter(m=>{
+    const key = String(m.id);
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if(unique.length !== chatPinnedMsgs.length) chatPinnedMsgs = unique;
+  if(!chatPinnedMsgs.length){ box.classList.remove('show'); box.innerHTML = ''; return; }
+  box.innerHTML = chatPinnedMsgs.map(m => `
+    <div class="cpin-row" data-pin-id="${m.id}">
+      <div class="cpin-icon">📌</div>
+      <div class="cpin-body"><div class="cpin-name">${escapeHtml(m.username || 'کاربر')}</div><div class="cpin-text">${escapeHtml(m.content || '')}</div></div>
+      ${isChatAdmin ? `<button type="button" class="cpin-unpin" data-pin-id="${m.id}" aria-label="برداشتن پین">✕</button>` : ''}
+    </div>`).join('');
   box.classList.add('show');
 }
 async function loadChatPinned(){
   if(!sb) return;
   try{
-    const { data, error } = await sb.from('chat_pinned').select('message_id, message_text, username').eq('id', 1).single();
-    if(error) return; // table not set up yet — skip silently, rest of the chat still works
-    chatPinnedMsgId = data && data.message_id ? data.message_id : null;
-    renderChatPinnedBanner(data);
+    const { data, error } = await sb.from('messages')
+      .select('id, content, username')
+      .eq('is_pinned', true)
+      .order('pinned_at', {ascending:true})
+      .limit(20);
+    if(error) return; // column not set up yet — skip silently, rest of the chat still works
+    chatPinnedMsgs = (data || []).map(m => ({ id: String(m.id), content: m.content, username: m.username }));
+    renderChatPinnedBanner();
     if(!chatPinnedChannel){
-      chatPinnedChannel = sb.channel('public:chat_pinned')
-        .on('postgres_changes', {event:'UPDATE', schema:'public', table:'chat_pinned'}, payload=>{
-          chatPinnedMsgId = payload.new.message_id || null;
-          renderChatPinnedBanner(payload.new);
+      chatPinnedChannel = sb.channel('public:messages-pin')
+        .on('postgres_changes', {event:'UPDATE', schema:'public', table:'messages'}, payload=>{
+          const row = payload.new;
+          const rowId = String(row.id);
+          const idx = chatPinnedMsgs.findIndex(m => m.id === rowId);
+          if(row.is_pinned){
+            const entry = { id: rowId, content: row.content, username: row.username };
+            if(idx === -1) chatPinnedMsgs.push(entry); else chatPinnedMsgs[idx] = entry;
+            renderChatPinnedBanner();
+          } else if(idx !== -1){
+            chatPinnedMsgs.splice(idx, 1);
+            renderChatPinnedBanner();
+          }
         }).subscribe();
     }
   }catch(err){ console.error('pinned message load error', err); }
@@ -15965,33 +16045,37 @@ async function pinChatMessage(el){
   const textEl = el.querySelector('.cm-text');
   const text = textEl ? textEl.textContent.trim().slice(0, 200) : '';
   const username = el.dataset.username || 'کاربر';
-  const msgId = el.dataset.msgId;
-  if(!msgId || !text) return;
+  const msgId = el.dataset.msgId ? String(el.dataset.msgId) : '';
+  if(!msgId) return;
   try{
-    const { error } = await sb.from('chat_pinned')
-      .update({ message_id: msgId, message_text: text, username, pinned_at: new Date().toISOString() })
-      .eq('id', 1);
-    if(error){ showToast('پین نشد — احتمالاً هنوز جدول chat_pinned ساخته نشده', 'error'); return; }
-    chatPinnedMsgId = msgId;
-    renderChatPinnedBanner({ message_text: text, username });
+    const { error } = await sb.from('messages')
+      .update({ is_pinned:true, pinned_at: new Date().toISOString() })
+      .eq('id', msgId);
+    if(error){ showToast('پین نشد', 'error'); return; }
+    if(!chatPinnedMsgs.some(m => m.id === msgId)) chatPinnedMsgs.push({ id: msgId, content: text, username });
+    renderChatPinnedBanner();
     showToast('پیام پین شد 📌');
   }catch(err){ showToast('پین نشد', 'error'); }
 }
-async function unpinChatMessage(){
-  if(!sb || !isChatAdmin) return;
+async function unpinChatMessage(msgId){
+  msgId = msgId ? String(msgId) : '';
+  if(!sb || !isChatAdmin || !msgId) return;
   try{
-    const { error } = await sb.from('chat_pinned').update({ message_id: null, message_text: null, username: null }).eq('id', 1);
+    const { error } = await sb.from('messages').update({ is_pinned:false, pinned_at:null }).eq('id', msgId);
     if(error){ showToast('برداشتن پین ناموفق بود', 'error'); return; }
-    chatPinnedMsgId = null;
+    chatPinnedMsgs = chatPinnedMsgs.filter(m => m.id !== msgId);
     renderChatPinnedBanner();
     showToast('پین برداشته شد');
   }catch(err){ showToast('برداشتن پین ناموفق بود', 'error'); }
 }
 const chatPinnedBannerEl = document.getElementById('chatPinnedBanner');
 if(chatPinnedBannerEl) chatPinnedBannerEl.addEventListener('click', e=>{
-  if(e.target.closest('#chatPinnedUnpinBtn')){ unpinChatMessage(); return; }
-  if(!chatPinnedMsgId) return;
-  const targetEl = document.querySelector(`.chat-msg[data-msg-id="${chatPinnedMsgId}"]`);
+  const unpinBtn = e.target.closest('.cpin-unpin');
+  if(unpinBtn){ unpinChatMessage(unpinBtn.dataset.pinId); return; }
+  const row = e.target.closest('.cpin-row');
+  if(!row) return;
+  const id = row.dataset.pinId;
+  const targetEl = document.querySelector(`.chat-msg[data-msg-id="${id}"]`);
   if(targetEl){
     targetEl.scrollIntoView({behavior:'smooth', block:'center'});
     targetEl.classList.add('flash');
@@ -16375,7 +16459,7 @@ function openChatMsgMenu(el){
   cmActionMenuTargetEl = el;
   const username = el.dataset.username || 'کاربر';
   const msgId = el.dataset.msgId;
-  const isPinned = chatPinnedMsgId && msgId === chatPinnedMsgId;
+  const isPinned = chatPinnedMsgs.some(m => m.id === String(msgId));
   const own = publicChatUser && el.dataset.userId === publicChatUser.id;
   // Editing is only offered for the sender's own plain messages — not daily-report cards,
   // which are structured/generated content rather than free text.
@@ -16435,7 +16519,7 @@ if(cmActionMenu) cmActionMenu.addEventListener('click', e=>{
   else if(btn.dataset.act === 'edit') startEditChatMessage(el);
   else if(btn.dataset.act === 'filter') setChatUserFilter(userId, username);
   else if(btn.dataset.act === 'pin') pinChatMessage(el);
-  else if(btn.dataset.act === 'unpin') unpinChatMessage();
+  else if(btn.dataset.act === 'unpin') unpinChatMessage(msgId);
   else if(btn.dataset.act === 'delete') deletePublicChatMessage(msgId);
   else if(btn.dataset.act === 'report') reportPublicChatMessage(msgId);
   else if(btn.dataset.act === 'block') blockChatUser(userId, username);
@@ -16601,7 +16685,6 @@ function updateChatModeUI(){
   const input = document.getElementById('chatInput');
   const sendBtn = document.getElementById('chatSendBtn');
   const attachBtn = document.getElementById('chatAttachBtn');
-  const voiceBtn = document.getElementById('chatVoiceBtn');
   const active = isReportModeActive();
   const muted = isCurrentlyMuted(); // sees the whole chat fine — only the composer locks
   if(panel) panel.classList.toggle('report-mode-active', active);
@@ -16613,7 +16696,6 @@ function updateChatModeUI(){
   }
   if(sendBtn) sendBtn.disabled = restricted;
   if(attachBtn) attachBtn.disabled = muted;
-  if(voiceBtn) voiceBtn.disabled = muted;
   if(banner){
     if(active){
       banner.textContent = isAppOwner
@@ -17160,260 +17242,6 @@ document.getElementById('chatMediaInput').addEventListener('change', (e)=>{
   if(file) sendPublicChatMedia(file);
 });
 
-/* ---------------- Voice messages (recording, unlimited length) ----------------
-   Tap the mic once to start recording (no time cap — keeps going until the person
-   stops it themselves), tap 🗑️ to discard or ➤ to stop-and-send. While recording, the
-   normal send row (with its fixed-size icon buttons) is swapped out for a dedicated
-   recording bar, so the row's layout never has to fit a 4th icon button alongside the
-   text input — that's what kept the earlier GIF/gallery row from overflowing.
-   Uploads to the same 'chat-media' Storage bucket as images/gifs/videos, with
-   media_type:'voice'. IMPORTANT: the bucket's allowed_mime_types (set in
-   chat-media-supabase-schema.sql) also needs audio/webm + audio/mp4 added, or Storage
-   will reject the upload even though it passes this client-side check. */
-let voiceRecorder = null;
-let voiceChunks = [];
-let voiceStartedAt = 0;
-let voiceTimerInterval = null;
-let voiceStream = null;
-
-function voiceFormatTimer(totalSeconds){
-  const mm = String(Math.floor(totalSeconds / 60)).padStart(2,'0');
-  const ss = String(totalSeconds % 60).padStart(2,'0');
-  return toFa(mm) + ':' + toFa(ss);
-}
-function showVoiceRecordRow(show){
-  const normalRow = document.getElementById('chatSendRowNormal');
-  const recordRow = document.getElementById('chatVoiceRecordRow');
-  if(normalRow) normalRow.style.display = show ? 'none' : 'flex';
-  if(recordRow) recordRow.classList.toggle('show', show);
-}
-async function startVoiceRecording(){
-  if(voiceRecorder) return;
-  if(isCurrentlySuspended()){
-    showToast('دسترسیت به چت عمومی موقتاً بسته‌ست', 'error');
-    renderSuspensionLocks();
-    return;
-  }
-  if(!(storeData.premium || isInTrial()) && getFreeChatMsgCountToday() >= FREE_CHAT_DAILY_LIMIT){
-    showToast(`تو نسخه‌ی رایگان روزی فقط ${toFa(FREE_CHAT_DAILY_LIMIT)} پیام می‌تونی بفرستی`, 'error');
-    openPremiumOverlay();
-    return;
-  }
-  if(isReportModeActive() && !isAppOwner){
-    showToast('الان فقط ارسال گزارش کار امکان‌پذیره 📋', 'error');
-    updateChatModeUI();
-    return;
-  }
-  // window.isSecureContext is the real gate browsers use: on http:// (non-localhost) pages
-  // navigator.mediaDevices is undefined entirely and getUserMedia never even offers a
-  // permission prompt — this is by far the most common reason "nothing happens" on tap.
-  if(!window.isSecureContext){
-    showToast('برای ضبط صدا سایت باید با https باز بشه', 'error');
-    console.warn('Voice recording blocked: not a secure context (location:', location.href, ')');
-    return;
-  }
-  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined'){
-    showToast('مرورگرت از ضبط صدا پشتیبانی نمی‌کنه', 'error');
-    console.warn('Voice recording blocked: mediaDevices/MediaRecorder unavailable in this browser');
-    return;
-  }
-  try{
-    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  }catch(err){
-    // NotAllowedError covers both "user tapped Deny" and "OS/browser blocked it before any
-    // prompt could show" (e.g. Chrome app itself lacks the Android RECORD_AUDIO permission,
-    // or the site's mic permission is already set to Block from a previous visit) — in both
-    // cases no in-page popup appears, which looks identical to the button "doing nothing".
-    showToast('دسترسی به میکروفون داده نشد — مجوز میکروفون مرورگر رو چک کن', 'error');
-    console.error('getUserMedia failed:', err && err.name, err && err.message);
-    return;
-  }
-  try{
-    voiceChunks = [];
-    const mimeCandidates = ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'];
-    const supportedMime = mimeCandidates.find(t => (typeof MediaRecorder.isTypeSupported === 'function') && MediaRecorder.isTypeSupported(t));
-    voiceRecorder = supportedMime ? new MediaRecorder(voiceStream, { mimeType: supportedMime }) : new MediaRecorder(voiceStream);
-  }catch(err){
-    showToast('ضبط صدا ممکن نشد', 'error');
-    console.error('MediaRecorder init failed:', err);
-    if(voiceStream) voiceStream.getTracks().forEach(t=>t.stop());
-    voiceStream = null;
-    voiceRecorder = null;
-    return;
-  }
-  voiceRecorder.addEventListener('dataavailable', (e)=>{ if(e.data && e.data.size > 0) voiceChunks.push(e.data); });
-  voiceStartedAt = Date.now();
-  voiceRecorder.start();
-  document.getElementById('chatVoiceBtn').classList.add('recording');
-  showVoiceRecordRow(true);
-  const timerEl = document.getElementById('chatVoiceTimer');
-  if(timerEl) timerEl.textContent = voiceFormatTimer(0);
-  voiceTimerInterval = setInterval(()=>{
-    const secs = Math.floor((Date.now() - voiceStartedAt) / 1000);
-    if(timerEl) timerEl.textContent = voiceFormatTimer(secs);
-  }, 500);
-}
-function teardownVoiceRecording(){
-  if(voiceTimerInterval){ clearInterval(voiceTimerInterval); voiceTimerInterval = null; }
-  if(voiceStream){ voiceStream.getTracks().forEach(t=>t.stop()); voiceStream = null; }
-  voiceRecorder = null;
-  voiceChunks = [];
-  document.getElementById('chatVoiceBtn').classList.remove('recording');
-  showVoiceRecordRow(false);
-}
-function cancelVoiceRecording(){
-  if(!voiceRecorder) return;
-  const rec = voiceRecorder;
-  rec.addEventListener('stop', ()=>{}, { once: true });
-  try{ rec.stop(); }catch(err){}
-  teardownVoiceRecording();
-}
-function stopAndSendVoiceRecording(){
-  if(!voiceRecorder){ return; }
-  const rec = voiceRecorder;
-  const mimeType = rec.mimeType || 'audio/webm';
-  const durationSecs = Math.max(1, Math.round((Date.now() - voiceStartedAt) / 1000));
-  rec.addEventListener('stop', ()=>{
-    const blob = new Blob(voiceChunks, { type: mimeType });
-    teardownVoiceRecording();
-    sendPublicChatVoice(blob, durationSecs);
-  }, { once: true });
-  try{ rec.stop(); }catch(err){ teardownVoiceRecording(); }
-}
-document.getElementById('chatVoiceBtn').addEventListener('click', ()=>{
-  try{
-    if(voiceRecorder) stopAndSendVoiceRecording(); else startVoiceRecording();
-  }catch(err){
-    console.error('Voice button click handler error:', err);
-    showToast('خطا در ضبط صدا', 'error');
-  }
-});
-document.getElementById('chatVoiceCancelBtn').addEventListener('click', cancelVoiceRecording);
-document.getElementById('chatVoiceSendBtn').addEventListener('click', stopAndSendVoiceRecording);
-
-/* No client-side duration cap on purpose (per request) — the only practical ceiling is
-   the Storage bucket's file_size_limit, and compressed voice audio is small enough
-   (roughly 1-2MB per 10 minutes with opus) that this isn't a real-world constraint. */
-const CHAT_VOICE_MAX_BYTES = 30 * 1024 * 1024;
-async function sendPublicChatVoice(blob, durationSecs){
-  if(!blob || !blob.size || !publicChatUser) return;
-  if(blob.size > CHAT_VOICE_MAX_BYTES){
-    showToast(`حجم ویس باید کمتر از ${toFa(Math.round(CHAT_VOICE_MAX_BYTES / (1024*1024)))} مگابایت باشه`, 'error');
-    return;
-  }
-  const streakVal = (typeof computeStreak === 'function') ? computeStreak() : 0;
-  const isPremiumNow = !!(storeData.premium || isInTrial());
-  const localUrl = URL.createObjectURL(blob);
-
-  const tempId = 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-  const tempMsg = { id: tempId, user_id: publicChatUser.id, username: publicChatUsername, content: '', streak: streakVal, premium: isPremiumNow, created_at: new Date().toISOString(), is_owner: isAppOwner, media_localUrl: localUrl, media_type: 'voice' };
-  const wrap = document.getElementById('chatMessages');
-  if(wrap.querySelector('.chat-empty-msg')) wrap.innerHTML = '';
-  const grouped = lastChatMsgUserId === publicChatUser.id;
-  wrap.insertAdjacentHTML('beforeend', publicChatMsgHtml(tempMsg, grouped));
-  const pendingEl = wrap.querySelector(`.chat-msg[data-msg-id="${tempId}"]`);
-  if(pendingEl) pendingEl.classList.add('cm-pending');
-  lastChatMsgUserId = publicChatUser.id;
-  applyChatUserFilter();
-  scrollChatToBottom(false);
-
-  try{
-    const ext = /mp4/.test(blob.type) ? 'm4a' : /ogg/.test(blob.type) ? 'ogg' : 'webm';
-    const path = `${publicChatUser.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error: upErr } = await sb.storage.from(CHAT_MEDIA_BUCKET).upload(path, blob, { contentType: blob.type || 'audio/webm', upsert: false });
-    if(upErr) throw upErr;
-
-    const { data, error } = await sb.from('messages').insert({ user_id: publicChatUser.id, username: publicChatUsername, content: '', streak: streakVal, premium: isPremiumNow, media_path: path, media_type: 'voice' }).select().single();
-    if(error && /media_path|media_type/i.test(error.message || '')){
-      throw new Error('ستون‌های media_path/media_type هنوز اجرا نشده — chat-media-supabase-schema.sql رو اجرا کن');
-    }
-    if(error) throw error;
-
-    if(pendingEl && data){
-      const audioEl = pendingEl.querySelector('.cm-voice-audio');
-      if(audioEl) audioEl.src = chatMediaPublicUrl(path);
-      URL.revokeObjectURL(localUrl);
-      pendingEl.dataset.msgId = data.id;
-      pendingEl.classList.remove('cm-pending');
-    }
-    if(!isPremiumNow) registerFreeChatMsgSent();
-  }catch(err){
-    console.error('Voice message send error', err);
-    showToast(`ارسال ویس ناموفق بود: ${(err && err.message) ? err.message : 'خطای نامشخص'}`, 'error');
-    if(pendingEl) pendingEl.remove();
-    URL.revokeObjectURL(localUrl);
-    if(!wrap.querySelector('.chat-msg')) wrap.innerHTML = '<div class="chat-empty-msg">هنوز پیامی نیست، اولین نفر باش!</div>';
-  }
-}
-
-/* ---- Voice bubble mini-player: play/pause + progress, driven by the hidden <audio> ---- */
-function voiceFormatTime(seconds){
-  if(!isFinite(seconds) || seconds < 0) seconds = 0;
-  const mm = String(Math.floor(seconds / 60)).padStart(2,'0');
-  const ss = String(Math.floor(seconds % 60)).padStart(2,'0');
-  return mm + ':' + ss;
-}
-document.addEventListener('click', (e)=>{
-  const playBtn = e.target.closest('.cm-voice-btn');
-  if(!playBtn) return;
-  const wrap = playBtn.closest('.cm-voice');
-  if(!wrap) return;
-  const audio = wrap.querySelector('.cm-voice-audio');
-  if(!audio) return;
-  if(audio.paused){
-    document.querySelectorAll('.cm-voice-audio').forEach(a=>{ if(a !== audio && !a.paused) a.pause(); });
-    audio.play().catch(()=>{});
-  } else {
-    audio.pause();
-  }
-});
-document.addEventListener('play', (e)=>{
-  if(!e.target.classList || !e.target.classList.contains('cm-voice-audio')) return;
-  const wrap = e.target.closest('.cm-voice');
-  const btn = wrap && wrap.querySelector('.cm-voice-btn');
-  if(btn) btn.textContent = '⏸';
-}, true);
-document.addEventListener('pause', (e)=>{
-  if(!e.target.classList || !e.target.classList.contains('cm-voice-audio')) return;
-  const wrap = e.target.closest('.cm-voice');
-  const btn = wrap && wrap.querySelector('.cm-voice-btn');
-  if(btn) btn.textContent = '▶';
-}, true);
-document.addEventListener('timeupdate', (e)=>{
-  if(!e.target.classList || !e.target.classList.contains('cm-voice-audio')) return;
-  const audio = e.target;
-  const wrap = audio.closest('.cm-voice');
-  if(!wrap) return;
-  const fill = wrap.querySelector('.cm-voice-fill');
-  const timeEl = wrap.querySelector('.cm-voice-time');
-  const pct = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
-  if(fill) fill.style.width = pct + '%';
-  if(timeEl) timeEl.textContent = voiceFormatTime(audio.duration && !audio.ended ? (audio.duration - audio.currentTime) : audio.duration || 0);
-}, true);
-document.addEventListener('loadedmetadata', (e)=>{
-  if(!e.target.classList || !e.target.classList.contains('cm-voice-audio')) return;
-  const audio = e.target;
-  const wrap = audio.closest('.cm-voice');
-  const timeEl = wrap && wrap.querySelector('.cm-voice-time');
-  if(timeEl && isFinite(audio.duration)) timeEl.textContent = voiceFormatTime(audio.duration);
-}, true);
-document.addEventListener('ended', (e)=>{
-  if(!e.target.classList || !e.target.classList.contains('cm-voice-audio')) return;
-  const wrap = e.target.closest('.cm-voice');
-  const fill = wrap && wrap.querySelector('.cm-voice-fill');
-  if(fill) fill.style.width = '0%';
-}, true);
-document.addEventListener('click', (e)=>{
-  const track = e.target.closest('.cm-voice-track');
-  if(!track) return;
-  const wrap = track.closest('.cm-voice');
-  const audio = wrap && wrap.querySelector('.cm-voice-audio');
-  if(!audio || !audio.duration) return;
-  const rect = track.getBoundingClientRect();
-  const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-  audio.currentTime = ratio * audio.duration;
-});
-
 /* ---------------- Giphy GIF picker ----------------
    The phone's own keyboard GIF tray (Gboard/Samsung Keyboard) can't send content into this
    chat input — that "این برنامه از فایل‌های GIF پشتیبانی نمی‌کند" message comes from Android
@@ -17664,7 +17492,7 @@ function updateReportBtnState(){
     if(hint) hint.textContent = 'فعلاً ساکتی، نمی‌تونی گزارش کار هم بفرستی';
     return;
   }
-  if(!isReportModeActive()){
+  if(!isReportModeActive() && !isAppOwner){
     btn.disabled = true;
     if(hint) hint.textContent = 'ارسال گزارش کار فقط از ساعت ۲۰ تا ۲۴ فعاله';
     return;
@@ -17684,7 +17512,7 @@ function updateReportBtnState(){
 async function sendTaskReport(){
   if(!sb || !publicChatUser) return;
   if(isCurrentlyMuted()){ showToast('فعلاً ساکتت کرده‌ن — نمی‌تونی گزارش کار بفرستی', 'error'); return; }
-  if(!isReportModeActive()){ showToast('ارسال گزارش کار فقط از ساعت ۲۰ تا ۲۴ فعاله', 'error'); return; }
+  if(!isReportModeActive() && !isAppOwner){ showToast('ارسال گزارش کار فقط از ساعت ۲۰ تا ۲۴ فعاله', 'error'); return; }
   if(!(storeData.premium || isInTrial()) && storeData.taskReportSentOnce){
     showToast('ارسال گزارش کار تو نسخه‌ی رایگان فقط یک‌بار امکان‌پذیره', 'error');
     openPremiumOverlay();
@@ -19055,8 +18883,20 @@ function doRealExit(){
 }
 document.getElementById('exitStayBtn').addEventListener('click', hideExitConfirm);
 document.getElementById('exitLeaveBtn').addEventListener('click', ()=>{
-  document.getElementById('exitOverlay').classList.add('leaving');
-  setTimeout(doRealExit, 520);
+  // فقط برای همین خروج، فید بستن رو خیلی سریع‌تر از حالت پیش‌فرض overlay/card
+  // می‌کنیم (استایل inline، فقط رو همین overlay) تا کاربر معطل نمونه — روی
+  // بقیه‌ی اورلی‌های هم‌کلاس (aiGate/inviteNudge/authGate) اثری نداره.
+  const ov = document.getElementById('exitOverlay');
+  const card = ov.querySelector('.exit-card');
+  ov.style.transition = 'opacity .1s ease';
+  if(card) card.style.transition = 'opacity .1s ease, transform .1s ease';
+  ov.classList.remove('leaving');
+  ov.classList.remove('show');
+  setTimeout(()=>{
+    doRealExit();
+    ov.style.transition = '';
+    if(card) card.style.transition = '';
+  }, 110);
 });
 
 function isOverlayShown(id){
