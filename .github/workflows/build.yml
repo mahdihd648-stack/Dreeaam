@@ -55,6 +55,30 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
+      - name: Set app version (versionCode/versionName)
+        # Myket (like Google Play) rejects an update unless its versionCode is strictly
+        # higher than the previously-uploaded one. android/ is regenerated from scratch every
+        # run (it's not committed), so Capacitor's default "versionCode 1 / versionName 1.0"
+        # would otherwise be baked into EVERY build — fine for the first upload, but every
+        # update after that would be silently rejected by Myket.
+        # Fix: versionCode = this workflow run's number (always increasing, guaranteed unique).
+        # versionName = content of a VERSION file at repo root if present (e.g. "1.3"), so you
+        # control the human-readable version just by editing that one file; defaults to "1.0".
+        run: |
+          VERSION_NAME="1.0"
+          [ -f VERSION ] && VERSION_NAME="$(tr -d '[:space:]' < VERSION)"
+          echo "versionCode=${{ github.run_number }}  versionName=${VERSION_NAME}"
+          python3 - "android/app/build.gradle" "${{ github.run_number }}" "$VERSION_NAME" <<'PYEOF'
+          import sys, re
+          path, code, name = sys.argv[1], sys.argv[2], sys.argv[3]
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+          src = re.sub(r'versionCode\s+\d+', f'versionCode {code}', src, count=1)
+          src = re.sub(r'versionName\s+"[^"]*"', f'versionName "{name}"', src, count=1)
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(src)
+          PYEOF
+
       - name: Generate app icon (adaptive, from resources/icon-only.png)
         # @capacitor/assets requires this EXACT filename for a simple/flat icon —
         # "icon.png" is silently ignored (it looks for icon-only.png, or the
