@@ -1,0 +1,16 @@
+{
+  "appId": "com.mahdihd648.dreamlifeapp",
+  "appName": "Dreamlife",
+  "webDir": "www",
+  "backgroundColor": "#4338CA",
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon",
+      "iconColor": "#4338CA",
+      "sound": "default"
+    },
+    "SplashScreen": {
+      "launchShowDuration": 0
+    }
+  }
+}
