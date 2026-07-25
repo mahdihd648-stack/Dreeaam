@@ -79,12 +79,38 @@ jobs:
               f.write(src)
           PYEOF
 
-      - name: Generate app icon (adaptive, from resources/icon-only.png)
-        # @capacitor/assets requires this EXACT filename for a simple/flat icon —
-        # "icon.png" is silently ignored (it looks for icon-only.png, or the
-        # icon-foreground.png + icon-background.png pair for a layered icon).
-        # --assetPath makes it check resources/ directly instead of assets/ first.
-        run: npx @capacitor/assets generate --android --assetPath resources --iconBackgroundColor '#4338CA' --iconBackgroundColorDark '#4338CA'
+      - name: Generate app icon (from resources/icon-only.png, direct — no @capacitor/assets)
+        # @capacitor/assets kept silently falling back to Ionic's default logo instead of
+        # erroring when it couldn't resolve the source file — several runs "succeeded" with
+        # the wrong icon and no warning in the log. Generating the mipmaps ourselves with
+        # ImageMagick removes that tool (and its file-detection quirks) from the equation
+        # entirely, the same way we already do for the notification icon below.
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y imagemagick
+          SRC="resources/icon-only.png"
+          if [ ! -f "$SRC" ]; then
+            echo "::error::$SRC not found in repo — icon cannot be generated. Check the file was uploaded to resources/icon-only.png."
+            exit 1
+          fi
+          identify "$SRC"
+          declare -A sizes=( [mdpi]=48 [hdpi]=72 [xhdpi]=96 [xxhdpi]=144 [xxxhdpi]=192 )
+          for density in "${!sizes[@]}"; do
+            size="${sizes[$density]}"
+            dir="android/app/src/main/res/mipmap-${density}"
+            mkdir -p "$dir"
+            convert "$SRC" -resize ${size}x${size}^ -gravity center -extent ${size}x${size} "$dir/ic_launcher.png"
+            convert "$SRC" -resize ${size}x${size}^ -gravity center -extent ${size}x${size} \
+              \( +clone -alpha extract -fill black -colorize 100 -fill white \
+                 -draw "circle $((size/2)),$((size/2)) $((size/2)),0" \) \
+              -alpha off -compose CopyOpacity -composite "$dir/ic_launcher_round.png"
+          done
+          # Remove the adaptive-icon XML (foreground/background layers + safe-zone cropping)
+          # that `cap add android` generates by default — Android 8+ launchers prefer it over
+          # the plain PNGs above when present, which is how the default logo kept winning even
+          # after we fixed the PNGs. Deleting it makes the launcher fall back to our PNGs.
+          rm -rf android/app/src/main/res/mipmap-anydpi-v26
+          echo "Generated launcher icons from $SRC:"
+          find android/app/src/main/res/mipmap-* -name "ic_launcher*.png" | sort
 
       - name: Generate notification small icon (ic_stat_icon)
         run: |
