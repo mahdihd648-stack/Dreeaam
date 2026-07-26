@@ -6840,6 +6840,19 @@ async function authHeaders(){
     return token ? { "Authorization": "Bearer " + token } : {};
   }catch(err){ return {}; }
 }
+/* وقتی Worker یه درخواست AI رو به‌خاطر محدودیت پرمیوم/سهمیه رد می‌کنه (402)، کاربر قبلاً فقط
+   یه توست خطا می‌دید و همون‌جا می‌موند — هیچ راهی برای رفتن به خرید نداشت مگه اینکه خودش
+   دستی از منو بره تو صفحه‌ی پرمیوم. الان علاوه بر توست، مستقیم می‌بریمش صفحه/باکس خرید
+   پرمیوم؛ یعنی هر قابلیت پرمیومی که بهش برنخوره (چه با پیش‌چک کلاینت رد بشه، چه واقعاً از
+   خودِ سرور 402 بگیره) آخرش به همون مقصد ختم می‌شه. برای بقیه‌ی خطاها (400/401/500 و ...)
+   فقط همون توست قبلی نشون داده می‌شه، چون ربطی به پرمیوم ندارن. */
+function handleAiWorkerError(response, data){
+  const msg = (data && data.error) || 'مشکلی پیش اومد، دوباره امتحان کن';
+  showToast(msg, 'error');
+  if(response.status === 402){
+    setTimeout(()=>{ if(typeof openPremiumPage === 'function') openPremiumPage(); }, 700);
+  }
+}
 const AI_FEATURE_LABELS = { nightReview:'تحلیل شب', weeklyReview:'گزارش هفتگی', letter:'نامه‌ی آینده', libDeep:'کتابخونه‌ی عمیق', lifeAnalyzer:'دفترچه هوشمند زندگی' };
 const LJ_REQUIRED_DAYS = 90;
 function daysLeftForFeature(key){
@@ -7640,7 +7653,7 @@ ${weightLine}هدف تقریبی کالری/پروتئین امروز بر اس�
     });
     const data = await response.json();
     if(!response.ok){
-      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      handleAiWorkerError(response, data);
       return;
     }
     const rawText = data.reply || '';
@@ -9891,7 +9904,7 @@ ${prevSummary ? 'جمع‌بندی هفته‌ی قبل این بود: "'+prevSu
     });
     const data = await response.json();
     if(!response.ok){
-      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      handleAiWorkerError(response, data);
       return;
     }
     const rawText = data.reply || '';
@@ -9963,7 +9976,7 @@ ${prevSummary ? 'جمع‌بندی هفته‌ی قبل این بود: "'+prevSu
     });
     const data = await response.json();
     if(!response.ok){
-      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      handleAiWorkerError(response, data);
       return;
     }
     const rawText = data.reply || '';
@@ -10025,7 +10038,7 @@ ${prevSummary ? 'جمع‌بندی ماه قبل این بود: "'+prevSummary+'
     });
     const data = await response.json();
     if(!response.ok){
-      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      handleAiWorkerError(response, data);
       return;
     }
     const rawText = data.reply || '';
@@ -10087,7 +10100,7 @@ async function generateLetter(){
     });
     const data = await response.json();
     if(!response.ok){
-      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      handleAiWorkerError(response, data);
       return;
     }
     const rawText = (data.reply || '').trim();
@@ -10181,7 +10194,7 @@ ${daysText}
     });
     const data = await response.json();
     if(!response.ok){
-      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      handleAiWorkerError(response, data);
       return;
     }
     const rawText = data.reply || '';
@@ -12032,7 +12045,7 @@ document.querySelectorAll('.subseg').forEach(seg=>{
 });
 
 /* ================= Swipe between tabs ================= */
-const SWIPE_TAB_ORDER = ['today','workout','meditation','speech','library'];
+const SWIPE_TAB_ORDER = ['today','workout','meditation','speech','ai','library'];
 // ترتیب تب‌های بخش عمومی، دقیقاً هم‌ترازِ دکمه‌های #pubSubnav (چت، لیدربورد، هم‌مسیر، پروفایل)
 const PUB_SWIPE_TAB_ORDER = ['chat','profile','leaderboard','buddy'];
 let swipeStartX = 0, swipeStartY = 0, swipeBlocked = false;
@@ -12043,6 +12056,7 @@ document.addEventListener('touchstart', (e)=>{
   swipeBlocked = !!(e.target.closest('#tabbar') || e.target.closest('#sideMenu') ||
     e.target.closest('#modeBar') || e.target.closest('#pubSubnav') ||
     e.target.closest('.subseg') || e.target.closest('#countersScroll') ||
+    e.target.closest('#lbStrip') || e.target.closest('#lbPodium') ||
     e.target.closest('.sos-overlay.show') || e.target.closest('.onboard-overlay') ||
     e.target.closest('input[type="range"]') ||
     // پیام‌های چت خودشون با کشیدن به راست ریپلای می‌شن (ژست جدا و اولویت‌دار)؛
@@ -13332,7 +13346,7 @@ document.getElementById('libDeepBtn').addEventListener('click', async ()=>{
     });
     const data = await response.json();
     if(!response.ok){
-      showToast(data.error || 'مشکلی پیش اومد، دوباره امتحان کن', 'error');
+      handleAiWorkerError(response, data);
       return;
     }
     const rawText = (data.reply || '').trim();
