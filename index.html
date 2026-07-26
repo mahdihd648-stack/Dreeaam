@@ -17292,24 +17292,27 @@ document.getElementById('chatMediaInput').addEventListener('change', (e)=>{
    InputConnection.commitContent API); it can't be turned on from this HTML/JS file alone.
    This in-app Giphy search is the standard workaround (same approach Discord/Slack/Telegram's
    web clients use): search or browse trending GIFs, tap one, and it's sent as a normal chat
-   media message. Requires a free Giphy API key from https://developers.giphy.com —
-   sign up, click "Create an App", choose the free "API" (not SDK) option, and it gives you
-   a key instantly with no cost and no waitlist — paste it below. */
-const GIPHY_API_KEY = 'jR7zTBXTPiiQTSPZvzua37k8RDfFfkto';
+   media message.
+   نکته‌ی مهم: قبلاً این درخواست مستقیم از گوشیِ کاربر به api.giphy.com می‌رفت — و چون Giphy
+   (مثل خیلی از سرویس‌های آمریکایی) IP ایران رو به‌خاطر تحریم‌ها مسدود/محدود می‌کنه، بدون
+   فیلترشکن اصلاً گیفی لود نمی‌شد. الان از طریق همون Worker خودمون (که برای AI هم استفاده
+   می‌شه و از ایران بدون مشکل در دسترسه) پروکسی می‌شه؛ کلید Giphy هم دیگه اینجا نیست، رو
+   خودِ Worker (env.GIPHY_API_KEY) نگه‌داری می‌شه. */
 let gifPickerSearchTimer = null;
 let gifPickerReqSeq = 0;
 let gifPickerActiveTab = 'trending'; // 'trending' | 'recent' — search results override whichever tab is active
 const GIF_RECENT_STORAGE_KEY = 'gifPicker:recent';
 const GIF_RECENT_MAX = 30;
 async function giphyFetch(endpoint, params){
-  const url = new URL(`https://api.giphy.com/v1/gifs/${endpoint}`);
-  url.searchParams.set('api_key', GIPHY_API_KEY);
-  url.searchParams.set('rating', 'pg-13');
-  url.searchParams.set('limit', '24');
-  Object.entries(params||{}).forEach(([k,v])=> url.searchParams.set(k, v));
-  const res = await fetch(url.toString());
-  if(!res.ok) throw new Error('Giphy request failed (' + res.status + ')');
-  return res.json();
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, await authHeaders());
+  const res = await fetch(WORKER_BASE + '/giphy', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ endpoint, q: (params && params.q) || '' }),
+  });
+  const data = await res.json();
+  if(!res.ok) throw new Error((data && data.error) || ('Giphy request failed (' + res.status + ')'));
+  return data;
 }
 function gifPickerCellHtml(thumb, full, type){
   if(!thumb || !full) return '';
@@ -17381,7 +17384,7 @@ async function loadGifPickerTrending(){
   }catch(err){
     console.error('Giphy trending load error', err);
     if(seq !== gifPickerReqSeq) return;
-    if(grid) grid.innerHTML = '<div class="cm-ov-empty">مشکلی در بارگذاری گیف‌ها پیش اومد. اتصال اینترنت/VPN و کلید Giphy رو چک کن.</div>';
+    if(grid) grid.innerHTML = '<div class="cm-ov-empty">مشکلی در بارگذاری گیف‌ها پیش اومد، دوباره امتحان کن.</div>';
   }
 }
 async function searchGifPicker(q){
