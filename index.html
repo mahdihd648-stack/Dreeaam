@@ -6832,6 +6832,13 @@ const WORKER_BASE = "https://groq-proxy.mahdihd648.workers.dev";
 /* هر درخواستی که به Worker می‌ره و نیاز به احراز هویت داره (AI، iab/verify، referral/apply،
    wheel/spin) باید این هدر رو داشته باشه؛ Worker از روش می‌فهمه واقعاً کی داره درخواست می‌ده
    و دیگه چیزی که کلاینت درباره‌ی پرمیوم/رفرال ادعا می‌کنه رو کورکورانه قبول نمی‌کنه. */
+// خودِ فایل گیف (نه فقط جواب جستجو) هم باید از Worker رد بشه، وگرنه تگ <img>/<video> مستقیم
+// از گوشیِ کاربر به media*.giphy.com وصل می‌شه که بدون فیلترشکن لود نمی‌شه ("این مدیا منقضی
+// شده"). آدرس‌های غیر-Giphy (blob:، عکس/ویدیوی خودمون رو Supabase Storage) دست‌نخورده می‌مونن.
+function giphyProxyIfNeeded(u){
+  if(!u || !/^https:\/\/([a-z0-9-]+\.)?giphy\.com\//i.test(u)) return u;
+  return WORKER_BASE + '/giphy/media?url=' + encodeURIComponent(u);
+}
 async function authHeaders(){
   try{
     if(!sb) return {};
@@ -15543,7 +15550,7 @@ function chatMsgContentParts(m){
   // Giphy-sourced GIFs store the CDN URL directly in media_path (no Storage upload needed,
   // since Giphy already hosts it permanently) — only resolve through chatMediaPublicUrl()
   // when it's a bucket-relative path, not an absolute URL.
-  const mediaSrc = m.media_localUrl || (m.media_path ? (/^https?:\/\//i.test(m.media_path) ? m.media_path : chatMediaPublicUrl(m.media_path)) : '');
+  const mediaSrc = giphyProxyIfNeeded(m.media_localUrl || (m.media_path ? (/^https?:\/\//i.test(m.media_path) ? m.media_path : chatMediaPublicUrl(m.media_path)) : ''));
   const mediaExpiredJs = `this.parentElement.innerHTML='${ci('hourglass')} این مدیا منقضی شده'; this.parentElement.classList.add('cm-media-expired');`.replace(/"/g, '&quot;');
   // Save-to-favorites star: only on GIFs/silent-videos, and only once the real (permanent)
   // URL exists — saving the temporary blob: preview would point at a URL that stops working
@@ -17316,9 +17323,10 @@ async function giphyFetch(endpoint, params){
 }
 function gifPickerCellHtml(thumb, full, type){
   if(!thumb || !full) return '';
+  const proxiedThumb = giphyProxyIfNeeded(thumb);
   const media = type === 'gifvideo'
-    ? `<video src="${escapeHtml(thumb)}" autoplay loop muted playsinline preload="auto"></video>`
-    : `<img src="${escapeHtml(thumb)}" alt="گیف" loading="lazy">`;
+    ? `<video src="${escapeHtml(proxiedThumb)}" autoplay loop muted playsinline preload="auto"></video>`
+    : `<img src="${escapeHtml(proxiedThumb)}" alt="گیف" loading="lazy">`;
   return `<div class="gif-picker-cell" data-full-url="${escapeHtml(full)}" data-thumb-url="${escapeHtml(thumb)}" data-media-type="${escapeHtml(type || 'gif')}">${media}</div>`;
 }
 function renderGifPickerResults(results){
