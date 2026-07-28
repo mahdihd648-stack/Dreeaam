@@ -42,17 +42,40 @@ jobs:
             npm install @capacitor/local-notifications
           fi
 
+      - name: Locate icon source at repo root
+        # Single source of truth for every generated icon (web + native). Looks directly
+        # in the repo root instead of resources/icon-only.png (which wasn't being found),
+        # and fails loudly with a directory listing if nothing matches.
+        run: |
+          set -e
+          CANDIDATES=(icon-only.png icon.png app-icon.png logo.png icon-source.png)
+          ICON_SRC=""
+          for c in "${CANDIDATES[@]}"; do
+            if [ -f "$c" ]; then
+              ICON_SRC="$c"
+              break
+            fi
+          done
+          if [ -z "$ICON_SRC" ]; then
+            echo "::error::No icon file found at repo root. Looked for: ${CANDIDATES[*]}"
+            echo "Repo root contents:"
+            ls -la
+            exit 1
+          fi
+          echo "Using icon source: $ICON_SRC"
+          echo "ICON_SRC=$ICON_SRC" >> "$GITHUB_ENV"
+
       - name: Generate web icons into assets/ (icon-192.png, icon-512.png)
         # The web app (index.html / manifest.json) expects icon-192.png and icon-512.png,
         # but nothing in the repo produced them before — this step derives them from the
-        # same source icon used for the native Android icon (resources/icon-only.png) and
-        # drops them into assets/, so they're versioned alongside the app's other assets
-        # and the next step can pick them up from there.
+        # same repo-root icon used for the native Android icon and drops them into assets/,
+        # so they're versioned alongside the app's other assets and the next step can pick
+        # them up from there.
         run: |
           sudo apt-get update -y && sudo apt-get install -y imagemagick
           mkdir -p assets
-          convert resources/icon-only.png -resize 192x192 assets/icon-192.png
-          convert resources/icon-only.png -resize 512x512 assets/icon-512.png
+          convert "$ICON_SRC" -resize 192x192 assets/icon-192.png
+          convert "$ICON_SRC" -resize 512x512 assets/icon-512.png
 
       - name: Commit generated web icons back to the repo
         # [skip ci] stops this commit from re-triggering the "push to main" trigger above —
@@ -96,12 +119,62 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
-      - name: Generate app icon (adaptive, from resources/icon-only.png)
-        # @capacitor/assets requires this EXACT filename for a simple/flat icon —
-        # "icon.png" is silently ignored (it looks for icon-only.png, or the
-        # icon-foreground.png + icon-background.png pair for a layered icon).
-        # --assetPath makes it check resources/ directly instead of assets/ first.
-        run: npx @capacitor/assets generate --android --assetPath resources --iconBackgroundColor '#4338CA' --iconBackgroundColorDark '#4338CA' --splashBackgroundColor '#4338CA' --splashBackgroundColorDark '#4338CA'
+      - name: Generate app icon manually (legacy + adaptive, from repo-root icon)
+        # Builds every launcher icon file by hand with ImageMagick instead of relying on
+        # @capacitor/assets' own file discovery. Produces:
+        #  - legacy square + round ic_launcher.png per density (mdpi..xxxhdpi), for API <26
+        #  - adaptive ic_launcher_foreground.png per density, icon scaled into the ~66%
+        #    "safe zone" so launchers that mask/crop the outer edge don't clip it
+        #  - a solid brand-purple background color + mipmap-anydpi-v26 XML wiring both
+        #    together for API 26+ adaptive icons
+        run: |
+          set -e
+          sudo apt-get update -y && sudo apt-get install -y imagemagick
+          SRC="$ICON_SRC"
+          identify "$SRC"
+
+          RES_BASE="android/app/src/main/res"
+          BG_HEX="4338CA"
+
+          declare -A LEGACY_SIZES=( [mdpi]=48 [hdpi]=72 [xhdpi]=96 [xxhdpi]=144 [xxxhdpi]=192 )
+          declare -A FOREGROUND_SIZES=( [mdpi]=108 [hdpi]=162 [xhdpi]=216 [xxhdpi]=324 [xxxhdpi]=432 )
+
+          for density in "${!LEGACY_SIZES[@]}"; do
+            size=${LEGACY_SIZES[$density]}
+            dir="$RES_BASE/mipmap-$density"
+            mkdir -p "$dir"
+            convert "$SRC" -resize ${size}x${size}^ -gravity center -extent ${size}x${size} "$dir/ic_launcher.png"
+            convert "$dir/ic_launcher.png" \( +clone -alpha extract -fill black -colorize 100% -fill white -draw "circle $((size/2)),$((size/2)) $((size/2)),0" \) -alpha off -compose CopyOpacity -composite "$dir/ic_launcher_round.png"
+          done
+
+          for density in "${!FOREGROUND_SIZES[@]}"; do
+            size=${FOREGROUND_SIZES[$density]}
+            dir="$RES_BASE/mipmap-$density"
+            mkdir -p "$dir"
+            inner=$(( size * 66 / 100 ))
+            convert -size ${size}x${size} xc:none \( "$SRC" -resize ${inner}x${inner} \) -gravity center -composite "$dir/ic_launcher_foreground.png"
+          done
+
+          mkdir -p "$RES_BASE/values"
+          cat > "$RES_BASE/values/ic_launcher_background_color.xml" <<XMLEOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="ic_launcher_background">#$BG_HEX</color>
+          </resources>
+          XMLEOF
+
+          mkdir -p "$RES_BASE/mipmap-anydpi-v26"
+          cat > "$RES_BASE/mipmap-anydpi-v26/ic_launcher.xml" <<XMLEOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_launcher_background"/>
+              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+          </adaptive-icon>
+          XMLEOF
+          cp "$RES_BASE/mipmap-anydpi-v26/ic_launcher.xml" "$RES_BASE/mipmap-anydpi-v26/ic_launcher_round.xml"
+
+          echo "Generated launcher icons manually from $SRC:"
+          find "$RES_BASE" -iname "ic_launcher*"
 
       - name: Align Android 12+ system splash screen with the app's brand purple
         # On Android 12+, the OS shows its OWN splash (icon + background) at cold start,
@@ -266,9 +339,16 @@ jobs:
           if 'ir.mservices.market.BILLING' not in src:
               src = re.sub(r'(<manifest[^>]*>\n)', r'\1' + extra_permissions, src, count=1)
 
+          # NOTE: Myket's own docs list BOTH the <package> entry AND this <intent> entry
+          # together — a previous version of this step only added <package>, which is not
+          # what's documented, so replicate the exact block Myket ships.
           queries_block = (
               '    <queries>\n'
               '        <package android:name="ir.mservices.market" />\n'
+              '        <intent>\n'
+              '            <action android:name="ir.mservices.market.InAppBillingService.BIND" />\n'
+              '            <data android:mimeType="*/*" />\n'
+              '        </intent>\n'
               '    </queries>\n'
           )
           if '<queries>' not in src:
@@ -738,6 +818,46 @@ jobs:
 
       - name: Sync web assets into Android project
         run: npx cap sync android
+
+      - name: Set app version from VERSION file
+        # Reads the repo-root VERSION file (e.g. "1.4") and writes it into
+        # android/app/build.gradle as versionName. versionCode is set to the GitHub
+        # Actions run number instead of anything derived from VERSION, because Myket/
+        # Play both require every uploaded APK to have a STRICTLY HIGHER versionCode
+        # than the last one — run_number already increases by 1 on every workflow run,
+        # so it satisfies that regardless of how versionName changes (or doesn't).
+        run: |
+          set -e
+          if [ ! -f VERSION ]; then
+            echo "::error::VERSION file not found at repo root"
+            exit 1
+          fi
+          APP_VERSION=$(tr -d '[:space:]' < VERSION)
+          if [ -z "$APP_VERSION" ]; then
+            echo "::error::VERSION file is empty"
+            exit 1
+          fi
+          echo "Using versionName=$APP_VERSION versionCode=$GITHUB_RUN_NUMBER"
+          APP_GRADLE="android/app/build.gradle"
+          python3 - "$APP_GRADLE" "$APP_VERSION" "$GITHUB_RUN_NUMBER" <<'PYEOF'
+          import sys, re
+          path, version_name, version_code = sys.argv[1], sys.argv[2], sys.argv[3]
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+
+          if re.search(r'versionName\s+"[^"]*"', src):
+              src = re.sub(r'versionName\s+"[^"]*"', 'versionName "' + version_name + '"', src, count=1)
+          else:
+              src = re.sub(r'(defaultConfig\s*\{)', r'\1\n        versionName "' + version_name + '"', src, count=1)
+
+          if re.search(r'versionCode\s+\d+', src):
+              src = re.sub(r'versionCode\s+\d+', 'versionCode ' + version_code, src, count=1)
+          else:
+              src = re.sub(r'(defaultConfig\s*\{)', r'\1\n        versionCode ' + version_code, src, count=1)
+
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(src)
+          PYEOF
 
       - name: Decode release keystore
         env:
