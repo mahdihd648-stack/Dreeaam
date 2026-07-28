@@ -289,6 +289,7 @@ jobs:
           cat > "$WIDGET_DIR/ChecklistWidgetProvider.java" <<JAVAEOF
           package ${APP_ID}.widget;
 
+          import ${APP_ID}.R;
           import android.app.PendingIntent;
           import android.appwidget.AppWidgetManager;
           import android.appwidget.AppWidgetProvider;
@@ -388,6 +389,7 @@ jobs:
           cat > "$WIDGET_DIR/DayProgressWidgetProvider.java" <<JAVAEOF
           package ${APP_ID}.widget;
 
+          import ${APP_ID}.R;
           import android.appwidget.AppWidgetManager;
           import android.appwidget.AppWidgetProvider;
           import android.content.ComponentName;
