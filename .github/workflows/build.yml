@@ -92,7 +92,15 @@ jobs:
               fi
               echo "Push rejected (remote moved on) — rebasing onto origin/main and retrying ($i/5)"
               git fetch origin main
-              git rebase origin/main
+              # These icons are binary and fully regenerated every run, so there's nothing
+              # meaningful to merge — on conflict, always keep our freshly generated files.
+              # Note: git rebase flips the usual meaning of ours/theirs — "theirs" here means
+              # the commit being replayed (ours), not origin's.
+              if ! git rebase -X theirs origin/main; then
+                echo "::error::Rebase failed even with -X theirs — aborting"
+                git rebase --abort
+                exit 1
+              fi
               if [ "$i" -eq 5 ]; then
                 echo "::error::Could not push after 5 attempts"
                 exit 1
