@@ -10,6 +10,8 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
 
+import android.util.Log;
+
 import com.android.vending.billing.IInAppBillingService;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -43,10 +45,15 @@ import java.util.concurrent.TimeUnit;
 @CapacitorPlugin(name = "MarketBilling")
 public class MarketBillingPlugin extends Plugin {
 
+    private static final String TAG = "MarketBillingPlugin";
     private static final String MYKET_PACKAGE = "ir.mservices.market";
     private static final String MYKET_BIND_ACTION = "ir.mservices.market.InAppBillingService.BIND";
     private static final int PURCHASE_REQUEST_CODE = 10011;
-    private static final long BIND_TIMEOUT_MS = 6000;
+    // Was 6000ms — bumped up because some OEM skins (MIUI in particular, relevant since
+    // one of the review devices is a Xiaomi/Poco) can be slower to spin up a bound service
+    // than stock Android, and a bind that "would have succeeded" at 7-8s was silently
+    // reported as "Myket not available" with no way to tell the two cases apart.
+    private static final long BIND_TIMEOUT_MS = 10000;
 
     private IInAppBillingService billingService;
     private ServiceConnection serviceConnection;
@@ -71,39 +78,56 @@ public class MarketBillingPlugin extends Plugin {
     @PluginMethod
     public void purchase(PluginCall call) {
         String sku = call.getString("sku");
+        Log.d(TAG, "purchase() called, sku=" + sku);
         if (sku == null || sku.isEmpty()) {
             call.reject("sku is required");
             return;
         }
         if (!ensureBound()) {
+            Log.e(TAG, "purchase() aborted — ensureBound() returned false (see preceding logs for why)");
             call.reject("مایکت رو این گوشی در دسترس نیست");
             return;
         }
         Activity activity = getActivity();
         if (activity == null) {
+            Log.e(TAG, "purchase() aborted — getActivity() returned null");
             call.reject("no activity");
             return;
         }
         try {
             Bundle buyIntentBundle = billingService.getBuyIntent(3, activity.getPackageName(), sku, "inapp", "");
             int response = buyIntentBundle.getInt("RESPONSE_CODE", -1);
+            Log.d(TAG, "getBuyIntent() RESPONSE_CODE=" + response + " for sku=" + sku + " pkg=" + activity.getPackageName());
             if (response != 0) {
+                // Common causes worth checking manually when this shows up in logcat:
+                //  3 (BILLING_UNAVAILABLE) — API version/type not supported
+                //  4 (ITEM_UNAVAILABLE)    — this sku isn't registered in the Myket panel
+                //  7 (ITEM_ALREADY_OWNED)  — an un-consumed purchase of this sku already exists
                 call.reject("خطای بیلینگ، کد پاسخ " + response);
                 return;
             }
-            PendingIntent pendingIntent = buyIntentBundle.getParcelable("BUY_INTENT");
+            PendingIntent pendingIntent;
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                pendingIntent = buyIntentBundle.getParcelable("BUY_INTENT", PendingIntent.class);
+            } else {
+                pendingIntent = buyIntentBundle.getParcelable("BUY_INTENT");
+            }
             if (pendingIntent == null) {
+                Log.e(TAG, "getBuyIntent() returned RESPONSE_CODE=0 but no BUY_INTENT — unexpected");
                 call.reject("قصد خرید (buy intent) برنگشت");
                 return;
             }
             bridge.saveCall(call);
             pendingPurchaseCallId = call.getCallbackId();
+            Log.d(TAG, "launching Myket checkout screen for sku=" + sku);
             activity.startIntentSenderForResult(
                 pendingIntent.getIntentSender(), PURCHASE_REQUEST_CODE, new Intent(), 0, 0, 0
             );
         } catch (RemoteException e) {
+            Log.e(TAG, "getBuyIntent() threw RemoteException", e);
             call.reject("ارتباط با سرویس فروشگاه قطع شد: " + e.getMessage());
         } catch (Exception e) {
+            Log.e(TAG, "purchase() threw unexpected exception", e);
             call.reject("خرید انجام نشد: " + e.getMessage());
         }
     }
@@ -118,6 +142,7 @@ public class MarketBillingPlugin extends Plugin {
         PluginCall call = bridge.getSavedCall(callId);
         if (call == null) return;
 
+        Log.d(TAG, "handleOnActivityResult resultCode=" + resultCode + " (RESULT_OK=" + Activity.RESULT_OK + ")");
         if (data == null || resultCode != Activity.RESULT_OK) {
             call.reject("خرید لغو شد");
             bridge.releaseCall(call);
@@ -125,6 +150,7 @@ public class MarketBillingPlugin extends Plugin {
         }
         int responseCode = data.getIntExtra("RESPONSE_CODE", -1);
         String purchaseData = data.getStringExtra("INAPP_PURCHASE_DATA");
+        Log.d(TAG, "handleOnActivityResult RESPONSE_CODE=" + responseCode + " purchaseData present=" + (purchaseData != null));
         if (responseCode != 0 || purchaseData == null) {
             call.reject("خرید لغو شد یا ناموفق بود");
             bridge.releaseCall(call);
@@ -230,9 +256,14 @@ public class MarketBillingPlugin extends Plugin {
             } else {
                 installer = ctx.getPackageManager().getInstallerPackageName(ctx.getPackageName());
             }
+            Log.d(TAG, "detectStore() installer=" + installer);
             if (MYKET_PACKAGE.equals(installer)) return "myket";
-        } catch (Exception ignored) {}
-        if (isPackageInstalled(ctx, MYKET_PACKAGE)) return "myket";
+        } catch (Exception e) {
+            Log.e(TAG, "detectStore() getInstaller* threw", e);
+        }
+        boolean myketInstalled = isPackageInstalled(ctx, MYKET_PACKAGE);
+        Log.d(TAG, "detectStore() installer wasn't Myket, isPackageInstalled(Myket)=" + myketInstalled);
+        if (myketInstalled) return "myket";
         return null;
     }
 
@@ -248,21 +279,29 @@ public class MarketBillingPlugin extends Plugin {
     private synchronized boolean ensureBound() {
         if (billingService != null) return true;
         if (boundStore == null) boundStore = detectStore();
-        if (boundStore == null) return false;
+        if (boundStore == null) {
+            Log.e(TAG, "ensureBound() failing — detectStore() found no Myket install (not the installer, and package not present)");
+            return false;
+        }
 
         Context ctx = getContext();
-        if (ctx == null) return false;
+        if (ctx == null) {
+            Log.e(TAG, "ensureBound() failing — getContext() returned null");
+            return false;
+        }
 
         final CountDownLatch latch = new CountDownLatch(1);
         serviceConnection = new ServiceConnection() {
             @Override
             public void onServiceConnected(ComponentName name, IBinder service) {
+                Log.d(TAG, "onServiceConnected — bound to " + name);
                 billingService = IInAppBillingService.Stub.asInterface(service);
                 latch.countDown();
             }
 
             @Override
             public void onServiceDisconnected(ComponentName name) {
+                Log.d(TAG, "onServiceDisconnected — " + name);
                 billingService = null;
             }
         };
@@ -273,13 +312,27 @@ public class MarketBillingPlugin extends Plugin {
         try {
             bound = ctx.bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
         } catch (Exception e) {
+            Log.e(TAG, "ctx.bindService() threw", e);
             bound = false;
         }
-        if (!bound) return false;
+        if (!bound) {
+            // bindService() returned false synchronously — Android could not even resolve a
+            // service matching this action+package. On Android 11+ this usually means the
+            // <queries> declaration for ir.mservices.market is missing from the manifest
+            // (package-visibility restriction), NOT that Myket itself is misbehaving.
+            Log.e(TAG, "ctx.bindService() returned false — no matching service found for action="
+                + MYKET_BIND_ACTION + " package=" + MYKET_PACKAGE
+                + ". Check the <queries> entry in AndroidManifest.xml.");
+            return false;
+        }
 
         try {
             latch.await(BIND_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (InterruptedException ignored) {}
+        if (billingService == null) {
+            Log.e(TAG, "bindService() accepted the request but onServiceConnected never fired within "
+                + BIND_TIMEOUT_MS + "ms — Myket's service accepted the bind but didn't respond in time.");
+        }
         return billingService != null;
     }
 
