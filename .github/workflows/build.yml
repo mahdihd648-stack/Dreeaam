@@ -5,6 +5,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -59,7 +63,18 @@ jobs:
           git add assets/icon-192.png assets/icon-512.png
           if ! git diff --cached --quiet; then
             git commit -m "chore: regenerate web icons (192/512) [skip ci]"
-            git push
+            for i in 1 2 3 4 5; do
+              if git push; then
+                break
+              fi
+              echo "Push rejected (remote moved on) — rebasing onto origin/main and retrying ($i/5)"
+              git fetch origin main
+              git rebase origin/main
+              if [ "$i" -eq 5 ]; then
+                echo "::error::Could not push after 5 attempts"
+                exit 1
+              fi
+            done
           else
             echo "Icons unchanged — nothing to commit"
           fi
@@ -86,7 +101,82 @@ jobs:
         # "icon.png" is silently ignored (it looks for icon-only.png, or the
         # icon-foreground.png + icon-background.png pair for a layered icon).
         # --assetPath makes it check resources/ directly instead of assets/ first.
-        run: npx @capacitor/assets generate --android --assetPath resources --iconBackgroundColor '#4338CA' --iconBackgroundColorDark '#4338CA'
+        run: npx @capacitor/assets generate --android --assetPath resources --iconBackgroundColor '#4338CA' --iconBackgroundColorDark '#4338CA' --splashBackgroundColor '#4338CA' --splashBackgroundColorDark '#4338CA'
+
+      - name: Align Android 12+ system splash screen with the app's brand purple
+        # On Android 12+, the OS shows its OWN splash (icon + background) at cold start,
+        # BEFORE MainActivity/WebView exists — no app can skip this, it's enforced by the
+        # platform. Left uncustomized, it falls back to a generic color/icon presentation
+        # that doesn't necessarily match #4338CA (index.html's splash gradient starts at
+        # exactly that color), so it can look like an unrelated purple flash before the
+        # real (HTML) splash appears. This makes the OS splash use the same #4338CA and the
+        # app's own adaptive icon, so the hand-off into the HTML splash feels continuous.
+        # Uses only the native `Theme.SplashScreen` (built into API 31+ — no Gradle
+        # dependency needed) via a values-v31 override, so behavior on <31 is untouched.
+        run: |
+          set -e
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          COLORS="android/app/src/main/res/values/colors.xml"
+          V31_DIR="android/app/src/main/res/values-v31"
+          mkdir -p "$V31_DIR"
+
+          python3 - "$MANIFEST" "$COLORS" "$V31_DIR" <<'PYEOF'
+          import re, sys, os
+          manifest_path, colors_path, v31_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+
+          with open(manifest_path, encoding='utf-8') as f:
+              manifest = f.read()
+
+          # Find the MainActivity element and whatever theme it currently declares (if any).
+          activity_match = re.search(r'<activity\b[^>]*android:name="\.MainActivity"[^>]*>', manifest)
+          base_theme = 'AppTheme.NoActionBarLaunch'  # Capacitor's default; used only if none found
+          if activity_match:
+              theme_match = re.search(r'android:theme="@style/([^"]+)"', activity_match.group(0))
+              if theme_match:
+                  base_theme = theme_match.group(1)
+
+          # 1) Add/ensure the brand-purple color resource exists.
+          if os.path.exists(colors_path):
+              with open(colors_path, encoding='utf-8') as f:
+                  colors_src = f.read()
+          else:
+              colors_src = '<resources>\n</resources>\n'
+          if 'dreamlifeSplashBg' not in colors_src:
+              colors_src = colors_src.replace(
+                  '</resources>',
+                  '    <color name="dreamlifeSplashBg">#4338CA</color>\n</resources>'
+              )
+          with open(colors_path, 'w', encoding='utf-8') as f:
+              f.write(colors_src)
+
+          # 2) values-v31/styles.xml: define the splash theme, then hand off to the app's
+          #    real theme once the system splash finishes.
+          starting_theme = (
+              '<resources>\n'
+              '    <style name="AppTheme.Starting" parent="Theme.SplashScreen">\n'
+              '        <item name="windowSplashScreenBackground">@color/dreamlifeSplashBg</item>\n'
+              '        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>\n'
+              f'        <item name="postSplashScreenTheme">@style/{base_theme}</item>\n'
+              '    </style>\n'
+              '</resources>\n'
+          )
+          with open(os.path.join(v31_dir, 'styles.xml'), 'w', encoding='utf-8') as f:
+              f.write(starting_theme)
+
+          # 3) Point MainActivity at the new starting theme (v31 devices only use this —
+          #    values-v31/styles.xml doesn't exist on <31, so nothing changes there).
+          if activity_match:
+              old_tag = activity_match.group(0)
+              if 'android:theme=' in old_tag:
+                  new_tag = re.sub(r'android:theme="@style/[^"]+"', 'android:theme="@style/AppTheme.Starting"', old_tag)
+              else:
+                  new_tag = old_tag[:-1] + ' android:theme="@style/AppTheme.Starting">'
+              manifest = manifest.replace(old_tag, new_tag, 1)
+              with open(manifest_path, 'w', encoding='utf-8') as f:
+                  f.write(manifest)
+          else:
+              print('::warning::Could not find MainActivity in AndroidManifest.xml — system splash screen color/icon left as default.')
+          PYEOF
 
       - name: Generate notification small icon (ic_stat_icon)
         run: |
