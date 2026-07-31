@@ -429,6 +429,11 @@ jobs:
               public static final String KEY_TASKS = "tasks_json";
               public static final String KEY_DAY = "day_number";
               public static final String KEY_PENDING = "pending_toggles";
+              public static final String KEY_ACCENT = "theme_accent";
+              public static final String KEY_ACCENT2 = "theme_accent2";
+              public static final String KEY_CARD = "theme_card";
+              public static final String KEY_TEXT = "theme_text";
+              public static final String KEY_MUTED = "theme_muted";
 
               private SharedPreferences prefs() {
                   return getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -452,6 +457,20 @@ jobs:
               }
 
               @PluginMethod
+              public void updateTheme(PluginCall call) {
+                  prefs().edit()
+                      .putString(KEY_ACCENT, call.getString("accent", "#4338CA"))
+                      .putString(KEY_ACCENT2, call.getString("accent2", "#BF26D3"))
+                      .putString(KEY_CARD, call.getString("card", "#FDFCFF"))
+                      .putString(KEY_TEXT, call.getString("text", "#241F3D"))
+                      .putString(KEY_MUTED, call.getString("muted", "#8A84AB"))
+                      .apply();
+                  ChecklistWidgetProvider.refreshAll(getContext());
+                  DayProgressWidgetProvider.refreshAll(getContext());
+                  call.resolve();
+              }
+
+              @PluginMethod
               public void getPendingToggles(PluginCall call) {
                   Set<String> pending = prefs().getStringSet(KEY_PENDING, new HashSet<String>());
                   JSArray ids = new JSArray();
@@ -468,6 +487,101 @@ jobs:
           }
           JAVAEOF
 
+          # ---- WidgetThemeCatalog.java (mirrors the app's THEMES table, for the "custom theme" widget picker) ----
+          cat > "$WIDGET_DIR/WidgetThemeCatalog.java" <<JAVAEOF
+          package ${APP_ID}.widget;
+
+          import android.graphics.Color;
+          import java.util.LinkedHashMap;
+          import java.util.Map;
+
+          /** Mirrors the THEMES table in the web app (index.html) so the widget's own "custom theme"
+           *  picker can offer the exact same curated palettes, independent of whatever theme the
+           *  app itself is currently set to. */
+          class WidgetThemeCatalog {
+              private static final Map<String, String[]> DATA = new LinkedHashMap<>();
+              static {
+                  DATA.put("brand",    new String[]{"#4338ca","#bf26d3","#fdfcff","#241f3d","#8a84ab"});
+                  DATA.put("warm",     new String[]{"#ff9a3d","#ffb347","#fffdfa","#3d2f22","#9c8b78"});
+                  DATA.put("ocean",    new String[]{"#2f9bd6","#5fc1e0","#fbfeff","#1f3a4a","#7c99a6"});
+                  DATA.put("forest",   new String[]{"#4f9d5c","#7cbb6c","#fbfdf8","#28361f","#84977a"});
+                  DATA.put("dark",     new String[]{"#ff9a3d","#ffb347","#2a2e38","#eee8de","#8b8f9a"});
+                  DATA.put("rose",     new String[]{"#e15b86","#ee80a3","#fffbfc","#4a1f2d","#a17f8b"});
+                  DATA.put("lavender", new String[]{"#8b6fd9","#a893e6","#fbfaff","#2e2545","#8e84a8"});
+                  DATA.put("mint",     new String[]{"#20b393","#4fcaa8","#fbfffd","#173c33","#7c9c93"});
+                  DATA.put("midnight", new String[]{"#6d8dff","#8fa8ff","#20263b","#e7e9f5","#8a90ab"});
+                  DATA.put("red",      new String[]{"#e6231e","#ff5b52","#fffbfa","#3d1210","#a3827e"});
+                  DATA.put("white",    new String[]{"#2b2b2b","#555555","#ffffff","#1a1a1a","#8a8a8a"});
+                  DATA.put("gray",     new String[]{"#6b7280","#9aa1ab","#fbfbfc","#26282b","#8b8f95"});
+              }
+              static final String[] NAMES = DATA.keySet().toArray(new String[0]);
+              static final String[] LABELS_FA = { "برند","گرم","اقیانوسی","جنگلی","تیره","رز","لاواندر","نعنایی","نیمه‌شب","قرمز","سفید","طوسی" };
+
+              /** Returns {accent, accent2, card, text, muted} as parsed ARGB ints. */
+              static int[] get(String name) {
+                  String[] hex = DATA.get(name);
+                  if (hex == null) hex = DATA.get("brand");
+                  int[] out = new int[5];
+                  for (int i = 0; i < 5; i++) {
+                      try { out[i] = Color.parseColor(hex[i]); } catch (Exception e) { out[i] = Color.WHITE; }
+                  }
+                  return out;
+              }
+          }
+          JAVAEOF
+
+          # ---- WidgetStyle.java (resolves the effective look for one widget instance) ----
+          cat > "$WIDGET_DIR/WidgetStyle.java" <<JAVAEOF
+          package ${APP_ID}.widget;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+
+          /** Combines the globally-pushed app theme (TaskWidgetPlugin.KEY_ACCENT etc., set from
+           *  index.html whenever the user changes their in-app theme) with any per-widget overrides
+           *  saved from WidgetConfigActivity — so each widget instance can either follow the app's
+           *  current theme or use its own independent color/background/shape. */
+          class WidgetStyle {
+              final int accent, accent2, card, text, muted;
+              final String bg;        // "opaque" | "glass" | "transparent"
+              final String shape;     // "rounded" | "pill" | "sharp" (checklist widget)
+              final String thickness; // "thin" | "medium" | "thick" (day-progress widget)
+
+              private WidgetStyle(int accent, int accent2, int card, int text, int muted, String bg, String shape, String thickness) {
+                  this.accent = accent; this.accent2 = accent2; this.card = card; this.text = text; this.muted = muted;
+                  this.bg = bg; this.shape = shape; this.thickness = thickness;
+              }
+
+              static int safeColor(String hex, int fallback) {
+                  try { return Color.parseColor(hex); } catch (Exception e) { return fallback; }
+              }
+
+              static String prefKey(int widgetId, String suffix) { return "w" + widgetId + "_" + suffix; }
+
+              static WidgetStyle resolve(Context context, int widgetId) {
+                  SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  boolean followTheme = prefs.getBoolean(prefKey(widgetId, "followTheme"), true);
+                  int accent, accent2, card, text, muted;
+                  if (followTheme) {
+                      accent = safeColor(prefs.getString(TaskWidgetPlugin.KEY_ACCENT, "#4338CA"), 0xFF4338CA);
+                      accent2 = safeColor(prefs.getString(TaskWidgetPlugin.KEY_ACCENT2, "#BF26D3"), 0xFFBF26D3);
+                      card = safeColor(prefs.getString(TaskWidgetPlugin.KEY_CARD, "#FDFCFF"), 0xFFFDFCFF);
+                      text = safeColor(prefs.getString(TaskWidgetPlugin.KEY_TEXT, "#241F3D"), 0xFF241F3D);
+                      muted = safeColor(prefs.getString(TaskWidgetPlugin.KEY_MUTED, "#8A84AB"), 0xFF8A84AB);
+                  } else {
+                      String themeName = prefs.getString(prefKey(widgetId, "themeName"), "brand");
+                      int[] t = WidgetThemeCatalog.get(themeName);
+                      accent = t[0]; accent2 = t[1]; card = t[2]; text = t[3]; muted = t[4];
+                  }
+                  String bg = prefs.getString(prefKey(widgetId, "bg"), "opaque");
+                  String shape = prefs.getString(prefKey(widgetId, "shape"), "rounded");
+                  String thickness = prefs.getString(prefKey(widgetId, "thickness"), "medium");
+                  return new WidgetStyle(accent, accent2, card, text, muted, bg, shape, thickness);
+              }
+          }
+          JAVAEOF
+
           # ---- ChecklistWidgetProvider.java ----
           cat > "$WIDGET_DIR/ChecklistWidgetProvider.java" <<JAVAEOF
           package ${APP_ID}.widget;
@@ -480,6 +594,7 @@ jobs:
           import android.content.Context;
           import android.content.Intent;
           import android.content.SharedPreferences;
+          import android.graphics.Color;
           import android.view.View;
           import android.widget.RemoteViews;
           import org.json.JSONArray;
@@ -501,9 +616,36 @@ jobs:
                   for (int id : ids) updateOne(context, mgr, id);
               }
 
+              public static void refreshOne(Context context, int widgetId) {
+                  updateOne(context, AppWidgetManager.getInstance(context), widgetId);
+              }
+
               private static void updateOne(Context context, AppWidgetManager mgr, int widgetId) {
                   SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
                   RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_checklist);
+                  WidgetStyle st = WidgetStyle.resolve(context, widgetId);
+
+                  if ("transparent".equals(st.bg)) {
+                      views.setViewVisibility(R.id.cardShadow, View.GONE);
+                      views.setViewVisibility(R.id.cardBg, View.GONE);
+                  } else {
+                      int shapeRes = "pill".equals(st.shape) ? R.drawable.widget_card_shape_pill
+                                   : "sharp".equals(st.shape) ? R.drawable.widget_card_shape_sharp
+                                   : R.drawable.widget_card_shape;
+                      int shadowRes = "pill".equals(st.shape) ? R.drawable.widget_card_shadow_pill
+                                    : "sharp".equals(st.shape) ? R.drawable.widget_card_shadow_sharp
+                                    : R.drawable.widget_card_shadow;
+                      views.setViewVisibility(R.id.cardShadow, View.VISIBLE);
+                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardShadow, shadowRes);
+                      views.setImageViewResource(R.id.cardBg, shapeRes);
+                      views.setInt(R.id.cardBg, "setColorFilter", st.card);
+                      boolean glass = "glass".equals(st.bg);
+                      views.setInt(R.id.cardBg, "setImageAlpha", glass ? 165 : 255);
+                      views.setInt(R.id.cardShadow, "setImageAlpha", glass ? 90 : 140);
+                  }
+                  views.setInt(R.id.title, "setTextColor", st.text);
+
                   try {
                       JSONArray tasks = new JSONArray(prefs.getString(TaskWidgetPlugin.KEY_TASKS, "[]"));
                       for (int i = 0; i < 4; i++) {
@@ -512,8 +654,10 @@ jobs:
                               int taskId = t.optInt("id", i);
                               views.setViewVisibility(ROW_IDS[i], View.VISIBLE);
                               views.setTextViewText(LABEL_IDS[i], t.optString("label"));
+                              views.setInt(LABEL_IDS[i], "setTextColor", st.text);
                               boolean done = t.optBoolean("done", false);
                               views.setImageViewResource(CHECK_IDS[i], done ? R.drawable.widget_check_on : R.drawable.widget_check_off);
+                              views.setInt(CHECK_IDS[i], "setColorFilter", done ? st.accent : st.muted);
 
                               Intent toggleIntent = new Intent(context, ChecklistWidgetProvider.class);
                               toggleIntent.setAction(ACTION_TOGGLE);
@@ -573,22 +717,26 @@ jobs:
           package ${APP_ID}.widget;
 
           import ${APP_ID}.R;
+          import android.app.AlarmManager;
+          import android.app.PendingIntent;
           import android.appwidget.AppWidgetManager;
           import android.appwidget.AppWidgetProvider;
           import android.content.ComponentName;
           import android.content.Context;
+          import android.content.Intent;
           import android.content.SharedPreferences;
           import android.graphics.Bitmap;
           import android.graphics.Canvas;
-          import android.graphics.Color;
           import android.graphics.Paint;
           import android.graphics.RectF;
+          import android.graphics.SweepGradient;
+          import android.view.View;
           import android.widget.RemoteViews;
+          import java.util.Calendar;
 
           public class DayProgressWidgetProvider extends AppWidgetProvider {
 
-              // Matches storeData.programLength's default (90) in index.html.
-              private static final int TOTAL_DAYS = 90;
+              public static final String ACTION_TICK = "${APP_ID}.ACTION_WIDGET_TICK";
 
               public static void refreshAll(Context context) {
                   AppWidgetManager mgr = AppWidgetManager.getInstance(context);
@@ -596,27 +744,83 @@ jobs:
                   for (int id : ids) updateOne(context, mgr, id);
               }
 
-              private static Bitmap ringBitmap(int day, int total, int sizeDp, Context context) {
+              public static void refreshOne(Context context, int widgetId) {
+                  updateOne(context, AppWidgetManager.getInstance(context), widgetId);
+              }
+
+              // Android batches/limits how often a widget can auto-refresh in the background (there's
+              // no way to get a true once-a-second tick without a foreground service and heavy battery
+              // cost) — this inexact repeating alarm gives a reliable ~15 min cadence, which is 96 steps
+              // across the day and reads as smooth motion on a ring this size.
+              private static PendingIntent tickIntent(Context context) {
+                  Intent intent = new Intent(context, DayProgressWidgetProvider.class);
+                  intent.setAction(ACTION_TICK);
+                  return PendingIntent.getBroadcast(context, 0, intent,
+                          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+              }
+
+              private static void scheduleTick(Context context) {
+                  try {
+                      AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+                      if (am != null) {
+                          am.setInexactRepeating(AlarmManager.RTC, System.currentTimeMillis(),
+                                  AlarmManager.INTERVAL_FIFTEEN_MINUTES, tickIntent(context));
+                      }
+                  } catch (Exception e) { /* best-effort */ }
+              }
+
+              private static void cancelTick(Context context) {
+                  try {
+                      AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+                      if (am != null) am.cancel(tickIntent(context));
+                  } catch (Exception e) { /* best-effort */ }
+              }
+
+              @Override
+              public void onEnabled(Context context) { scheduleTick(context); }
+
+              @Override
+              public void onDisabled(Context context) { cancelTick(context); }
+
+              @Override
+              public void onUpdate(Context context, AppWidgetManager mgr, int[] appWidgetIds) {
+                  scheduleTick(context); // safety net: re-arms the alarm in case it was lost (e.g. reboot)
+                  for (int id : appWidgetIds) updateOne(context, mgr, id);
+              }
+
+              @Override
+              public void onReceive(Context context, Intent intent) {
+                  super.onReceive(context, intent);
+                  if (ACTION_TICK.equals(intent.getAction())) {
+                      refreshAll(context);
+                  }
+              }
+
+              // Draws the ring as a soft two-color gradient sweep (accent -> accent2) that fills one
+              // full lap every 24 hours (resetting at midnight), instead of the old day/90 fraction.
+              private static Bitmap ringBitmap(float pct, int sizeDp, Context context, int accent, int accent2, int trackColor, float strokeFactor) {
                   float density = context.getResources().getDisplayMetrics().density;
                   int size = Math.max(1, (int) (sizeDp * density));
                   Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
                   Canvas canvas = new Canvas(bmp);
-                  float stroke = size * 0.09f;
+                  float stroke = size * strokeFactor;
                   RectF rect = new RectF(stroke, stroke, size - stroke, size - stroke);
+                  float cx = size / 2f, cy = size / 2f;
 
                   Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
                   track.setStyle(Paint.Style.STROKE);
                   track.setStrokeWidth(stroke);
-                  track.setColor(Color.parseColor("#332B2540"));
+                  track.setColor(trackColor);
                   track.setStrokeCap(Paint.Cap.ROUND);
                   canvas.drawArc(rect, 0f, 360f, false, track);
 
-                  float pct = Math.max(0f, Math.min(1f, day / (float) total));
                   Paint fg = new Paint(Paint.ANTI_ALIAS_FLAG);
                   fg.setStyle(Paint.Style.STROKE);
                   fg.setStrokeWidth(stroke);
-                  fg.setColor(Color.parseColor("#4338CA"));
                   fg.setStrokeCap(Paint.Cap.ROUND);
+                  SweepGradient gradient = new SweepGradient(cx, cy,
+                      new int[]{ accent, accent2, accent }, new float[]{ 0f, 0.5f, 1f });
+                  fg.setShader(gradient);
                   canvas.drawArc(rect, -90f, 360f * pct, false, fg);
                   return bmp;
               }
@@ -624,15 +828,343 @@ jobs:
               private static void updateOne(Context context, AppWidgetManager mgr, int widgetId) {
                   SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
                   int day = prefs.getInt(TaskWidgetPlugin.KEY_DAY, 0);
+                  WidgetStyle st = WidgetStyle.resolve(context, widgetId);
+
+                  Calendar now = Calendar.getInstance();
+                  int minutesSinceMidnight = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
+                  float pct = Math.max(0f, Math.min(1f, minutesSinceMidnight / 1440f));
+                  float strokeFactor = "thin".equals(st.thickness) ? 0.06f : "thick".equals(st.thickness) ? 0.13f : 0.09f;
+
                   RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_day_progress);
-                  views.setImageViewBitmap(R.id.ring, ringBitmap(day, TOTAL_DAYS, 96, context));
+
+                  if ("transparent".equals(st.bg)) {
+                      views.setViewVisibility(R.id.cardShadow, View.GONE);
+                      views.setViewVisibility(R.id.cardBg, View.GONE);
+                  } else {
+                      views.setViewVisibility(R.id.cardShadow, View.VISIBLE);
+                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
+                      views.setInt(R.id.cardBg, "setColorFilter", st.card);
+                      boolean glass = "glass".equals(st.bg);
+                      views.setInt(R.id.cardBg, "setImageAlpha", glass ? 165 : 255);
+                      views.setInt(R.id.cardShadow, "setImageAlpha", glass ? 90 : 140);
+                  }
+
+                  int track = (st.muted & 0x00FFFFFF) | 0x33000000;
+                  views.setImageViewBitmap(R.id.ring, ringBitmap(pct, 96, context, st.accent, st.accent2, track, strokeFactor));
                   views.setTextViewText(R.id.dayLabel, "روز " + day);
+                  views.setInt(R.id.dayLabel, "setTextColor", st.text);
                   mgr.updateAppWidget(widgetId, views);
               }
+          }
+          JAVAEOF
+
+          # ---- WidgetConfigActivity.java (the "add widget" / long-press "Edit" customization screen) ----
+          cat > "$WIDGET_DIR/WidgetConfigActivity.java" <<JAVAEOF
+          package ${APP_ID}.widget;
+
+          import ${APP_ID}.R;
+          import android.app.Activity;
+          import android.appwidget.AppWidgetManager;
+          import android.appwidget.AppWidgetProviderInfo;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
+          import android.os.Bundle;
+          import android.util.TypedValue;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.widget.Button;
+          import android.widget.CompoundButton;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.Switch;
+          import android.widget.TextView;
+
+          /** Shared "add widget" / long-press "Edit" screen for both home-screen widgets. Each
+           *  widget instance can either follow the app's current in-app theme (default), or use
+           *  one of the app's own theme palettes independently, plus its own background opacity
+           *  and card shape / ring thickness — this is the per-widget customization layer. */
+          public class WidgetConfigActivity extends Activity {
+
+              private int appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID;
+              private boolean isChecklist = true;
+
+              private boolean followTheme = true;
+              private String themeName = "brand";
+              private String bg = "opaque";
+              private String shape = "rounded";
+              private String thickness = "medium";
+
+              private LinearLayout themeSwatchRow, bgOptionRow, shapeOptionRow, thicknessOptionRow;
+              private FrameLayout previewHolder;
+              private Switch followThemeSwitch;
 
               @Override
-              public void onUpdate(Context context, AppWidgetManager mgr, int[] appWidgetIds) {
-                  for (int id : appWidgetIds) updateOne(context, mgr, id);
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  setResult(RESULT_CANCELED);
+
+                  Bundle extras = getIntent().getExtras();
+                  if (extras != null) {
+                      appWidgetId = extras.getInt(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);
+                  }
+                  if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+                      finish();
+                      return;
+                  }
+
+                  AppWidgetManager mgr = AppWidgetManager.getInstance(this);
+                  AppWidgetProviderInfo info = mgr.getAppWidgetInfo(appWidgetId);
+                  isChecklist = info == null || info.provider == null
+                          || info.provider.getClassName().endsWith("ChecklistWidgetProvider");
+
+                  setContentView(R.layout.activity_widget_config);
+
+                  SharedPreferences prefs = getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  followTheme = prefs.getBoolean(WidgetStyle.prefKey(appWidgetId, "followTheme"), true);
+                  themeName = prefs.getString(WidgetStyle.prefKey(appWidgetId, "themeName"), "brand");
+                  bg = prefs.getString(WidgetStyle.prefKey(appWidgetId, "bg"), "opaque");
+                  shape = prefs.getString(WidgetStyle.prefKey(appWidgetId, "shape"), "rounded");
+                  thickness = prefs.getString(WidgetStyle.prefKey(appWidgetId, "thickness"), "medium");
+
+                  previewHolder = findViewById(R.id.previewHolder);
+                  themeSwatchRow = findViewById(R.id.themeSwatchRow);
+                  bgOptionRow = findViewById(R.id.bgOptionRow);
+                  shapeOptionRow = findViewById(R.id.shapeOptionRow);
+                  thicknessOptionRow = findViewById(R.id.thicknessOptionRow);
+                  followThemeSwitch = findViewById(R.id.followThemeSwitch);
+                  TextView shapeLabel = findViewById(R.id.shapeLabel);
+                  TextView thicknessLabel = findViewById(R.id.thicknessLabel);
+
+                  if (isChecklist) {
+                      thicknessOptionRow.setVisibility(View.GONE);
+                      thicknessLabel.setVisibility(View.GONE);
+                  } else {
+                      shapeOptionRow.setVisibility(View.GONE);
+                      shapeLabel.setVisibility(View.GONE);
+                  }
+
+                  followThemeSwitch.setChecked(followTheme);
+                  buildThemeSwatches();
+                  buildBgOptions();
+                  if (isChecklist) buildShapeOptions(); else buildThicknessOptions();
+                  updateSwatchEnabled();
+                  renderPreview();
+
+                  followThemeSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                      @Override public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                          followTheme = isChecked;
+                          updateSwatchEnabled();
+                          renderPreview();
+                      }
+                  });
+
+                  Button saveBtn = findViewById(R.id.saveBtn);
+                  saveBtn.setOnClickListener(new View.OnClickListener() {
+                      @Override public void onClick(View v) { save(); }
+                  });
+              }
+
+              private void updateSwatchEnabled() {
+                  themeSwatchRow.setAlpha(followTheme ? 0.35f : 1f);
+                  for (int i = 0; i < themeSwatchRow.getChildCount(); i++) {
+                      themeSwatchRow.getChildAt(i).setEnabled(!followTheme);
+                  }
+              }
+
+              private int dp(int v) {
+                  return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
+              }
+
+              private void buildThemeSwatches() {
+                  themeSwatchRow.removeAllViews();
+                  for (final String name : WidgetThemeCatalog.NAMES) {
+                      int[] colors = WidgetThemeCatalog.get(name);
+                      FrameLayout holder = new FrameLayout(this);
+                      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(44));
+                      lp.setMargins(dp(6), dp(4), dp(6), dp(4));
+                      holder.setLayoutParams(lp);
+
+                      View dot = new View(this);
+                      FrameLayout.LayoutParams dotLp = new FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER);
+                      GradientDrawable circle = new GradientDrawable();
+                      circle.setShape(GradientDrawable.OVAL);
+                      circle.setColor(colors[0]);
+                      if (name.equals(themeName)) circle.setStroke(dp(3), Color.WHITE);
+                      dot.setBackground(circle);
+                      dot.setLayoutParams(dotLp);
+                      holder.addView(dot);
+                      holder.setOnClickListener(new View.OnClickListener() {
+                          @Override public void onClick(View v) {
+                              themeName = name;
+                              buildThemeSwatches();
+                              updateSwatchEnabled();
+                              renderPreview();
+                          }
+                      });
+                      themeSwatchRow.addView(holder);
+                  }
+              }
+
+              private Button pillButton(String label, boolean selected) {
+                  Button b = new Button(this);
+                  b.setText(label);
+                  b.setAllCaps(false);
+                  b.setTextSize(13);
+                  b.setTextColor(selected ? Color.WHITE : Color.parseColor("#CFCBE0"));
+                  GradientDrawable bgShape = new GradientDrawable();
+                  bgShape.setCornerRadius(dp(18));
+                  bgShape.setColor(selected ? Color.parseColor("#4338CA") : Color.parseColor("#262A38"));
+                  b.setBackground(bgShape);
+                  b.setPadding(dp(14), dp(8), dp(14), dp(8));
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                  lp.setMarginEnd(dp(10));
+                  b.setLayoutParams(lp);
+                  return b;
+              }
+
+              private void buildBgOptions() {
+                  bgOptionRow.removeAllViews();
+                  String[] keys = { "opaque", "glass", "transparent" };
+                  String[] labels = { "کدر", "شیشه‌ای", "بدون پس‌زمینه" };
+                  for (int i = 0; i < keys.length; i++) {
+                      final String key = keys[i];
+                      Button b = pillButton(labels[i], key.equals(bg));
+                      b.setOnClickListener(new View.OnClickListener() {
+                          @Override public void onClick(View v) { bg = key; buildBgOptions(); renderPreview(); }
+                      });
+                      bgOptionRow.addView(b);
+                  }
+              }
+
+              private void buildShapeOptions() {
+                  shapeOptionRow.removeAllViews();
+                  String[] keys = { "rounded", "pill", "sharp" };
+                  String[] labels = { "گردگوشه", "بیضی", "تیز" };
+                  for (int i = 0; i < keys.length; i++) {
+                      final String key = keys[i];
+                      Button b = pillButton(labels[i], key.equals(shape));
+                      b.setOnClickListener(new View.OnClickListener() {
+                          @Override public void onClick(View v) { shape = key; buildShapeOptions(); renderPreview(); }
+                      });
+                      shapeOptionRow.addView(b);
+                  }
+              }
+
+              private void buildThicknessOptions() {
+                  thicknessOptionRow.removeAllViews();
+                  String[] keys = { "thin", "medium", "thick" };
+                  String[] labels = { "نازک", "متوسط", "ضخیم" };
+                  for (int i = 0; i < keys.length; i++) {
+                      final String key = keys[i];
+                      Button b = pillButton(labels[i], key.equals(thickness));
+                      b.setOnClickListener(new View.OnClickListener() {
+                          @Override public void onClick(View v) { thickness = key; buildThicknessOptions(); renderPreview(); }
+                      });
+                      thicknessOptionRow.addView(b);
+                  }
+              }
+
+              private int[] currentAppColors() {
+                  SharedPreferences prefs = getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  return new int[]{
+                      WidgetStyle.safeColor(prefs.getString(TaskWidgetPlugin.KEY_ACCENT, "#4338CA"), 0xFF4338CA),
+                      WidgetStyle.safeColor(prefs.getString(TaskWidgetPlugin.KEY_ACCENT2, "#BF26D3"), 0xFFBF26D3),
+                      WidgetStyle.safeColor(prefs.getString(TaskWidgetPlugin.KEY_CARD, "#FDFCFF"), 0xFFFDFCFF),
+                      WidgetStyle.safeColor(prefs.getString(TaskWidgetPlugin.KEY_TEXT, "#241F3D"), 0xFF241F3D),
+                      WidgetStyle.safeColor(prefs.getString(TaskWidgetPlugin.KEY_MUTED, "#8A84AB"), 0xFF8A84AB)
+                  };
+              }
+
+              private void renderPreview() {
+                  previewHolder.removeAllViews();
+                  int[] colors = followTheme ? currentAppColors() : WidgetThemeCatalog.get(themeName);
+                  int accent = colors[0], card = colors[2], text = colors[3], muted = colors[4];
+
+                  FrameLayout.LayoutParams full = new FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+
+                  if (!"transparent".equals(bg)) {
+                      View cardView = new View(this);
+                      GradientDrawable shapeDrawable = new GradientDrawable();
+                      shapeDrawable.setColor(card);
+                      if (!isChecklist || "pill".equals(shape)) shapeDrawable.setCornerRadius(dp(999));
+                      else if ("sharp".equals(shape)) shapeDrawable.setCornerRadius(dp(4));
+                      else shapeDrawable.setCornerRadius(dp(24));
+                      cardView.setBackground(shapeDrawable);
+                      cardView.setAlpha("glass".equals(bg) ? 0.65f : 1f);
+                      previewHolder.addView(cardView, full);
+                  }
+
+                  if (isChecklist) {
+                      LinearLayout content = new LinearLayout(this);
+                      content.setOrientation(LinearLayout.VERTICAL);
+                      content.setPadding(dp(16), dp(14), dp(16), dp(14));
+                      TextView title = new TextView(this);
+                      title.setText("چک‌لیست امروز");
+                      title.setTextColor(text);
+                      title.setTextSize(13);
+                      title.setTypeface(null, Typeface.BOLD);
+                      content.addView(title);
+                      for (int i = 0; i < 2; i++) {
+                          LinearLayout row = new LinearLayout(this);
+                          row.setOrientation(LinearLayout.HORIZONTAL);
+                          row.setGravity(Gravity.CENTER_VERTICAL);
+                          row.setPadding(0, dp(6), 0, dp(6));
+                          View dot = new View(this);
+                          GradientDrawable dotShape = new GradientDrawable();
+                          dotShape.setShape(GradientDrawable.OVAL);
+                          dotShape.setColor(i == 0 ? accent : Color.TRANSPARENT);
+                          dotShape.setStroke(dp(1), muted);
+                          dot.setBackground(dotShape);
+                          LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(14), dp(14));
+                          dotLp.setMarginEnd(dp(8));
+                          row.addView(dot, dotLp);
+                          View line = new View(this);
+                          line.setBackgroundColor(muted);
+                          LinearLayout.LayoutParams lineLp = new LinearLayout.LayoutParams(dp(90), dp(2));
+                          line.setLayoutParams(lineLp);
+                          row.addView(line);
+                          content.addView(row);
+                      }
+                      previewHolder.addView(content, full);
+                  } else {
+                      TextView dayText = new TextView(this);
+                      dayText.setText("روز ۱۲");
+                      dayText.setTextColor(text);
+                      dayText.setTypeface(null, Typeface.BOLD);
+                      dayText.setTextSize(15);
+                      FrameLayout.LayoutParams centerLp = new FrameLayout.LayoutParams(
+                              ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+                      previewHolder.addView(dayText, centerLp);
+                  }
+              }
+
+              private void save() {
+                  SharedPreferences prefs = getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  SharedPreferences.Editor editor = prefs.edit();
+                  editor.putBoolean(WidgetStyle.prefKey(appWidgetId, "followTheme"), followTheme);
+                  editor.putString(WidgetStyle.prefKey(appWidgetId, "themeName"), themeName);
+                  editor.putString(WidgetStyle.prefKey(appWidgetId, "bg"), bg);
+                  editor.putString(WidgetStyle.prefKey(appWidgetId, "shape"), shape);
+                  editor.putString(WidgetStyle.prefKey(appWidgetId, "thickness"), thickness);
+                  editor.apply();
+
+                  if (isChecklist) {
+                      ChecklistWidgetProvider.refreshOne(this, appWidgetId);
+                  } else {
+                      DayProgressWidgetProvider.refreshOne(this, appWidgetId);
+                  }
+
+                  Intent result = new Intent();
+                  result.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
+                  setResult(RESULT_OK, result);
+                  finish();
               }
           }
           JAVAEOF
@@ -640,62 +1172,86 @@ jobs:
           # ---- res/layout/widget_checklist.xml ----
           cat > "$RES_DIR/layout/widget_checklist.xml" <<'XMLEOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:orientation="vertical"
-              android:background="#F3EEFC"
-              android:padding="12dp">
+              android:layout_height="match_parent">
 
-              <TextView
-                  android:id="@+id/title"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="چک‌لیست امروز"
-                  android:textDirection="rtl"
-                  android:textAlignment="viewStart"
-                  android:textColor="#241F3D"
-                  android:textStyle="bold"
-                  android:textSize="14sp"
-                  android:paddingBottom="6dp" />
+              <!-- Soft drop shadow: a static translucent rounded rect, offset a couple dp down so
+                   the card in front reads as gently floating instead of a flat pasted-on rectangle. -->
+              <ImageView
+                  android:id="@+id/cardShadow"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:layout_marginTop="3dp"
+                  android:src="@drawable/widget_card_shadow"
+                  android:scaleType="fitXY" />
 
-              <LinearLayout android:id="@+id/row0" android:layout_width="match_parent" android:layout_height="wrap_content"
-                  android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="4dp" android:paddingBottom="4dp">
-                  <ImageView android:id="@+id/check0" android:layout_width="20dp" android:layout_height="20dp"
-                      android:src="@drawable/widget_check_off" android:layout_marginEnd="8dp" />
-                  <TextView android:id="@+id/label0" android:layout_width="0dp" android:layout_weight="1"
-                      android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
-                      android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
+              <!-- The actual card: one shape recolored at runtime (setColorFilter) to whatever
+                   theme.card color the app is currently using — this is what makes the widget
+                   follow the in-app theme instead of a hardcoded lavender box. -->
+              <ImageView
+                  android:id="@+id/cardBg"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:src="@drawable/widget_card_shape"
+                  android:scaleType="fitXY" />
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:orientation="vertical"
+                  android:padding="16dp">
+
+                  <TextView
+                      android:id="@+id/title"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="چک‌لیست امروز"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:textColor="#241F3D"
+                      android:textStyle="bold"
+                      android:textSize="14sp"
+                      android:paddingBottom="8dp" />
+
+                  <LinearLayout android:id="@+id/row0" android:layout_width="match_parent" android:layout_height="wrap_content"
+                      android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="5dp" android:paddingBottom="5dp">
+                      <ImageView android:id="@+id/check0" android:layout_width="20dp" android:layout_height="20dp"
+                          android:src="@drawable/widget_check_off" android:layout_marginEnd="10dp" />
+                      <TextView android:id="@+id/label0" android:layout_width="0dp" android:layout_weight="1"
+                          android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
+                          android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
+                  </LinearLayout>
+
+                  <LinearLayout android:id="@+id/row1" android:layout_width="match_parent" android:layout_height="wrap_content"
+                      android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="5dp" android:paddingBottom="5dp">
+                      <ImageView android:id="@+id/check1" android:layout_width="20dp" android:layout_height="20dp"
+                          android:src="@drawable/widget_check_off" android:layout_marginEnd="10dp" />
+                      <TextView android:id="@+id/label1" android:layout_width="0dp" android:layout_weight="1"
+                          android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
+                          android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
+                  </LinearLayout>
+
+                  <LinearLayout android:id="@+id/row2" android:layout_width="match_parent" android:layout_height="wrap_content"
+                      android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="5dp" android:paddingBottom="5dp">
+                      <ImageView android:id="@+id/check2" android:layout_width="20dp" android:layout_height="20dp"
+                          android:src="@drawable/widget_check_off" android:layout_marginEnd="10dp" />
+                      <TextView android:id="@+id/label2" android:layout_width="0dp" android:layout_weight="1"
+                          android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
+                          android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
+                  </LinearLayout>
+
+                  <LinearLayout android:id="@+id/row3" android:layout_width="match_parent" android:layout_height="wrap_content"
+                      android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="5dp" android:paddingBottom="5dp">
+                      <ImageView android:id="@+id/check3" android:layout_width="20dp" android:layout_height="20dp"
+                          android:src="@drawable/widget_check_off" android:layout_marginEnd="10dp" />
+                      <TextView android:id="@+id/label3" android:layout_width="0dp" android:layout_weight="1"
+                          android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
+                          android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
+                  </LinearLayout>
+
               </LinearLayout>
-
-              <LinearLayout android:id="@+id/row1" android:layout_width="match_parent" android:layout_height="wrap_content"
-                  android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="4dp" android:paddingBottom="4dp">
-                  <ImageView android:id="@+id/check1" android:layout_width="20dp" android:layout_height="20dp"
-                      android:src="@drawable/widget_check_off" android:layout_marginEnd="8dp" />
-                  <TextView android:id="@+id/label1" android:layout_width="0dp" android:layout_weight="1"
-                      android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
-                      android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
-              </LinearLayout>
-
-              <LinearLayout android:id="@+id/row2" android:layout_width="match_parent" android:layout_height="wrap_content"
-                  android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="4dp" android:paddingBottom="4dp">
-                  <ImageView android:id="@+id/check2" android:layout_width="20dp" android:layout_height="20dp"
-                      android:src="@drawable/widget_check_off" android:layout_marginEnd="8dp" />
-                  <TextView android:id="@+id/label2" android:layout_width="0dp" android:layout_weight="1"
-                      android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
-                      android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
-              </LinearLayout>
-
-              <LinearLayout android:id="@+id/row3" android:layout_width="match_parent" android:layout_height="wrap_content"
-                  android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="4dp" android:paddingBottom="4dp">
-                  <ImageView android:id="@+id/check3" android:layout_width="20dp" android:layout_height="20dp"
-                      android:src="@drawable/widget_check_off" android:layout_marginEnd="8dp" />
-                  <TextView android:id="@+id/label3" android:layout_width="0dp" android:layout_weight="1"
-                      android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
-                      android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
-              </LinearLayout>
-
-          </LinearLayout>
+          </FrameLayout>
           XMLEOF
 
           # ---- res/layout/widget_day_progress.xml ----
@@ -704,18 +1260,239 @@ jobs:
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
               android:layout_height="match_parent"
-              android:background="#F3EEFC"
-              android:padding="10dp">
+              android:padding="8dp">
+
+              <!-- Soft drop shadow behind the circular card (same floating-card trick as the
+                   checklist widget), then the recolorable circular card, then the gradient ring. -->
+              <ImageView
+                  android:id="@+id/cardShadow"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:layout_marginTop="3dp"
+                  android:src="@drawable/widget_card_shadow_circle"
+                  android:scaleType="fitXY" />
+
+              <ImageView
+                  android:id="@+id/cardBg"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:src="@drawable/widget_card_shape_circle"
+                  android:scaleType="fitXY" />
+
               <ImageView android:id="@+id/ring" android:layout_width="match_parent" android:layout_height="match_parent"
-                  android:layout_gravity="center" />
+                  android:layout_gravity="center" android:padding="4dp" />
               <TextView android:id="@+id/dayLabel" android:layout_width="wrap_content" android:layout_height="wrap_content"
                   android:layout_gravity="center" android:textDirection="rtl" android:textColor="#241F3D"
                   android:textStyle="bold" android:textSize="16sp" />
           </FrameLayout>
           XMLEOF
 
+          # ---- res/layout/activity_widget_config.xml (the widget customization screen) ----
+          cat > "$RES_DIR/layout/activity_widget_config.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="#12141c">
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:orientation="vertical"
+                  android:padding="20dp">
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="شخصی‌سازی ویجت"
+                      android:textColor="#FFFFFF"
+                      android:textSize="20sp"
+                      android:textStyle="bold"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:layout_marginBottom="16dp" />
+
+                  <FrameLayout
+                      android:id="@+id/previewHolder"
+                      android:layout_width="match_parent"
+                      android:layout_height="140dp"
+                      android:layout_marginBottom="22dp" />
+
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal"
+                      android:gravity="center_vertical"
+                      android:layout_marginBottom="18dp">
+                      <TextView
+                          android:layout_width="0dp"
+                          android:layout_weight="1"
+                          android:layout_height="wrap_content"
+                          android:text="پیروی از تم اپ"
+                          android:textColor="#CFCBE0"
+                          android:textSize="14sp"
+                          android:textDirection="rtl"
+                          android:textAlignment="viewStart" />
+                      <Switch
+                          android:id="@+id/followThemeSwitch"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content" />
+                  </LinearLayout>
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="رنگ ویجت"
+                      android:textColor="#CFCBE0"
+                      android:textSize="14sp"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:layout_marginBottom="8dp" />
+                  <HorizontalScrollView
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:layout_marginBottom="20dp"
+                      android:scrollbars="none">
+                      <LinearLayout
+                          android:id="@+id/themeSwatchRow"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:orientation="horizontal" />
+                  </HorizontalScrollView>
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="پس‌زمینه"
+                      android:textColor="#CFCBE0"
+                      android:textSize="14sp"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:layout_marginBottom="8dp" />
+                  <LinearLayout
+                      android:id="@+id/bgOptionRow"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal"
+                      android:layout_marginBottom="20dp" />
+
+                  <TextView
+                      android:id="@+id/shapeLabel"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="شکل کارت"
+                      android:textColor="#CFCBE0"
+                      android:textSize="14sp"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:layout_marginBottom="8dp" />
+                  <LinearLayout
+                      android:id="@+id/shapeOptionRow"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal"
+                      android:layout_marginBottom="20dp" />
+
+                  <TextView
+                      android:id="@+id/thicknessLabel"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="ضخامت حلقه"
+                      android:textColor="#CFCBE0"
+                      android:textSize="14sp"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:layout_marginBottom="8dp" />
+                  <LinearLayout
+                      android:id="@+id/thicknessOptionRow"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal"
+                      android:layout_marginBottom="26dp" />
+
+                  <Button
+                      android:id="@+id/saveBtn"
+                      android:layout_width="match_parent"
+                      android:layout_height="52dp"
+                      android:text="ذخیره"
+                      android:textColor="#FFFFFF"
+                      android:textStyle="bold"
+                      android:textAllCaps="false"
+                      android:background="@drawable/widget_card_shape"
+                      android:backgroundTint="#4338CA" />
+              </LinearLayout>
+          </ScrollView>
+          XMLEOF
+          cat > "$RES_DIR/drawable/widget_card_shape.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#FFFFFF" />
+              <corners android:radius="24dp" />
+          </shape>
+          XMLEOF
+
+          # ---- res/drawable/widget_card_shadow.xml (static soft shadow, not recolored) ----
+          cat > "$RES_DIR/drawable/widget_card_shadow.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#22000000" />
+              <corners android:radius="24dp" />
+          </shape>
+          XMLEOF
+
+          # ---- res/drawable/widget_card_shape_circle.xml (day-progress card, recolored at runtime) ----
+          cat > "$RES_DIR/drawable/widget_card_shape_circle.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+              <solid android:color="#FFFFFF" />
+          </shape>
+          XMLEOF
+
+          # ---- res/drawable/widget_card_shadow_circle.xml (static soft shadow, not recolored) ----
+          cat > "$RES_DIR/drawable/widget_card_shadow_circle.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+              <solid android:color="#22000000" />
+          </shape>
+          XMLEOF
+
+          # ---- res/drawable/widget_card_shape_pill.xml (fully rounded "stadium" card shape option) ----
+          cat > "$RES_DIR/drawable/widget_card_shape_pill.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#FFFFFF" />
+              <corners android:radius="999dp" />
+          </shape>
+          XMLEOF
+
+          # ---- res/drawable/widget_card_shadow_pill.xml ----
+          cat > "$RES_DIR/drawable/widget_card_shadow_pill.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#22000000" />
+              <corners android:radius="999dp" />
+          </shape>
+          XMLEOF
+
+          # ---- res/drawable/widget_card_shape_sharp.xml (square-corner card shape option) ----
+          cat > "$RES_DIR/drawable/widget_card_shape_sharp.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#FFFFFF" />
+              <corners android:radius="4dp" />
+          </shape>
+          XMLEOF
+
+          # ---- res/drawable/widget_card_shadow_sharp.xml ----
+          cat > "$RES_DIR/drawable/widget_card_shadow_sharp.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#22000000" />
+              <corners android:radius="4dp" />
+          </shape>
+          XMLEOF
+
           # ---- res/xml/widget_checklist_info.xml ----
-          cat > "$RES_DIR/xml/widget_checklist_info.xml" <<'XMLEOF'
+          cat > "$RES_DIR/xml/widget_checklist_info.xml" <<XMLEOF
           <?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
               android:minWidth="250dp"
@@ -724,11 +1501,13 @@ jobs:
               android:initialLayout="@layout/widget_checklist"
               android:previewImage="@mipmap/ic_launcher"
               android:resizeMode="horizontal|vertical"
+              android:configure="${APP_ID}.widget.WidgetConfigActivity"
+              android:widgetFeatures="reconfigurable"
               android:widgetCategory="home_screen" />
           XMLEOF
 
           # ---- res/xml/widget_day_progress_info.xml ----
-          cat > "$RES_DIR/xml/widget_day_progress_info.xml" <<'XMLEOF'
+          cat > "$RES_DIR/xml/widget_day_progress_info.xml" <<XMLEOF
           <?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
               android:minWidth="110dp"
@@ -737,6 +1516,8 @@ jobs:
               android:initialLayout="@layout/widget_day_progress"
               android:previewImage="@mipmap/ic_launcher"
               android:resizeMode="horizontal|vertical"
+              android:configure="${APP_ID}.widget.WidgetConfigActivity"
+              android:widgetFeatures="reconfigurable"
               android:widgetCategory="home_screen" />
           XMLEOF
 
@@ -785,9 +1566,18 @@ jobs:
                   '    <receiver android:name="' + app_id + '.widget.DayProgressWidgetProvider" android:exported="true">\n'
                   '        <intent-filter>\n'
                   '            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
+                  '            <action android:name="' + app_id + '.ACTION_WIDGET_TICK" />\n'
                   '        </intent-filter>\n'
                   '        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_day_progress_info" />\n'
                   '    </receiver>\n'
+                  '    <activity android:name="' + app_id + '.widget.WidgetConfigActivity"\n'
+                  '        android:exported="true"\n'
+                  '        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">\n'
+                  '        <intent-filter>\n'
+                  '            <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />\n'
+                  '            <category android:name="android.intent.category.DEFAULT" />\n'
+                  '        </intent-filter>\n'
+                  '    </activity>\n'
               )
               src = src.replace('</application>', receivers + '</application>', 1)
 
