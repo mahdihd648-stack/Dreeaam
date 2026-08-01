@@ -131,6 +131,41 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
+      - name: Set app version (versionCode/versionName) from VERSION file
+        # مایکت (و گوگل‌پلی) رد می‌کنن اگه ورژن آپلودی از آخرین نسخه‌ی تأییدشده بالاتر
+        # نباشه. تا قبل از این، این ورک‌فلو اصلاً دست به versionCode/versionName نمی‌زد،
+        # پس هر بار همون مقدار پیش‌فرضِ Capacitor (versionCode=1, versionName="1.0")
+        # می‌موند — دقیقاً برای همین هر بیلد جدید رد می‌شد (حتی وقتی فایل VERSION تو ریپو
+        # عوض شده بود، چون هیچ‌کس این عدد رو واقعاً به build.gradle نمی‌رسوند).
+        # از این به بعد: versionName = دقیقاً همون متن فایل VERSION (مثلاً "1.5")، و
+        # versionCode = major*10000 + minor*100 + patch، که تا وقتی VERSION رو ببری بالا
+        # همیشه از قبلی بزرگ‌تره. اگه مایکت بازم رد کرد، دقیق عددی که تو پنلش به‌عنوان
+        # «آخرین نسخه‌ی پذیرفته‌شده» نشون می‌ده رو بگو تا offset این محاسبه رو باهاش هماهنگ کنم.
+        run: |
+          APP_GRADLE="android/app/build.gradle"
+          python3 - "$APP_GRADLE" <<'PYEOF'
+          import sys, re
+          path = sys.argv[1]
+          with open('VERSION', encoding='utf-8') as f:
+              version_name = f.read().strip()
+          parts = (version_name.split('.') + ['0','0'])[:3]
+          major, minor, patch = (int(p) if p.isdigit() else 0 for p in parts)
+          version_code = major*10000 + minor*100 + patch
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+          new_src, n1 = re.subn(r'versionCode\s+\d+', f'versionCode {version_code}', src, count=1)
+          if n1 == 0:
+              print(f"::error::could not find a 'versionCode' line in {path}")
+              sys.exit(1)
+          new_src, n2 = re.subn(r'versionName\s+"[^"]*"', f'versionName "{version_name}"', new_src, count=1)
+          if n2 == 0:
+              print(f"::error::could not find a 'versionName' line in {path}")
+              sys.exit(1)
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(new_src)
+          print(f"Set versionName={version_name!r}, versionCode={version_code}")
+          PYEOF
+
       - name: Generate app icon manually (legacy + adaptive, from repo-root icon)
         # Builds every launcher icon file by hand with ImageMagick instead of relying on
         # @capacitor/assets' own file discovery. Produces:
