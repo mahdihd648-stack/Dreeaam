@@ -10,7 +10,8 @@
     "@capacitor/android": "latest",
     "@capacitor/browser": "latest",
     "@capacitor/app": "latest",
-    "@capacitor/local-notifications": "latest"
+    "@capacitor/local-notifications": "latest",
+    "@capacitor/share": "latest"
   },
   "devDependencies": {
     "@capacitor/cli": "latest"
