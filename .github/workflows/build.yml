@@ -114,6 +114,10 @@ jobs:
         run: |
           mkdir -p www
           cp index.html www/index.html
+          # index.html با <script defer src="app.js"> اسکریپت اصلی رو جدا لود می‌کنه —
+          # بدون این خط، www/app.js اصلاً وجود نداره و اپ اندروید یه صفحه‌ی کاملاً سفید
+          # و بدون جاوااسکریپت می‌شه (نه فقط باگ سوییچ تب، هیچی کار نمی‌کنه).
+          [ -f app.js ] && cp app.js www/app.js || { echo "::error::app.js not found in repo root"; exit 1; }
           [ -f manifest.json ] && cp manifest.json www/manifest.json || true
           [ -f assets/icon-192.png ] && cp assets/icon-192.png www/icon-192.png || { [ -f icon-192.png ] && cp icon-192.png www/icon-192.png || true; }
           [ -f assets/icon-512.png ] && cp assets/icon-512.png www/icon-512.png || { [ -f icon-512.png ] && cp icon-512.png www/icon-512.png || true; }
@@ -513,9 +517,17 @@ jobs:
                   DATA.put("red",      new String[]{"#e6231e","#ff5b52","#fffbfa","#3d1210","#a3827e"});
                   DATA.put("white",    new String[]{"#2b2b2b","#555555","#ffffff","#1a1a1a","#8a8a8a"});
                   DATA.put("gray",     new String[]{"#6b7280","#9aa1ab","#fbfbfc","#26282b","#8b8f95"});
+                  DATA.put("sunset",   new String[]{"#ff6b6b","#ffa06b","#fff8f5","#4a2318","#ab8f82"});
+                  DATA.put("gold",     new String[]{"#d4a017","#f0c14b","#fffdf5","#3d3115","#a89a72"});
+                  DATA.put("teal",     new String[]{"#17a2a8","#4fc9cd","#f5fdfd","#17393b","#7fa3a5"});
+                  DATA.put("plum",     new String[]{"#8e3b7a","#b563a0","#fdf6fb","#3a1730","#a687a0"});
+                  DATA.put("coral",    new String[]{"#ff6f61","#ff9589","#fff9f8","#4a231e","#ab8d88"});
+                  DATA.put("sky",      new String[]{"#4aa8e0","#7ec4ec","#f7fcff","#1c3548","#7fa0b0"});
+                  DATA.put("olive",    new String[]{"#7a8450","#9fab72","#fafbf5","#33361f","#939c7c"});
+                  DATA.put("noir",     new String[]{"#f2c94c","#e0a93a","#121212","#f5f5f0","#8a8a86"});
               }
               static final String[] NAMES = DATA.keySet().toArray(new String[0]);
-              static final String[] LABELS_FA = { "برند","گرم","اقیانوسی","جنگلی","تیره","رز","لاواندر","نعنایی","نیمه‌شب","قرمز","سفید","طوسی" };
+              static final String[] LABELS_FA = { "برند","گرم","اقیانوسی","جنگلی","تیره","رز","لاواندر","نعنایی","نیمه‌شب","قرمز","سفید","طوسی","غروب","طلایی","فیروزه‌ای","آلویی","مرجانی","آسمانی","زیتونی","مشکی شیک" };
 
               /** Returns {accent, accent2, card, text, muted} as parsed ARGB ints. */
               static int[] get(String name) {
@@ -547,10 +559,15 @@ jobs:
               final String bg;        // "opaque" | "glass" | "transparent"
               final String shape;     // "rounded" | "pill" | "sharp" (checklist widget)
               final String thickness; // "thin" | "medium" | "thick" (day-progress widget)
+              final String pattern;   // "none" | "dots" | "stripes" | "grid" | "waves" — decorative overlay tinted with accent2
+              final boolean showHour;   // day-progress widget only — off by default, costs extra battery when on
+              final boolean showMinute; // day-progress widget only — off by default, costs extra battery when on
+              final String clockStyle;  // "simple" | "digital" | "capsule" — how the hour/minute text looks
 
-              private WidgetStyle(int accent, int accent2, int card, int text, int muted, String bg, String shape, String thickness) {
+              private WidgetStyle(int accent, int accent2, int card, int text, int muted, String bg, String shape, String thickness, String pattern, boolean showHour, boolean showMinute, String clockStyle) {
                   this.accent = accent; this.accent2 = accent2; this.card = card; this.text = text; this.muted = muted;
-                  this.bg = bg; this.shape = shape; this.thickness = thickness;
+                  this.bg = bg; this.shape = shape; this.thickness = thickness; this.pattern = pattern;
+                  this.showHour = showHour; this.showMinute = showMinute; this.clockStyle = clockStyle;
               }
 
               static int safeColor(String hex, int fallback) {
@@ -577,7 +594,19 @@ jobs:
                   String bg = prefs.getString(prefKey(widgetId, "bg"), "opaque");
                   String shape = prefs.getString(prefKey(widgetId, "shape"), "rounded");
                   String thickness = prefs.getString(prefKey(widgetId, "thickness"), "medium");
-                  return new WidgetStyle(accent, accent2, card, text, muted, bg, shape, thickness);
+                  String pattern = prefs.getString(prefKey(widgetId, "pattern"), "none");
+                  boolean showHour = prefs.getBoolean(prefKey(widgetId, "showHour"), false);
+                  boolean showMinute = prefs.getBoolean(prefKey(widgetId, "showMinute"), false);
+                  String clockStyle = prefs.getString(prefKey(widgetId, "clockStyle"), "simple");
+                  return new WidgetStyle(accent, accent2, card, text, muted, bg, shape, thickness, pattern, showHour, showMinute, clockStyle);
+              }
+
+              /** Resolves a pattern key to its drawable resource id, or 0 for "none". */
+              static int patternDrawableRes(Context context, String pattern) {
+                  String appId = context.getPackageName();
+                  if ("none".equals(pattern) || pattern == null) return 0;
+                  int id = context.getResources().getIdentifier("widget_pattern_" + pattern, "drawable", appId);
+                  return id;
               }
           }
           JAVAEOF
@@ -606,9 +635,6 @@ jobs:
 
               public static final String ACTION_TOGGLE = "${APP_ID}.ACTION_TOGGLE_TASK";
 
-              private static final int[] ROW_IDS = { R.id.row0, R.id.row1, R.id.row2, R.id.row3 };
-              private static final int[] LABEL_IDS = { R.id.label0, R.id.label1, R.id.label2, R.id.label3 };
-              private static final int[] CHECK_IDS = { R.id.check0, R.id.check1, R.id.check2, R.id.check3 };
 
               public static void refreshAll(Context context) {
                   AppWidgetManager mgr = AppWidgetManager.getInstance(context);
@@ -644,35 +670,46 @@ jobs:
                       views.setInt(R.id.cardBg, "setImageAlpha", glass ? 165 : 255);
                       views.setInt(R.id.cardShadow, "setImageAlpha", glass ? 90 : 140);
                   }
-                  views.setInt(R.id.title, "setTextColor", st.text);
 
-                  try {
-                      JSONArray tasks = new JSONArray(prefs.getString(TaskWidgetPlugin.KEY_TASKS, "[]"));
-                      for (int i = 0; i < 4; i++) {
-                          if (i < tasks.length()) {
-                              JSONObject t = tasks.getJSONObject(i);
-                              int taskId = t.optInt("id", i);
-                              views.setViewVisibility(ROW_IDS[i], View.VISIBLE);
-                              views.setTextViewText(LABEL_IDS[i], t.optString("label"));
-                              views.setInt(LABEL_IDS[i], "setTextColor", st.text);
-                              boolean done = t.optBoolean("done", false);
-                              views.setImageViewResource(CHECK_IDS[i], done ? R.drawable.widget_check_on : R.drawable.widget_check_off);
-                              views.setInt(CHECK_IDS[i], "setColorFilter", done ? st.accent : st.muted);
-
-                              Intent toggleIntent = new Intent(context, ChecklistWidgetProvider.class);
-                              toggleIntent.setAction(ACTION_TOGGLE);
-                              toggleIntent.putExtra("task_id", taskId);
-                              PendingIntent pi = PendingIntent.getBroadcast(context, taskId, toggleIntent,
-                                      PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-                              views.setOnClickPendingIntent(ROW_IDS[i], pi);
-                          } else {
-                              views.setViewVisibility(ROW_IDS[i], View.GONE);
-                          }
-                      }
-                  } catch (Exception e) {
-                      // leave default/empty state if tasks_json is malformed
+                  // Decorative background pattern (dots/stripes/grid/waves), tinted with the
+                  // secondary theme color at low alpha so it reads as a subtle texture rather
+                  // than competing with the task text. Hidden entirely when the card itself is
+                  // hidden (transparent bg) or when the user picked "none".
+                  int patternRes = "transparent".equals(st.bg) ? 0 : WidgetStyle.patternDrawableRes(context, st.pattern);
+                  if (patternRes != 0) {
+                      views.setViewVisibility(R.id.cardPattern, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardPattern, patternRes);
+                      views.setInt(R.id.cardPattern, "setColorFilter", st.accent2);
+                      views.setInt(R.id.cardPattern, "setImageAlpha", 46);
+                  } else {
+                      views.setViewVisibility(R.id.cardPattern, View.GONE);
                   }
+
+                  views.setInt(R.id.title, "setTextColor", st.text);
+                  views.setInt(R.id.emptyView, "setTextColor", st.muted);
+
+                  // Scrollable task list: the row views themselves are built on demand by
+                  // ChecklistRemoteViewsFactory (one instance per widgetId), so any number of
+                  // tasks can be scrolled through instead of being capped at a handful of rows.
+                  Intent adapterIntent = new Intent(context, ChecklistRemoteViewsService.class);
+                  adapterIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
+                  // Distinct data Uri so each widget instance's RemoteViews isn't treated as an
+                  // identical/cached intent by the framework (a well-known RemoteViewsService gotcha).
+                  adapterIntent.setData(android.net.Uri.parse("widget://checklist/" + widgetId));
+                  views.setRemoteAdapter(R.id.checklistListView, adapterIntent);
+                  views.setEmptyView(R.id.checklistListView, R.id.emptyView);
+
+                  // One shared click template for every row; each row supplies its own task_id via
+                  // a fill-in intent (RemoteViewsFactory#getViewAt). Requires FLAG_MUTABLE so the
+                  // system is allowed to merge that fill-in intent's extras in at click time.
+                  Intent toggleTemplate = new Intent(context, ChecklistWidgetProvider.class);
+                  toggleTemplate.setAction(ACTION_TOGGLE);
+                  PendingIntent togglePi = PendingIntent.getBroadcast(context, widgetId, toggleTemplate,
+                          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
+                  views.setPendingIntentTemplate(R.id.checklistListView, togglePi);
+
                   mgr.updateAppWidget(widgetId, views);
+                  mgr.notifyAppWidgetViewDataChanged(widgetId, R.id.checklistListView);
               }
 
               @Override
@@ -712,6 +749,99 @@ jobs:
           }
           JAVAEOF
 
+          # ---- ChecklistRemoteViewsService.java (powers the scrollable task list — builds one
+          #      row per task on demand instead of a fixed handful of rows, so the list can hold
+          #      any number of tasks and be swiped through) ----
+          cat > "$WIDGET_DIR/ChecklistRemoteViewsService.java" <<JAVAEOF
+          package ${APP_ID}.widget;
+
+          import ${APP_ID}.R;
+          import android.appwidget.AppWidgetManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.widget.RemoteViews;
+          import android.widget.RemoteViewsService;
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+
+          public class ChecklistRemoteViewsService extends RemoteViewsService {
+              @Override
+              public RemoteViewsFactory onGetViewFactory(Intent intent) {
+                  return new Factory(getApplicationContext(), intent);
+              }
+
+              private static class Factory implements RemoteViewsFactory {
+                  private final Context context;
+                  private final int widgetId;
+                  private JSONArray tasks = new JSONArray();
+                  private WidgetStyle style;
+
+                  Factory(Context context, Intent intent) {
+                      this.context = context;
+                      this.widgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);
+                  }
+
+                  @Override
+                  public void onCreate() { reload(); }
+
+                  @Override
+                  public void onDataSetChanged() { reload(); }
+
+                  private void reload() {
+                      style = WidgetStyle.resolve(context, widgetId);
+                      SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                      try {
+                          tasks = new JSONArray(prefs.getString(TaskWidgetPlugin.KEY_TASKS, "[]"));
+                      } catch (Exception e) {
+                          tasks = new JSONArray();
+                      }
+                  }
+
+                  @Override
+                  public void onDestroy() { tasks = new JSONArray(); }
+
+                  @Override
+                  public int getCount() { return tasks.length(); }
+
+                  @Override
+                  public RemoteViews getViewAt(int position) {
+                      RemoteViews item = new RemoteViews(context.getPackageName(), R.layout.widget_checklist_item);
+                      try {
+                          JSONObject t = tasks.getJSONObject(position);
+                          int taskId = t.optInt("id", position);
+                          boolean done = t.optBoolean("done", false);
+                          item.setTextViewText(R.id.itemLabel, t.optString("label"));
+                          item.setInt(R.id.itemLabel, "setTextColor", style.text);
+                          item.setImageViewResource(R.id.itemCheck, done ? R.drawable.widget_check_on : R.drawable.widget_check_off);
+                          item.setInt(R.id.itemCheck, "setColorFilter", done ? style.accent : style.muted);
+
+                          // Only the task_id differs row to row — merged into the provider's shared
+                          // PendingIntentTemplate at click time.
+                          Intent fillIn = new Intent();
+                          fillIn.putExtra("task_id", taskId);
+                          item.setOnClickFillInIntent(R.id.itemRow, fillIn);
+                      } catch (Exception e) {
+                          // leave a blank row rather than crash the whole list
+                      }
+                      return item;
+                  }
+
+                  @Override
+                  public RemoteViews getLoadingView() { return null; }
+
+                  @Override
+                  public int getViewTypeCount() { return 1; }
+
+                  @Override
+                  public long getItemId(int position) { return position; }
+
+                  @Override
+                  public boolean hasStableIds() { return true; }
+              }
+          }
+          JAVAEOF
+
           # ---- DayProgressWidgetProvider.java ----
           cat > "$WIDGET_DIR/DayProgressWidgetProvider.java" <<JAVAEOF
           package ${APP_ID}.widget;
@@ -727,6 +857,7 @@ jobs:
           import android.content.SharedPreferences;
           import android.graphics.Bitmap;
           import android.graphics.Canvas;
+          import android.graphics.Color;
           import android.graphics.Paint;
           import android.graphics.RectF;
           import android.graphics.SweepGradient;
@@ -750,8 +881,11 @@ jobs:
 
               // Android batches/limits how often a widget can auto-refresh in the background (there's
               // no way to get a true once-a-second tick without a foreground service and heavy battery
-              // cost) — this inexact repeating alarm gives a reliable ~15 min cadence, which is 96 steps
-              // across the day and reads as smooth motion on a ring this size.
+              // cost) — this inexact repeating alarm gives a ~15 min cadence by default, which is 96
+              // steps across the day and reads as smooth motion on a ring this size. If the user turns
+              // on the live minute display (opt-in, see WidgetConfigActivity), we switch to a ~1 min
+              // cadence just for that — that's the extra battery cost the config screen warns about,
+              // so it only applies while at least one placed widget actually asked for it.
               private static PendingIntent tickIntent(Context context) {
                   Intent intent = new Intent(context, DayProgressWidgetProvider.class);
                   intent.setAction(ACTION_TICK);
@@ -759,14 +893,34 @@ jobs:
                           PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
               }
 
+              private static boolean anyWidgetWantsMinuteTick(Context context) {
+                  try {
+                      AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+                      int[] ids = mgr.getAppWidgetIds(new ComponentName(context, DayProgressWidgetProvider.class));
+                      SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                      for (int id : ids) {
+                          if (prefs.getBoolean(WidgetStyle.prefKey(id, "showMinute"), false)) return true;
+                      }
+                  } catch (Exception e) { /* best-effort — falls back to the cheaper cadence */ }
+                  return false;
+              }
+
               private static void scheduleTick(Context context) {
                   try {
                       AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
                       if (am != null) {
+                          long interval = anyWidgetWantsMinuteTick(context) ? 60_000L : AlarmManager.INTERVAL_FIFTEEN_MINUTES;
                           am.setInexactRepeating(AlarmManager.RTC, System.currentTimeMillis(),
-                                  AlarmManager.INTERVAL_FIFTEEN_MINUTES, tickIntent(context));
+                                  interval, tickIntent(context));
                       }
                   } catch (Exception e) { /* best-effort */ }
+              }
+
+              // Called from WidgetConfigActivity right after the user toggles "نمایش دقیقه" so the
+              // tick cadence changes immediately instead of waiting for the next onUpdate cycle.
+              static void rescheduleTick(Context context) {
+                  cancelTick(context);
+                  scheduleTick(context);
               }
 
               private static void cancelTick(Context context) {
@@ -849,10 +1003,57 @@ jobs:
                       views.setInt(R.id.cardShadow, "setImageAlpha", glass ? 90 : 140);
                   }
 
+                  int patternRes = "transparent".equals(st.bg) ? 0 : WidgetStyle.patternDrawableRes(context, st.pattern);
+                  if (patternRes != 0) {
+                      views.setViewVisibility(R.id.cardPattern, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardPattern, patternRes);
+                      views.setInt(R.id.cardPattern, "setColorFilter", st.accent2);
+                      views.setInt(R.id.cardPattern, "setImageAlpha", 46);
+                  } else {
+                      views.setViewVisibility(R.id.cardPattern, View.GONE);
+                  }
+
                   int track = (st.muted & 0x00FFFFFF) | 0x33000000;
                   views.setImageViewBitmap(R.id.ring, ringBitmap(pct, 96, context, st.accent, st.accent2, track, strokeFactor));
                   views.setTextViewText(R.id.dayLabel, "روز " + day);
                   views.setInt(R.id.dayLabel, "setTextColor", st.text);
+
+                  if (st.showHour || st.showMinute) {
+                      String clockText;
+                      if (st.showHour && st.showMinute) {
+                          clockText = String.format(java.util.Locale.US, "%02d:%02d", now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE));
+                      } else if (st.showHour) {
+                          clockText = String.format(java.util.Locale.US, "%02d", now.get(Calendar.HOUR_OF_DAY));
+                      } else {
+                          clockText = String.format(java.util.Locale.US, "%02d", now.get(Calendar.MINUTE));
+                      }
+                      views.setViewVisibility(R.id.clockLabelWrap, View.VISIBLE);
+                      views.setTextViewText(R.id.clockLabel, clockText);
+                      if ("capsule".equals(st.clockStyle)) {
+                          // Small tinted pill behind the text, same recolor trick as cardBg.
+                          views.setViewVisibility(R.id.clockBadgeBg, View.VISIBLE);
+                          views.setInt(R.id.clockBadgeBg, "setColorFilter", st.accent);
+                          views.setInt(R.id.clockBadgeBg, "setImageAlpha", 210);
+                          views.setInt(R.id.clockLabel, "setTextColor", Color.WHITE);
+                          views.setFloat(R.id.clockLabel, "setLetterSpacing", 0f);
+                          views.setFloat(R.id.clockLabel, "setTextSize", 9f);
+                      } else if ("digital".equals(st.clockStyle)) {
+                          // Letter-spaced + accent-colored, for a spaced-out "LED display" feel.
+                          views.setViewVisibility(R.id.clockBadgeBg, View.GONE);
+                          views.setInt(R.id.clockLabel, "setTextColor", st.accent);
+                          views.setFloat(R.id.clockLabel, "setLetterSpacing", 0.18f);
+                          views.setFloat(R.id.clockLabel, "setTextSize", 9.5f);
+                      } else {
+                          // "simple" (default): small and muted, no decoration.
+                          views.setViewVisibility(R.id.clockBadgeBg, View.GONE);
+                          views.setInt(R.id.clockLabel, "setTextColor", st.muted);
+                          views.setFloat(R.id.clockLabel, "setLetterSpacing", 0f);
+                          views.setFloat(R.id.clockLabel, "setTextSize", 9f);
+                      }
+                  } else {
+                      views.setViewVisibility(R.id.clockLabelWrap, View.GONE);
+                  }
+
                   mgr.updateAppWidget(widgetId, views);
               }
           }
@@ -880,6 +1081,7 @@ jobs:
           import android.widget.Button;
           import android.widget.CompoundButton;
           import android.widget.FrameLayout;
+          import android.widget.ImageView;
           import android.widget.LinearLayout;
           import android.widget.Switch;
           import android.widget.TextView;
@@ -898,10 +1100,16 @@ jobs:
               private String bg = "opaque";
               private String shape = "rounded";
               private String thickness = "medium";
+              private String pattern = "none";
+              private boolean showHour = false;
+              private boolean showMinute = false;
+              private String clockStyle = "simple";
 
-              private LinearLayout themeSwatchRow, bgOptionRow, shapeOptionRow, thicknessOptionRow;
+              private LinearLayout themeSwatchRow, bgOptionRow, shapeOptionRow, thicknessOptionRow, patternOptionRow;
+              private LinearLayout showHourRow, showMinuteRow, clockStyleOptionRow;
+              private TextView clockBatteryHint, clockStyleLabel;
               private FrameLayout previewHolder;
-              private Switch followThemeSwitch;
+              private Switch followThemeSwitch, showHourSwitch, showMinuteSwitch;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
@@ -930,28 +1138,50 @@ jobs:
                   bg = prefs.getString(WidgetStyle.prefKey(appWidgetId, "bg"), "opaque");
                   shape = prefs.getString(WidgetStyle.prefKey(appWidgetId, "shape"), "rounded");
                   thickness = prefs.getString(WidgetStyle.prefKey(appWidgetId, "thickness"), "medium");
+                  pattern = prefs.getString(WidgetStyle.prefKey(appWidgetId, "pattern"), "none");
+                  showHour = prefs.getBoolean(WidgetStyle.prefKey(appWidgetId, "showHour"), false);
+                  showMinute = prefs.getBoolean(WidgetStyle.prefKey(appWidgetId, "showMinute"), false);
+                  clockStyle = prefs.getString(WidgetStyle.prefKey(appWidgetId, "clockStyle"), "simple");
 
                   previewHolder = findViewById(R.id.previewHolder);
                   themeSwatchRow = findViewById(R.id.themeSwatchRow);
                   bgOptionRow = findViewById(R.id.bgOptionRow);
                   shapeOptionRow = findViewById(R.id.shapeOptionRow);
                   thicknessOptionRow = findViewById(R.id.thicknessOptionRow);
+                  patternOptionRow = findViewById(R.id.patternOptionRow);
                   followThemeSwitch = findViewById(R.id.followThemeSwitch);
+                  showHourRow = findViewById(R.id.showHourRow);
+                  showMinuteRow = findViewById(R.id.showMinuteRow);
+                  showHourSwitch = findViewById(R.id.showHourSwitch);
+                  showMinuteSwitch = findViewById(R.id.showMinuteSwitch);
+                  clockBatteryHint = findViewById(R.id.clockBatteryHint);
+                  clockStyleOptionRow = findViewById(R.id.clockStyleOptionRow);
+                  clockStyleLabel = findViewById(R.id.clockStyleLabel);
                   TextView shapeLabel = findViewById(R.id.shapeLabel);
                   TextView thicknessLabel = findViewById(R.id.thicknessLabel);
 
                   if (isChecklist) {
                       thicknessOptionRow.setVisibility(View.GONE);
                       thicknessLabel.setVisibility(View.GONE);
+                      showHourRow.setVisibility(View.GONE);
+                      showMinuteRow.setVisibility(View.GONE);
+                      clockBatteryHint.setVisibility(View.GONE);
+                      clockStyleOptionRow.setVisibility(View.GONE);
+                      clockStyleLabel.setVisibility(View.GONE);
                   } else {
                       shapeOptionRow.setVisibility(View.GONE);
                       shapeLabel.setVisibility(View.GONE);
                   }
 
                   followThemeSwitch.setChecked(followTheme);
+                  showHourSwitch.setChecked(showHour);
+                  showMinuteSwitch.setChecked(showMinute);
                   buildThemeSwatches();
                   buildBgOptions();
                   if (isChecklist) buildShapeOptions(); else buildThicknessOptions();
+                  buildPatternOptions();
+                  buildClockStyleOptions();
+                  updateClockStyleRowVisibility();
                   updateSwatchEnabled();
                   renderPreview();
 
@@ -959,6 +1189,20 @@ jobs:
                       @Override public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                           followTheme = isChecked;
                           updateSwatchEnabled();
+                          renderPreview();
+                      }
+                  });
+                  showHourSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                      @Override public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                          showHour = isChecked;
+                          updateClockStyleRowVisibility();
+                          renderPreview();
+                      }
+                  });
+                  showMinuteSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                      @Override public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                          showMinute = isChecked;
+                          updateClockStyleRowVisibility();
                           renderPreview();
                       }
                   });
@@ -974,6 +1218,15 @@ jobs:
                   for (int i = 0; i < themeSwatchRow.getChildCount(); i++) {
                       themeSwatchRow.getChildAt(i).setEnabled(!followTheme);
                   }
+              }
+
+              // The clock-appearance row only makes sense once the user actually turned the
+              // hour/minute display on — keep it out of the way otherwise.
+              private void updateClockStyleRowVisibility() {
+                  if (isChecklist) return;
+                  int vis = (showHour || showMinute) ? View.VISIBLE : View.GONE;
+                  clockStyleOptionRow.setVisibility(vis);
+                  clockStyleLabel.setVisibility(vis);
               }
 
               private int dp(int v) {
@@ -1070,6 +1323,34 @@ jobs:
                   }
               }
 
+              private void buildPatternOptions() {
+                  patternOptionRow.removeAllViews();
+                  String[] keys = { "none", "dots", "stripes", "grid", "waves", "chevron", "circles", "confetti", "crosshatch", "hearts" };
+                  String[] labels = { "بدون طرح", "نقطه‌ای", "راه‌راه", "شطرنجی", "موجی", "زیگزاگ", "حبابی", "کانفتی", "شبکه مورب", "قلبی" };
+                  for (int i = 0; i < keys.length; i++) {
+                      final String key = keys[i];
+                      Button b = pillButton(labels[i], key.equals(pattern));
+                      b.setOnClickListener(new View.OnClickListener() {
+                          @Override public void onClick(View v) { pattern = key; buildPatternOptions(); renderPreview(); }
+                      });
+                      patternOptionRow.addView(b);
+                  }
+              }
+
+              private void buildClockStyleOptions() {
+                  clockStyleOptionRow.removeAllViews();
+                  String[] keys = { "simple", "digital", "capsule" };
+                  String[] labels = { "ساده", "دیجیتال", "کپسولی" };
+                  for (int i = 0; i < keys.length; i++) {
+                      final String key = keys[i];
+                      Button b = pillButton(labels[i], key.equals(clockStyle));
+                      b.setOnClickListener(new View.OnClickListener() {
+                          @Override public void onClick(View v) { clockStyle = key; buildClockStyleOptions(); renderPreview(); }
+                      });
+                      clockStyleOptionRow.addView(b);
+                  }
+              }
+
               private int[] currentAppColors() {
                   SharedPreferences prefs = getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
                   return new int[]{
@@ -1084,7 +1365,7 @@ jobs:
               private void renderPreview() {
                   previewHolder.removeAllViews();
                   int[] colors = followTheme ? currentAppColors() : WidgetThemeCatalog.get(themeName);
-                  int accent = colors[0], card = colors[2], text = colors[3], muted = colors[4];
+                  int accent = colors[0], accent2 = colors[1], card = colors[2], text = colors[3], muted = colors[4];
 
                   FrameLayout.LayoutParams full = new FrameLayout.LayoutParams(
                           ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
@@ -1099,6 +1380,16 @@ jobs:
                       cardView.setBackground(shapeDrawable);
                       cardView.setAlpha("glass".equals(bg) ? 0.65f : 1f);
                       previewHolder.addView(cardView, full);
+
+                      int patRes = WidgetStyle.patternDrawableRes(this, pattern);
+                      if (patRes != 0) {
+                          ImageView patView = new ImageView(this);
+                          patView.setImageResource(patRes);
+                          patView.setScaleType(ImageView.ScaleType.FIT_XY);
+                          patView.setColorFilter(accent2);
+                          patView.setImageAlpha(46);
+                          previewHolder.addView(patView, full);
+                      }
                   }
 
                   if (isChecklist) {
@@ -1134,14 +1425,42 @@ jobs:
                       }
                       previewHolder.addView(content, full);
                   } else {
+                      LinearLayout dayCol = new LinearLayout(this);
+                      dayCol.setOrientation(LinearLayout.VERTICAL);
+                      dayCol.setGravity(Gravity.CENTER);
                       TextView dayText = new TextView(this);
                       dayText.setText("روز ۱۲");
                       dayText.setTextColor(text);
                       dayText.setTypeface(null, Typeface.BOLD);
                       dayText.setTextSize(15);
+                      dayCol.addView(dayText);
+                      if (showHour || showMinute) {
+                          String clockStr = showHour && showMinute ? "12:34" : showHour ? "12" : "34";
+                          TextView clockText = new TextView(this);
+                          clockText.setText(clockStr);
+                          clockText.setTextSize(9);
+                          LinearLayout.LayoutParams clockLp = new LinearLayout.LayoutParams(
+                                  LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                          clockLp.topMargin = dp(1);
+                          if ("capsule".equals(clockStyle)) {
+                              GradientDrawable pill = new GradientDrawable();
+                              pill.setShape(GradientDrawable.RECTANGLE);
+                              pill.setCornerRadius(dp(999));
+                              pill.setColor(accent);
+                              clockText.setBackground(pill);
+                              clockText.setPadding(dp(6), dp(1), dp(6), dp(1));
+                              clockText.setTextColor(Color.WHITE);
+                          } else if ("digital".equals(clockStyle)) {
+                              clockText.setLetterSpacing(0.18f);
+                              clockText.setTextColor(accent);
+                          } else {
+                              clockText.setTextColor(muted);
+                          }
+                          dayCol.addView(clockText, clockLp);
+                      }
                       FrameLayout.LayoutParams centerLp = new FrameLayout.LayoutParams(
                               ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
-                      previewHolder.addView(dayText, centerLp);
+                      previewHolder.addView(dayCol, centerLp);
                   }
               }
 
@@ -1153,12 +1472,19 @@ jobs:
                   editor.putString(WidgetStyle.prefKey(appWidgetId, "bg"), bg);
                   editor.putString(WidgetStyle.prefKey(appWidgetId, "shape"), shape);
                   editor.putString(WidgetStyle.prefKey(appWidgetId, "thickness"), thickness);
+                  editor.putString(WidgetStyle.prefKey(appWidgetId, "pattern"), pattern);
+                  editor.putBoolean(WidgetStyle.prefKey(appWidgetId, "showHour"), showHour);
+                  editor.putBoolean(WidgetStyle.prefKey(appWidgetId, "showMinute"), showMinute);
+                  editor.putString(WidgetStyle.prefKey(appWidgetId, "clockStyle"), clockStyle);
                   editor.apply();
 
                   if (isChecklist) {
                       ChecklistWidgetProvider.refreshOne(this, appWidgetId);
                   } else {
                       DayProgressWidgetProvider.refreshOne(this, appWidgetId);
+                      // Applies the battery-cost cadence change (see the config screen's warning
+                      // text) immediately, instead of waiting for the next background onUpdate.
+                      DayProgressWidgetProvider.rescheduleTick(this);
                   }
 
                   Intent result = new Intent();
@@ -1196,6 +1522,15 @@ jobs:
                   android:src="@drawable/widget_card_shape"
                   android:scaleType="fitXY" />
 
+              <!-- Optional decorative pattern (dots/stripes/grid/waves), drawn on top of cardBg
+                   and tinted with the secondary theme color at runtime. Gone by default. -->
+              <ImageView
+                  android:id="@+id/cardPattern"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:scaleType="fitXY"
+                  android:visibility="gone" />
+
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
@@ -1214,44 +1549,66 @@ jobs:
                       android:textSize="14sp"
                       android:paddingBottom="8dp" />
 
-                  <LinearLayout android:id="@+id/row0" android:layout_width="match_parent" android:layout_height="wrap_content"
-                      android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="5dp" android:paddingBottom="5dp">
-                      <ImageView android:id="@+id/check0" android:layout_width="20dp" android:layout_height="20dp"
-                          android:src="@drawable/widget_check_off" android:layout_marginEnd="10dp" />
-                      <TextView android:id="@+id/label0" android:layout_width="0dp" android:layout_weight="1"
-                          android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
-                          android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
-                  </LinearLayout>
+                  <!-- Real scrollable task list (backed by ChecklistRemoteViewsService), so any
+                       number of tasks can be swiped through — not capped at a fixed row count,
+                       and resizing the widget taller simply reveals more rows at once. -->
+                  <ListView
+                      android:id="@+id/checklistListView"
+                      android:layout_width="match_parent"
+                      android:layout_height="0dp"
+                      android:layout_weight="1"
+                      android:divider="@null"
+                      android:dividerHeight="0dp"
+                      android:scrollbars="none"
+                      android:listSelector="@android:color/transparent"
+                      android:cacheColorHint="#00000000" />
 
-                  <LinearLayout android:id="@+id/row1" android:layout_width="match_parent" android:layout_height="wrap_content"
-                      android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="5dp" android:paddingBottom="5dp">
-                      <ImageView android:id="@+id/check1" android:layout_width="20dp" android:layout_height="20dp"
-                          android:src="@drawable/widget_check_off" android:layout_marginEnd="10dp" />
-                      <TextView android:id="@+id/label1" android:layout_width="0dp" android:layout_weight="1"
-                          android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
-                          android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
-                  </LinearLayout>
-
-                  <LinearLayout android:id="@+id/row2" android:layout_width="match_parent" android:layout_height="wrap_content"
-                      android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="5dp" android:paddingBottom="5dp">
-                      <ImageView android:id="@+id/check2" android:layout_width="20dp" android:layout_height="20dp"
-                          android:src="@drawable/widget_check_off" android:layout_marginEnd="10dp" />
-                      <TextView android:id="@+id/label2" android:layout_width="0dp" android:layout_weight="1"
-                          android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
-                          android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
-                  </LinearLayout>
-
-                  <LinearLayout android:id="@+id/row3" android:layout_width="match_parent" android:layout_height="wrap_content"
-                      android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="5dp" android:paddingBottom="5dp">
-                      <ImageView android:id="@+id/check3" android:layout_width="20dp" android:layout_height="20dp"
-                          android:src="@drawable/widget_check_off" android:layout_marginEnd="10dp" />
-                      <TextView android:id="@+id/label3" android:layout_width="0dp" android:layout_weight="1"
-                          android:layout_height="wrap_content" android:textDirection="rtl" android:textAlignment="viewStart"
-                          android:textColor="#241F3D" android:textSize="13sp" android:maxLines="1" android:ellipsize="end" />
-                  </LinearLayout>
+                  <TextView
+                      android:id="@+id/emptyView"
+                      android:layout_width="match_parent"
+                      android:layout_height="0dp"
+                      android:layout_weight="1"
+                      android:gravity="center"
+                      android:text="کاری برای امروز نیست"
+                      android:textDirection="rtl"
+                      android:textColor="#8A84AB"
+                      android:textSize="12sp"
+                      android:visibility="gone" />
 
               </LinearLayout>
           </FrameLayout>
+          XMLEOF
+
+          # ---- res/layout/widget_checklist_item.xml (one row inside the scrollable list, built
+          #      per-item by ChecklistRemoteViewsFactory) ----
+          cat > "$RES_DIR/layout/widget_checklist_item.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/itemRow"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:orientation="horizontal"
+              android:gravity="center_vertical"
+              android:paddingTop="5dp"
+              android:paddingBottom="5dp">
+              <ImageView
+                  android:id="@+id/itemCheck"
+                  android:layout_width="20dp"
+                  android:layout_height="20dp"
+                  android:src="@drawable/widget_check_off"
+                  android:layout_marginEnd="10dp" />
+              <TextView
+                  android:id="@+id/itemLabel"
+                  android:layout_width="0dp"
+                  android:layout_weight="1"
+                  android:layout_height="wrap_content"
+                  android:textDirection="rtl"
+                  android:textAlignment="viewStart"
+                  android:textColor="#241F3D"
+                  android:textSize="13sp"
+                  android:maxLines="1"
+                  android:ellipsize="end" />
+          </LinearLayout>
           XMLEOF
 
           # ---- res/layout/widget_day_progress.xml ----
@@ -1279,11 +1636,50 @@ jobs:
                   android:src="@drawable/widget_card_shape_circle"
                   android:scaleType="fitXY" />
 
+              <!-- Optional decorative pattern (dots/stripes/grid/waves), drawn on top of cardBg
+                   and tinted with the secondary theme color at runtime. Gone by default. -->
+              <ImageView
+                  android:id="@+id/cardPattern"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:scaleType="fitXY"
+                  android:visibility="gone" />
+
               <ImageView android:id="@+id/ring" android:layout_width="match_parent" android:layout_height="match_parent"
                   android:layout_gravity="center" android:padding="4dp" />
-              <TextView android:id="@+id/dayLabel" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                  android:layout_gravity="center" android:textDirection="rtl" android:textColor="#241F3D"
-                  android:textStyle="bold" android:textSize="16sp" />
+              <LinearLayout
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="center"
+                  android:orientation="vertical"
+                  android:gravity="center">
+                  <TextView android:id="@+id/dayLabel" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:textDirection="rtl" android:textColor="#241F3D"
+                      android:textStyle="bold" android:textSize="16sp" />
+                  <!-- Optional live HH / MM display (off by default — costs a bit more battery
+                       since it needs a faster background refresh; see WidgetConfigActivity).
+                       clockBadgeBg is only shown for the "capsule" style, tinted at runtime the
+                       same way cardBg is — a small colored pill sitting behind the text. -->
+                  <FrameLayout
+                      android:id="@+id/clockLabelWrap"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="1dp"
+                      android:visibility="gone">
+                      <ImageView
+                          android:id="@+id/clockBadgeBg"
+                          android:layout_width="match_parent"
+                          android:layout_height="match_parent"
+                          android:src="@drawable/widget_card_shape_pill"
+                          android:scaleType="fitXY"
+                          android:visibility="gone" />
+                      <TextView android:id="@+id/clockLabel" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                          android:layout_gravity="center"
+                          android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingTop="1dp" android:paddingBottom="1dp"
+                          android:textDirection="ltr" android:textColor="#8A84AB"
+                          android:textSize="9sp" />
+                  </FrameLayout>
+              </LinearLayout>
           </FrameLayout>
           XMLEOF
 
@@ -1376,6 +1772,27 @@ jobs:
                       android:layout_marginBottom="20dp" />
 
                   <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="طرح تزئینی"
+                      android:textColor="#CFCBE0"
+                      android:textSize="14sp"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:layout_marginBottom="8dp" />
+                  <HorizontalScrollView
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:layout_marginBottom="20dp"
+                      android:scrollbars="none">
+                      <LinearLayout
+                          android:id="@+id/patternOptionRow"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:orientation="horizontal" />
+                  </HorizontalScrollView>
+
+                  <TextView
                       android:id="@+id/shapeLabel"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
@@ -1387,6 +1804,79 @@ jobs:
                       android:layout_marginBottom="8dp" />
                   <LinearLayout
                       android:id="@+id/shapeOptionRow"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal"
+                      android:layout_marginBottom="20dp" />
+
+                  <LinearLayout
+                      android:id="@+id/showHourRow"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal"
+                      android:gravity="center_vertical"
+                      android:layout_marginBottom="12dp">
+                      <TextView
+                          android:layout_width="0dp"
+                          android:layout_weight="1"
+                          android:layout_height="wrap_content"
+                          android:text="نمایش ساعت"
+                          android:textColor="#CFCBE0"
+                          android:textSize="14sp"
+                          android:textDirection="rtl"
+                          android:textAlignment="viewStart" />
+                      <Switch
+                          android:id="@+id/showHourSwitch"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content" />
+                  </LinearLayout>
+
+                  <LinearLayout
+                      android:id="@+id/showMinuteRow"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal"
+                      android:gravity="center_vertical"
+                      android:layout_marginBottom="8dp">
+                      <TextView
+                          android:layout_width="0dp"
+                          android:layout_weight="1"
+                          android:layout_height="wrap_content"
+                          android:text="نمایش دقیقه"
+                          android:textColor="#CFCBE0"
+                          android:textSize="14sp"
+                          android:textDirection="rtl"
+                          android:textAlignment="viewStart" />
+                      <Switch
+                          android:id="@+id/showMinuteSwitch"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content" />
+                  </LinearLayout>
+
+                  <TextView
+                      android:id="@+id/clockBatteryHint"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="⚠️ روشن‌بودن این‌ها یعنی ویجت مرتب‌تر آپدیت می‌شه، پس باتری رو یکم بیشتر مصرف می‌کنه. هرکدوم رو دوست داشتی، خودت روشن کن."
+                      android:textColor="#B79A4A"
+                      android:textSize="11.5sp"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:lineSpacingExtra="2dp"
+                      android:layout_marginBottom="20dp" />
+
+                  <TextView
+                      android:id="@+id/clockStyleLabel"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="ظاهر ساعت"
+                      android:textColor="#CFCBE0"
+                      android:textSize="14sp"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:layout_marginBottom="8dp" />
+                  <LinearLayout
+                      android:id="@+id/clockStyleOptionRow"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
                       android:orientation="horizontal"
@@ -1491,12 +1981,107 @@ jobs:
           </shape>
           XMLEOF
 
+          # ---- res/drawable/widget_pattern_dots.xml (decorative widget background pattern, tinted
+          #      at runtime with the secondary theme color via setColorFilter) ----
+          cat > "$RES_DIR/drawable/widget_pattern_dots.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="200" android:viewportHeight="200">
+              <path android:fillColor="#FFFFFF" android:pathData="M27,34 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M27,78 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M27,122 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M27,166 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M71,34 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M71,78 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M71,122 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M71,166 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M115,34 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M115,78 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M115,122 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M115,166 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M159,34 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M159,78 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M159,122 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M159,166 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+          </vector>
+          XMLEOF
+
+          # ---- res/drawable/widget_pattern_stripes.xml ----
+          cat > "$RES_DIR/drawable/widget_pattern_stripes.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="200" android:viewportHeight="200">
+              <path android:fillColor="#FFFFFF" android:pathData="M-180,0 L-166,0 L34,200 L20,200 Z M-144,0 L-130,0 L70,200 L56,200 Z M-108,0 L-94,0 L106,200 L92,200 Z M-72,0 L-58,0 L142,200 L128,200 Z M-36,0 L-22,0 L178,200 L164,200 Z M0,0 L14,0 L214,200 L200,200 Z M36,0 L50,0 L250,200 L236,200 Z M72,0 L86,0 L286,200 L272,200 Z M108,0 L122,0 L322,200 L308,200 Z M144,0 L158,0 L358,200 L344,200 Z M180,0 L194,0 L394,200 L380,200 Z M216,0 L230,0 L430,200 L416,200 Z" />
+          </vector>
+          XMLEOF
+
+          # ---- res/drawable/widget_pattern_grid.xml ----
+          cat > "$RES_DIR/drawable/widget_pattern_grid.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="200" android:viewportHeight="200">
+              <path android:fillColor="#FFFFFF" android:pathData="M38,20 L42,20 L42,180 L38,180 Z M78,20 L82,20 L82,180 L78,180 Z M118,20 L122,20 L122,180 L118,180 Z M158,20 L162,20 L162,180 L158,180 Z M20,38 L180,38 L180,42 L20,42 Z M20,78 L180,78 L180,82 L20,82 Z M20,118 L180,118 L180,122 L20,122 Z M20,158 L180,158 L180,162 L20,162 Z" />
+          </vector>
+          XMLEOF
+
+          # ---- res/drawable/widget_pattern_waves.xml ----
+          cat > "$RES_DIR/drawable/widget_pattern_waves.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="200" android:viewportHeight="200">
+              <path android:fillColor="#FFFFFF" android:pathData="M0,47 C50,37 50,57 100,47 C150,37 150,57 200,47 L200,53 C150,63 150,43 100,53 C50,63 50,43 0,53 Z M0,97 C50,87 50,107 100,97 C150,87 150,107 200,97 L200,103 C150,113 150,93 100,103 C50,113 50,93 0,103 Z M0,147 C50,137 50,157 100,147 C150,137 150,157 200,147 L200,153 C150,163 150,143 100,153 C50,163 50,143 0,153 Z" />
+          </vector>
+          XMLEOF
+
+          # ---- res/drawable/widget_pattern_chevron.xml ----
+          cat > "$RES_DIR/drawable/widget_pattern_chevron.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="200" android:viewportHeight="200">
+              <path android:fillColor="#FFFFFF" android:pathData="M-20,32 L30,68 L80,32 L130,68 L180,32 L230,68 L230,82 L180,46 L130,82 L80,46 L30,82 L-20,46 Z M-20,92 L30,128 L80,92 L130,128 L180,92 L230,128 L230,142 L180,106 L130,142 L80,106 L30,142 L-20,106 Z M-20,152 L30,188 L80,152 L130,188 L180,152 L230,188 L230,202 L180,166 L130,202 L80,166 L30,202 L-20,166 Z" />
+          </vector>
+          XMLEOF
+
+          # ---- res/drawable/widget_pattern_circles.xml ----
+          cat > "$RES_DIR/drawable/widget_pattern_circles.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="200" android:viewportHeight="200">
+              <path android:fillColor="#FFFFFF" android:fillType="evenOdd" android:pathData="M24,50 a26,26 0 1,0 52,0 a26,26 0 1,0 -52,0 M31,50 a19,19 0 1,1 38,0 a19,19 0 1,1 -38,0 M132,60 a18,18 0 1,0 36,0 a18,18 0 1,0 -36,0 M138,60 a12,12 0 1,1 24,0 a12,12 0 1,1 -24,0 M40,150 a20,20 0 1,0 40,0 a20,20 0 1,0 -40,0 M46,150 a14,14 0 1,1 28,0 a14,14 0 1,1 -28,0 M120,150 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0 M128,150 a22,22 0 1,1 44,0 a22,22 0 1,1 -44,0 M86,100 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0 M91,100 a9,9 0 1,1 18,0 a9,9 0 1,1 -18,0" />
+          </vector>
+          XMLEOF
+
+          # ---- res/drawable/widget_pattern_confetti.xml ----
+          cat > "$RES_DIR/drawable/widget_pattern_confetti.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="200" android:viewportHeight="200">
+              <path android:fillColor="#FFFFFF" android:pathData="M24,40 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 M135,30 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 M163,90 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 M55,120 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 M94,170 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 M25,170 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 M90,41 L99,50 L90,59 L81,50 Z M170,142 L178,150 L170,158 L162,150 Z M50,83 L57,90 L50,97 L43,90 Z M130,101 L139,119 L121,119 Z M170,33 L177,47 L163,47 Z M100,13 L107,27 L93,27 Z" />
+          </vector>
+          XMLEOF
+
+          # ---- res/drawable/widget_pattern_crosshatch.xml ----
+          cat > "$RES_DIR/drawable/widget_pattern_crosshatch.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="200" android:viewportHeight="200">
+              <path android:fillColor="#FFFFFF" android:pathData="M-180,0 L-175,0 L25,200 L20,200 Z M-140,0 L-135,0 L65,200 L60,200 Z M-100,0 L-95,0 L105,200 L100,200 Z M-60,0 L-55,0 L145,200 L140,200 Z M-20,0 L-15,0 L185,200 L180,200 Z M20,0 L25,0 L225,200 L220,200 Z M60,0 L65,0 L265,200 L260,200 Z M100,0 L105,0 L305,200 L300,200 Z M140,0 L145,0 L345,200 L340,200 Z M180,0 L185,0 L385,200 L380,200 Z M380,0 L375,0 L175,200 L180,200 Z M340,0 L335,0 L135,200 L140,200 Z M300,0 L295,0 L95,200 L100,200 Z M260,0 L255,0 L55,200 L60,200 Z M220,0 L215,0 L15,200 L20,200 Z M180,0 L175,0 L-25,200 L-20,200 Z M140,0 L135,0 L-65,200 L-60,200 Z M100,0 L95,0 L-105,200 L-100,200 Z M60,0 L55,0 L-145,200 L-140,200 Z M20,0 L15,0 L-185,200 L-180,200 Z" />
+          </vector>
+          XMLEOF
+
+          # ---- res/drawable/widget_pattern_hearts.xml ----
+          cat > "$RES_DIR/drawable/widget_pattern_hearts.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="200" android:viewportHeight="200">
+              <path android:fillColor="#FFFFFF" android:pathData="M45,59.4 C24.2,38.6 33.8,24.2 45,37.0 C56.2,24.2 65.8,38.6 45,59.4 Z M150,52.6 C131.8,34.4 140.2,21.8 150,33.0 C159.8,21.8 168.2,34.4 150,52.6 Z M100,126.2 C76.6,102.8 87.4,86.6 100,101.0 C112.6,86.6 123.4,102.8 100,126.2 Z M45,162.6 C26.8,144.4 35.2,131.8 45,143.0 C54.8,131.8 63.2,144.4 45,162.6 Z M155,169.4 C134.2,148.6 143.8,134.2 155,147.0 C166.2,134.2 175.8,148.6 155,169.4 Z" />
+          </vector>
+          XMLEOF
+
           # ---- res/xml/widget_checklist_info.xml ----
           cat > "$RES_DIR/xml/widget_checklist_info.xml" <<XMLEOF
           <?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
               android:minWidth="250dp"
               android:minHeight="180dp"
+              android:minResizeWidth="110dp"
+              android:minResizeHeight="110dp"
+              android:targetCellWidth="4"
+              android:targetCellHeight="2"
               android:updatePeriodMillis="1800000"
               android:initialLayout="@layout/widget_checklist"
               android:previewImage="@mipmap/ic_launcher"
@@ -1510,8 +2095,12 @@ jobs:
           cat > "$RES_DIR/xml/widget_day_progress_info.xml" <<XMLEOF
           <?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-              android:minWidth="110dp"
-              android:minHeight="110dp"
+              android:minWidth="40dp"
+              android:minHeight="40dp"
+              android:minResizeWidth="40dp"
+              android:minResizeHeight="40dp"
+              android:targetCellWidth="1"
+              android:targetCellHeight="1"
               android:updatePeriodMillis="1800000"
               android:initialLayout="@layout/widget_day_progress"
               android:previewImage="@mipmap/ic_launcher"
@@ -1563,6 +2152,9 @@ jobs:
                   '        </intent-filter>\n'
                   '        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_checklist_info" />\n'
                   '    </receiver>\n'
+                  '    <service android:name="' + app_id + '.widget.ChecklistRemoteViewsService"\n'
+                  '        android:exported="false"\n'
+                  '        android:permission="android.permission.BIND_REMOTEVIEWS" />\n'
                   '    <receiver android:name="' + app_id + '.widget.DayProgressWidgetProvider" android:exported="true">\n'
                   '        <intent-filter>\n'
                   '            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
