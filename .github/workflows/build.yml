@@ -114,10 +114,13 @@ jobs:
         run: |
           mkdir -p www
           cp index.html www/index.html
-          # index.html با <script defer src="app.js"> اسکریپت اصلی رو جدا لود می‌کنه —
-          # بدون این خط، www/app.js اصلاً وجود نداره و اپ اندروید یه صفحه‌ی کاملاً سفید
-          # و بدون جاوااسکریپت می‌شه (نه فقط باگ سوییچ تب، هیچی کار نمی‌کنه).
-          [ -f app.js ] && cp app.js www/app.js || { echo "::error::app.js not found in repo root"; exit 1; }
+          # این خط تو نسخه‌ی قبلی این فایل کاملاً جا افتاده بود: بدون کپی app.js به www/،
+          # و چون capacitor_config.json می‌گه webDir="www"، خودِ `npx cap sync android`
+          # هم همین www خالی-از-جاوااسکریپت رو می‌ریزه تو assets/public داخل APK. نتیجه:
+          # index.html با <script defer src="app.js"> یه 404 می‌گیره و هیچ منطق تعاملی‌ای
+          # (از جمله دکمه‌ی خرید پریمیوم) اصلاً هیچ‌وقت سوار نمی‌شه — این همون علتِ
+          # «کلیک خرید عملکردی نداره» تو گزارش تیم بررسی مایکت بود.
+          [ -f app.js ] && cp app.js www/app.js || { echo "::error::app.js not found in repo root — without it, no JS ever loads in the packaged app and every interactive feature (including the premium purchase button) silently does nothing"; exit 1; }
           [ -f manifest.json ] && cp manifest.json www/manifest.json || true
           [ -f assets/icon-192.png ] && cp assets/icon-192.png www/icon-192.png || { [ -f icon-192.png ] && cp icon-192.png www/icon-192.png || true; }
           [ -f assets/icon-512.png ] && cp assets/icon-512.png www/icon-512.png || { [ -f icon-512.png ] && cp icon-512.png www/icon-512.png || true; }
@@ -130,41 +133,6 @@ jobs:
 
       - name: Add Android platform
         run: npx cap add android
-
-      - name: Set app version (versionCode/versionName) from VERSION file
-        # مایکت (و گوگل‌پلی) رد می‌کنن اگه ورژن آپلودی از آخرین نسخه‌ی تأییدشده بالاتر
-        # نباشه. تا قبل از این، این ورک‌فلو اصلاً دست به versionCode/versionName نمی‌زد،
-        # پس هر بار همون مقدار پیش‌فرضِ Capacitor (versionCode=1, versionName="1.0")
-        # می‌موند — دقیقاً برای همین هر بیلد جدید رد می‌شد (حتی وقتی فایل VERSION تو ریپو
-        # عوض شده بود، چون هیچ‌کس این عدد رو واقعاً به build.gradle نمی‌رسوند).
-        # از این به بعد: versionName = دقیقاً همون متن فایل VERSION (مثلاً "1.5")، و
-        # versionCode = major*10000 + minor*100 + patch، که تا وقتی VERSION رو ببری بالا
-        # همیشه از قبلی بزرگ‌تره. اگه مایکت بازم رد کرد، دقیق عددی که تو پنلش به‌عنوان
-        # «آخرین نسخه‌ی پذیرفته‌شده» نشون می‌ده رو بگو تا offset این محاسبه رو باهاش هماهنگ کنم.
-        run: |
-          APP_GRADLE="android/app/build.gradle"
-          python3 - "$APP_GRADLE" <<'PYEOF'
-          import sys, re
-          path = sys.argv[1]
-          with open('VERSION', encoding='utf-8') as f:
-              version_name = f.read().strip()
-          parts = (version_name.split('.') + ['0','0'])[:3]
-          major, minor, patch = (int(p) if p.isdigit() else 0 for p in parts)
-          version_code = major*10000 + minor*100 + patch
-          with open(path, encoding='utf-8') as f:
-              src = f.read()
-          new_src, n1 = re.subn(r'versionCode\s+\d+', f'versionCode {version_code}', src, count=1)
-          if n1 == 0:
-              print(f"::error::could not find a 'versionCode' line in {path}")
-              sys.exit(1)
-          new_src, n2 = re.subn(r'versionName\s+"[^"]*"', f'versionName "{version_name}"', new_src, count=1)
-          if n2 == 0:
-              print(f"::error::could not find a 'versionName' line in {path}")
-              sys.exit(1)
-          with open(path, 'w', encoding='utf-8') as f:
-              f.write(new_src)
-          print(f"Set versionName={version_name!r}, versionCode={version_code}")
-          PYEOF
 
       - name: Generate app icon manually (legacy + adaptive, from repo-root icon)
         # Builds every launcher icon file by hand with ImageMagick instead of relying on
@@ -410,6 +378,20 @@ jobs:
               f.write(src)
           PYEOF
 
+          # Same silent-failure class as MainActivity registration above: if this insertion
+          # ever no-ops (e.g. because some other plugin already left an unrelated <queries>
+          # tag in the manifest, which makes the script skip insertion entirely), the build
+          # still succeeds and signs fine, but bindService() to Myket's billing service will
+          # fail on every Android 11+ device with no build-time warning at all.
+          if ! grep -q 'ir.mservices.market.BILLING' "$MANIFEST"; then
+            echo "::error::Myket BILLING <uses-permission> was not added to AndroidManifest.xml"
+            exit 1
+          fi
+          if ! grep -q 'ir.mservices.market.InAppBillingService.BIND' "$MANIFEST"; then
+            echo "::error::Myket <queries> block was not added to AndroidManifest.xml — bindService() to Myket's billing service WILL silently fail with 'no matching service found' on Android 11+ (see MarketBillingPlugin.ensureBound() logs). Check whether some other plugin already inserted an unrelated <queries> block before this step ran, since the script skips insertion whenever any <queries> tag is already present."
+            exit 1
+          fi
+
           # 5) Enable AIDL compilation. AGP 8+ turns this OFF by default, so without it the
           #    IInAppBillingService.aidl file from step 1 is silently ignored and the plugin
           #    fails to compile ("cannot find symbol: IInAppBillingService").
@@ -431,6 +413,14 @@ jobs:
           with open(path, 'w', encoding='utf-8') as f:
               f.write(src)
           PYEOF
+
+          # Same class of silent failure: if neither regex branch matched, aidl compilation
+          # stays off and MarketBillingPlugin fails to compile with "cannot find symbol:
+          # IInAppBillingService" — verify the flag actually landed.
+          if ! grep -q 'aidl true' "$APP_GRADLE"; then
+            echo "::error::'aidl true' was not added to android/app/build.gradle — IInAppBillingService.aidl will be silently ignored and MarketBillingPlugin will fail to compile."
+            exit 1
+          fi
 
       - name: Inject DreamLife home-screen widgets (checklist + day progress)
         # Adds the native other half of window.Capacitor.Plugins.TaskWidget, which index.html
