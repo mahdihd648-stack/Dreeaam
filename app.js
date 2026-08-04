@@ -1,3 +1,80 @@
+/* ==================== پنل تشخیصی سراسری — همون اول فایل ====================
+   عمداً اولین چیزیه که تو کل app.js اجرا می‌شه. یه پنل کوچیک گوشه‌ی پایین صفحه
+   می‌سازه و از همین لحظه، سه چیز رو مستقیم رو صفحه (بدون نیاز به کامپیوتر یا
+   chrome://inspect) ثبت می‌کنه:
+     ۱) هر throw مدیریت‌نشده، هرجای کل فایل، حتی خیلی قبل‌تر از بخش خرید —
+        چون اگه یه خطای کاملاً بی‌ربط جایی وسط فایل بترکه، خودِ اجرای اسکریپت از
+        همونجا متوقف می‌شه و کدهای بعدش (از جمله ثبتِ addEventListener رو دکمه‌ی
+        خرید) اصلاً هیچ‌وقت اجرا نمی‌شن — همون حالتی که از بیرون دقیقاً شبیه
+        «دکمه هیچ کاری نمی‌کنه» به‌نظر می‌رسه، بدون هیچ توست یا خطایی.
+     ۲) هر Promise ردشده‌ی مدیریت‌نشده (unhandled rejection).
+     ۳) هر console.error، هرجای فایل — نه فقط بخش خرید.
+   خودِ تابع‌های iabDebugPanel/iabDebugStep/iabDebugReset پایین‌تر تو همین بخش
+   تعریف شدن و از همه‌جای بقیه‌ی فایل (بخش خرید و هرجای دیگه) صداشون می‌زنیم.
+   بعد از رفع مشکل، برای برداشتنش کافیه IAB_DEBUG_PANEL رو false کنی، یا کلاً
+   از اول این بلاک تا همینجا رو حذف کنی. */
+const IAB_DEBUG_PANEL = true;
+function iabDebugPanel(){
+  let panel = document.getElementById('iabDebugPanel');
+  if(!panel){
+    panel = document.createElement('div');
+    panel.id = 'iabDebugPanel';
+    panel.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:999999;background:#111;color:#0f0;font:11px/1.7 monospace;padding:10px 12px;border-radius:10px;max-height:46vh;overflow:auto;direction:ltr;text-align:left;box-shadow:0 4px 24px rgba(0,0,0,.5);';
+    const closeBtn = document.createElement('div');
+    closeBtn.textContent = '✕ بستن پنل تشخیصی';
+    closeBtn.style.cssText = 'direction:rtl;text-align:center;color:#f66;font:12px sans-serif;margin-bottom:6px;cursor:pointer;padding:4px;border-bottom:1px solid #333;';
+    closeBtn.onclick = ()=>{ panel.style.display = 'none'; };
+    panel.appendChild(closeBtn);
+    (document.body || document.documentElement).appendChild(panel);
+  }
+  return panel;
+}
+function iabDebugStep(label, ok, detail){
+  if(!IAB_DEBUG_PANEL) return;
+  try{
+    const panel = iabDebugPanel();
+    panel.style.display = 'block';
+    const row = document.createElement('div');
+    row.style.cssText = 'margin-bottom:5px;white-space:pre-wrap;word-break:break-all;';
+    const icon = ok === null ? '⏳' : (ok ? '✅' : '❌');
+    row.textContent = icon + ' ' + label + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : '');
+    panel.appendChild(row);
+    panel.scrollTop = panel.scrollHeight;
+  }catch(_){ /* خودِ پنل تشخیصی هیچ‌وقت نباید چیزی رو خراب کنه */ }
+}
+function iabDebugReset(){
+  if(!IAB_DEBUG_PANEL) return;
+  try{
+    const panel = iabDebugPanel();
+    panel.querySelectorAll('div:not(:first-child)').forEach(el => el.remove());
+    panel.style.display = 'block';
+  }catch(_){}
+}
+// اگه document.body هنوز آماده نباشه (اسکریپت تو <head> بدون defer باشه)، اولین
+// تلاش برای ساختن پنل رو به بعد از لود شدن DOM موکول می‌کن.
+document.addEventListener('DOMContentLoaded', function(){ try{ iabDebugPanel(); }catch(_){} });
+
+window.addEventListener('error', function(e){
+  iabDebugStep('خطای جاوااسکریپت', false, (e && e.message) + ' — ' + (e && e.filename) + ':' + (e && e.lineno) + ':' + (e && e.colno));
+});
+window.addEventListener('unhandledrejection', function(e){
+  const reason = e && e.reason;
+  iabDebugStep('Promise ردشده‌ی مدیریت‌نشده', false, (reason && (reason.message || reason.toString && reason.toString())) || String(reason));
+});
+(function(){
+  const _origConsoleError = console.error;
+  console.error = function(){
+    try{
+      const parts = Array.prototype.slice.call(arguments).map(function(a){
+        if(typeof a === 'string') return a;
+        try{ return JSON.stringify(a); }catch(_){ return String(a); }
+      });
+      iabDebugStep('console.error', false, parts.join(' '));
+    }catch(_){}
+    return _origConsoleError.apply(console, arguments);
+  };
+})();
+
 /* ================= window.storage compatibility shim =================
    window.storage.get/set/delete/list is an API that only exists inside
    Claude.ai's artifact sandbox. On a real, independently-hosted site it
@@ -15140,6 +15217,10 @@ function getIabPlugin(){
     'Capacitor روی صفحه هست؟', !!window.Capacitor,
     '| Capacitor.Plugins هست؟', !!(window.Capacitor && Capacitor.Plugins),
     '| پلاگین‌های واقعاً رجیسترشده:', (window.Capacitor && Capacitor.Plugins) ? Object.keys(Capacitor.Plugins).join(', ') : 'n/a (Capacitor.Plugins تعریف نشده)');
+  iabDebugStep('پلاگین بیلینگ (MarketBilling)', false,
+    'Capacitor=' + !!window.Capacitor +
+    ' | Capacitor.Plugins=' + !!(window.Capacitor && Capacitor.Plugins) +
+    ' | پلاگین‌های رجیسترشده=' + ((window.Capacitor && Capacitor.Plugins) ? Object.keys(Capacitor.Plugins).join(',') : 'هیچی'));
   return null;
 }
 function withTimeout(promise, ms){
@@ -15152,16 +15233,20 @@ async function iabPurchase(sku){
   console.log('[IAB] درخواست خرید، sku =', sku);
   const plugin = getIabPlugin();
   if(!plugin){ showToast('این نسخه هنوز به پرداخت درون‌برنامه‌ای مایکت وصل نشده', 'error'); return null; }
+  iabDebugStep('پلاگین بیلینگ (MarketBilling)', true, 'پیدا شد');
   try{
     console.log('[IAB] پلاگین پیدا شد، در حال صدا زدن purchase() نیتیو...');
+    iabDebugStep('purchase() نیتیو', null, 'در حال باز شدن پنل مایکت...');
     // اگه کاربر وسط درگاه پرداخت برگرده عقب یا فیلترشکن رو خاموش/روشن کنه، ممکنه
     // callback نیتیو هیچ‌وقت نرسه و promise برای همیشه معلق بمونه؛ برای همین یه
     // سقف زمانی می‌ذاریم تا دکمه هیچ‌وقت قفل نمونه.
     const result = await withTimeout(plugin.purchase({ sku }), 120000);
     console.log('[IAB] purchase() نیتیو resolve شد:', result);
+    iabDebugStep('purchase() نیتیو', true, result);
     return result;
   }catch(e){
     console.error('[IAB] purchase() نیتیو fail شد:', (e && e.message) || e, e);
+    iabDebugStep('purchase() نیتیو', false, (e && e.message) || String(e));
     if(e && e.message === 'iab-timeout'){
       showToast('پاسخی از درگاه پرداخت نرسید؛ اگه خرید انجام شده، از «بازیابی خرید قبلی» استفاده کن', 'error');
     } else {
@@ -15228,6 +15313,7 @@ document.addEventListener('visibilitychange', ()=>{
 async function iabVerifyOnServer(purchase){
   try{
     const __auth = await authHeaders();
+    iabDebugStep('ارسال تایید به سرور (iab/verify)', null, 'auth header ارسال شد؟ ' + !!__auth.Authorization);
     const res = await fetch(WORKER_BASE + '/iab/verify', {
       method:'POST', headers: Object.assign({'Content-Type':'application/json'}, __auth),
       body: JSON.stringify({ store: purchase.store, sku: purchase.sku, purchaseToken: purchase.purchaseToken })
@@ -15237,9 +15323,16 @@ async function iabVerifyOnServer(purchase){
     // فقط ok:false برمی‌گشت و از کنسول هیچ سرنخی برای دیباگ نبود.
     if(!res.ok || !data || data.ok !== true){
       console.error('[IAB] iab/verify ناموفق. HTTP status:', res.status, '| auth header ارسال شد؟', !!__auth.Authorization, '| بدنه‌ی پاسخ:', data);
+      iabDebugStep('پاسخ iab/verify', false, 'HTTP ' + res.status + ' | ' + JSON.stringify(data));
+    } else {
+      iabDebugStep('پاسخ iab/verify', true, JSON.stringify(data));
     }
     return data || { ok:false };
-  }catch(e){ console.error('[IAB] iab/verify درخواست fetch fail شد:', (e && e.message) || e); return { ok:false }; }
+  }catch(e){
+    console.error('[IAB] iab/verify درخواست fetch fail شد:', (e && e.message) || e);
+    iabDebugStep('iab/verify (fetch)', false, (e && e.message) || String(e));
+    return { ok:false };
+  }
 }
 /* بعد از اینکه ورکر ok:true برگردوند، به جای اینکه کورکورانه بهش اعتماد کنیم، خودمون
    مستقیم از Supabase چک می‌کنیم profiles.premium_until واقعاً آپدیت شده یا نه. اگه
@@ -15247,11 +15340,16 @@ async function iabVerifyOnServer(purchase){
    این جلوی اون حالت رو می‌گیره که کاربر تست "فعال شد 🎉" ببینه ولی چند لحظه بعد
    (با اولین رفرش سشن) دوباره غیرپرمیوم بشه — منبع حقیقت همیشه همینجاست، نه پاسخ ورکر. */
 async function confirmPremiumOnServer(){
-  if(!sb || !publicChatUser) return isAppOwner === true;
+  if(!sb || !publicChatUser){
+    iabDebugStep('تایید نهایی از Supabase', false, 'sb یا publicChatUser موجود نیست (یعنی لاگین نبودی)');
+    return isAppOwner === true;
+  }
   try{
     const { data } = await sb.from('profiles').select('premium_until').eq('id', publicChatUser.id).single();
-    return !!(data && data.premium_until && new Date(data.premium_until) > new Date());
-  }catch(e){ return false; }
+    const ok = !!(data && data.premium_until && new Date(data.premium_until) > new Date());
+    iabDebugStep('تایید نهایی از Supabase (profiles.premium_until)', ok, data);
+    return ok;
+  }catch(e){ iabDebugStep('تایید نهایی از Supabase', false, (e && e.message) || String(e)); return false; }
 }
 
 /* ==================== Lifetime-capacity (500 slots) — REAL counter ====================
@@ -15499,6 +15597,8 @@ document.getElementById('premiumPayBtn').addEventListener('click', async ()=>{
   const btn = document.getElementById('premiumPayBtn');
   btn.disabled = true; btn.textContent = 'در حال اتصال...';
   console.log('[IAB] دکمه‌ی خرید کلیک شد. sku انتخاب‌شده:', currentPremiumSku(), '| myDiscount:', myDiscount);
+  iabDebugReset();
+  iabDebugStep('کلیک روی دکمه‌ی خرید', true, 'sku=' + currentPremiumSku());
   try{
     const purchase = await iabPurchase(currentPremiumSku());
     if(purchase){
@@ -15507,6 +15607,7 @@ document.getElementById('premiumPayBtn').addEventListener('click', async ()=>{
       console.log('[IAB] نتیجه‌ی iab/verify از ورکر:', verify);
       const reallyActivated = (verify && verify.ok) ? await confirmPremiumOnServer() : false;
       console.log('[IAB] reallyActivated (تایید نهایی رو Supabase):', reallyActivated);
+      iabDebugStep('نتیجه‌ی کلی', reallyActivated, reallyActivated ? 'پرمیوم فعال شد 🎉' : 'فعال نشد — اولین ❌ بالا رو نگاه کن');
       if(reallyActivated){
         storeData.premium = true; saveData();
         await claimLifetimeSlotIfNeeded();
@@ -15533,6 +15634,7 @@ document.getElementById('premiumPayBtn').addEventListener('click', async ()=>{
       }
     } else {
       console.log('[IAB] iabPurchase چیزی برنگردوند (null) — یعنی یا پلاگین پیدا نشد، یا خرید نیتیو fail/cancel/timeout شد؛ جزئیاتش تو لاگ‌های بالاتره.');
+      iabDebugStep('نتیجه‌ی کلی', false, 'iabPurchase چیزی برنگردوند — یکی از مراحل بالا ❌ خورده');
     }
   }finally{
     btn.disabled = false; btn.textContent = '💳 خرید نسخه‌ی پرمیوم';
