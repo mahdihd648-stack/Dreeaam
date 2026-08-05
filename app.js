@@ -1,79 +1,8 @@
-/* ==================== پنل تشخیصی سراسری — همون اول فایل ====================
-   عمداً اولین چیزیه که تو کل app.js اجرا می‌شه. یه پنل کوچیک گوشه‌ی پایین صفحه
-   می‌سازه و از همین لحظه، سه چیز رو مستقیم رو صفحه (بدون نیاز به کامپیوتر یا
-   chrome://inspect) ثبت می‌کنه:
-     ۱) هر throw مدیریت‌نشده، هرجای کل فایل، حتی خیلی قبل‌تر از بخش خرید —
-        چون اگه یه خطای کاملاً بی‌ربط جایی وسط فایل بترکه، خودِ اجرای اسکریپت از
-        همونجا متوقف می‌شه و کدهای بعدش (از جمله ثبتِ addEventListener رو دکمه‌ی
-        خرید) اصلاً هیچ‌وقت اجرا نمی‌شن — همون حالتی که از بیرون دقیقاً شبیه
-        «دکمه هیچ کاری نمی‌کنه» به‌نظر می‌رسه، بدون هیچ توست یا خطایی.
-     ۲) هر Promise ردشده‌ی مدیریت‌نشده (unhandled rejection).
-     ۳) هر console.error، هرجای فایل — نه فقط بخش خرید.
-   خودِ تابع‌های iabDebugPanel/iabDebugStep/iabDebugReset پایین‌تر تو همین بخش
-   تعریف شدن و از همه‌جای بقیه‌ی فایل (بخش خرید و هرجای دیگه) صداشون می‌زنیم.
-   بعد از رفع مشکل، برای برداشتنش کافیه IAB_DEBUG_PANEL رو false کنی، یا کلاً
-   از اول این بلاک تا همینجا رو حذف کنی. */
-const IAB_DEBUG_PANEL = true;
-function iabDebugPanel(){
-  let panel = document.getElementById('iabDebugPanel');
-  if(!panel){
-    panel = document.createElement('div');
-    panel.id = 'iabDebugPanel';
-    panel.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:999999;background:#111;color:#0f0;font:11px/1.7 monospace;padding:10px 12px;border-radius:10px;max-height:46vh;overflow:auto;direction:ltr;text-align:left;box-shadow:0 4px 24px rgba(0,0,0,.5);';
-    const closeBtn = document.createElement('div');
-    closeBtn.textContent = '✕ بستن پنل تشخیصی';
-    closeBtn.style.cssText = 'direction:rtl;text-align:center;color:#f66;font:12px sans-serif;margin-bottom:6px;cursor:pointer;padding:4px;border-bottom:1px solid #333;';
-    closeBtn.onclick = ()=>{ panel.style.display = 'none'; };
-    panel.appendChild(closeBtn);
-    (document.body || document.documentElement).appendChild(panel);
-  }
-  return panel;
-}
-function iabDebugStep(label, ok, detail){
-  if(!IAB_DEBUG_PANEL) return;
-  try{
-    const panel = iabDebugPanel();
-    panel.style.display = 'block';
-    const row = document.createElement('div');
-    row.style.cssText = 'margin-bottom:5px;white-space:pre-wrap;word-break:break-all;';
-    const icon = ok === null ? '⏳' : (ok ? '✅' : '❌');
-    row.textContent = icon + ' ' + label + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : '');
-    panel.appendChild(row);
-    panel.scrollTop = panel.scrollHeight;
-  }catch(_){ /* خودِ پنل تشخیصی هیچ‌وقت نباید چیزی رو خراب کنه */ }
-}
-function iabDebugReset(){
-  if(!IAB_DEBUG_PANEL) return;
-  try{
-    const panel = iabDebugPanel();
-    panel.querySelectorAll('div:not(:first-child)').forEach(el => el.remove());
-    panel.style.display = 'block';
-  }catch(_){}
-}
-// اگه document.body هنوز آماده نباشه (اسکریپت تو <head> بدون defer باشه)، اولین
-// تلاش برای ساختن پنل رو به بعد از لود شدن DOM موکول می‌کن.
-document.addEventListener('DOMContentLoaded', function(){ try{ iabDebugPanel(); }catch(_){} });
-
-window.addEventListener('error', function(e){
-  iabDebugStep('خطای جاوااسکریپت', false, (e && e.message) + ' — ' + (e && e.filename) + ':' + (e && e.lineno) + ':' + (e && e.colno));
-});
-window.addEventListener('unhandledrejection', function(e){
-  const reason = e && e.reason;
-  iabDebugStep('Promise ردشده‌ی مدیریت‌نشده', false, (reason && (reason.message || reason.toString && reason.toString())) || String(reason));
-});
-(function(){
-  const _origConsoleError = console.error;
-  console.error = function(){
-    try{
-      const parts = Array.prototype.slice.call(arguments).map(function(a){
-        if(typeof a === 'string') return a;
-        try{ return JSON.stringify(a); }catch(_){ return String(a); }
-      });
-      iabDebugStep('console.error', false, parts.join(' '));
-    }catch(_){}
-    return _origConsoleError.apply(console, arguments);
-  };
-})();
+/* پنل تشخیصی موقت (که برای تست خرید پرمیوم اضافه شده بود) حذف شد.
+   iabDebugStep/iabDebugReset به‌صورت no-op نگه داشته شدن تا فراخوانی‌هاشون
+   تو بخش خرید (پایین‌تر تو همین فایل) بدون تغییر اون بخش، بی‌خطر باقی بمونه. */
+function iabDebugStep(){}
+function iabDebugReset(){}
 
 /* ================= window.storage compatibility shim =================
    window.storage.get/set/delete/list is an API that only exists inside
@@ -353,6 +282,7 @@ const ADDICTION_LABELS = {
   gaming:"بازی‌های ویدیویی", smoking:"سیگار / دخانیات", alcohol:"الکل",
   binge:"پرخوری یا خوردن هیجانی", sleep:"بی‌نظمی خواب", procrastination:"تعلل و اهمال‌کاری",
   shopping:"خرید وسواسی", nailbiting:"ناخن‌جویدن", anxiety:"اضطراب",
+  aggression:"پرخاشگری و تندخویی",
   other:"یه موضوع شخصی دیگه"
 };
 /* ---- Health/medication self-report tags (onboarding step "سلامت"). This is a light,
@@ -406,6 +336,12 @@ const ADDICTION_ITEMS = {
     "قبل از یه موقعیت که معمولاً اضطرابم می‌ده، از قبل یه برنامه‌ی آرامش‌بخش آماده داشتم",
     "اضطراب دیگه کنترل کل روزمو دست نمی‌گیره؛ باهاش خیلی آروم‌تر کنار میام",
     "حتی تو یه روز پراضطراب هم از تکنیک آرام‌سازیم به‌موقع استفاده کردم"],
+  aggression: ["امروز وقتی عصبانی شدم، قبل از هر واکنشی چند ثانیه مکث کردم",
+    "به‌جای داد زدن یا تند حرف زدن، حرفمو با لحن آروم‌تر گفتم",
+    "قبل از عصبانی شدن، نشونه‌های اولیه‌ی بدنم (تنش فک، ضربان قلب) رو شناختم و عقب کشیدم",
+    "این هفته دفعات از کوره در رفتنم نسبت به قبل کمتر بود",
+    "کنترل خشمم دیگه نیاز به تلاش آگاهانه‌ی زیاد نداره",
+    "حتی تو یه بحث یا موقعیت واقعاً عصبی‌کننده هم آرامشمو حفظ کردم"],
   other: ["امروز یه قدم کوچیک در مسیر کنترل «{X}» برداشتم","وقتی وسوسه‌ی «{X}» اومد سراغم، یه فعالیت جایگزین انجام دادم",
     "یه روز کامل با کنترل بهتر روی «{X}» داشتم","این هفته پیشرفت محسوسی نسبت به «{X}» داشتم",
     "کنترل «{X}» داره برام عادی و خودکار می‌شه","حتی تو سخت‌ترین موقعیت‌ها هم رو کنترل «{X}» موندم"]
@@ -422,6 +358,7 @@ const ADDICTION_AVOID_EXTRA = {
   shopping:["باز نگه‌داشتن اپ‌ها یا تب‌های فروشگاهی برای «فقط دیدن»","ذخیره کردن اطلاعات کارت بانکی تو اپ‌های خرید برای خرید یه‌کلیکی","دنبال کردن پیج‌ها و تبلیغات فروش ویژه","خرید برای پر کردن یه حس بد یا خالی، بدون نیاز واقعی"],
   nailbiting:["نگه‌داشتن ناخن‌های بلند و ناهموار در دسترس دندون","نشستن جلوی تلویزیون یا کامپیوتر بدون هیچ چیز جایگزین تو دست","نادیده گرفتن اولین نشونه‌ی هشدار (کشش لبه‌ی ناخن)","فراموش کردن ابزار کمکی (فیجت، لاک تلخ) تو موقعیت‌های پرخطر"],
   anxiety:["غرق شدن تو فکرهای نگران‌کننده بدون هیچ اقدام آرامش‌بخش","مصرف بی‌حد اخبار یا محتوای اضطراب‌زا","اجتناب کامل از موقعیت‌هایی که فقط باعث تشدید اضطراب بلندمدت می‌شن","نگه داشتن نگرانی‌ها تو دل، بدون گفتنشون به کسی"],
+  aggression:["داد زدن سر کسی که هیچ ربطی به دلیل واقعی عصبانیتم نداشت","سرکوب کامل خشم به‌جای بیان آروم و درستش","پرت کردن یا کوبیدن وسایل موقع عصبانیت","جواب دادن به یه پیام یا حرف تند دقیقاً همون لحظه‌ی اوج عصبانیت"],
   other:["نادیده گرفتن علائم هشدار مربوط به «{X}»","توجیه کردن یه لغزش کوچیک با «فقط همین یه‌بار»","قرار گرفتن آگاهانه تو موقعیت‌های پرخطر مربوط به «{X}»","تنها موندن با «{X}» بدون گفتنش به کسی"]
 };
 function pickAvoidExtra(id){
@@ -463,6 +400,12 @@ const GOOD_HABIT_ITEMS = {
   exercise: ["امروز یه جلسه نرمش یا ورزش سبک انجام دادم","یه برنامه‌ی ورزشی مشخص رو دنبال کردم",
     "حرکات کششی و نرمشی رو با تمرکز بیشتری انجام دادم","این هفته منظم‌تر از هفته‌ی قبل ورزش کردم",
     "ورزش کردن دیگه نیاز به اراده‌ی زیاد نداره، بخشی از روتینمه","ورزش دیگه بخش خودکار روزمه؛ حتی دلم می‌خواد اگه یه روز نکنم"],
+  parents: ["امروز با پدر یا مادرم تماس گرفتم یا حضوری احوالشونو پرسیدم",
+    "تو صحبت با پدر و مادرم، لحن آروم و محترمانه‌مو حتی وقتی نظرمون فرق داشت حفظ کردم",
+    "یه کار کوچیک برای کمک به پدر یا مادرم انجام دادم، بدون اینکه ازم بخوان",
+    "این هفته وقت بیشتری رو نسبت به قبل با پدر و مادرم گذروندم یا باهاشون در ارتباط بودم",
+    "احترام و رسیدگی به پدر و مادرم دیگه بخش طبیعی و روزمره‌ی زندگیمه",
+    "حتی وقتی سرم شلوغ یا خسته بودم، بازم برای پدر و مادرم وقت و احترام گذاشتم"],
   other: ["امروز یه قدم کوچیک در مسیر «{X}» برداشتم","یه تمرین مشخص برای پیشرفت تو «{X}» انجام دادم",
     "زمان مشخصی رو به «{X}» اختصاص دادم","این هفته پیشرفت محسوسی تو «{X}» داشتم",
     "کار کردن رو «{X}» دیگه بخش طبیعی از روزمه","«{X}» دیگه واقعاً بخشی از روتین روزمره‌امه"]
@@ -506,6 +449,9 @@ const ADDICTION_ITEMS_HEAVY = {
   anxiety: ["علائم جسمی اضطراب (تپش قلب، تنش عضلانی) رو همون لحظه شناسایی و ثبت کردم","حداقل دو بار امروز تمرین تنفس یا آرام‌سازی عضلانی پیش‌رونده انجام دادم",
     "مصرف اخبار/محتوای اضطراب‌زا رو به یه بازه‌ی زمانی مشخص و کوتاه محدود کردم","این هفته شدت اضطرابم نسبت به هفته‌ی قبل محسوس کمتر شد",
     "دیگه اضطراب منو از انجام کارهای روزمره‌ام باز نمی‌داره","اضطراب دیگه کنترلم رو دست نمی‌گیره؛ همیشه یه راه سریع برای آروم شدن دارم"],
+  aggression: ["دقیقاً ثبت کردم امروز کِی و به چه دلیلی عصبانی شدم","به‌محض اولین نشونه‌ی خشم، از اتاق یا موقعیت خارج شدم تا آروم بشم",
+    "یه تکنیک آرام‌سازی مشخص (نفس عمیق، شمردن تا ۱۰) رو امروز واقعاً به کار بردم","این هفته دفعات از کوره در رفتنم به‌وضوح نسبت به هفته‌ی قبل کمتر شد",
+    "دیگه لازم نیست هر بار آگاهانه خودمو کنترل کنم؛ آرامش خودکار شده","حتی تو پرتنش‌ترین موقعیت هفته هم دستم به کسی یا چیزی بلند نشد و صدام بالا نرفت"],
   other: ["امروز یه قدم محسوس و بزرگ‌تر در کنترل «{X}» برداشتم","به‌محض اولین نشونه‌ی وسوسه‌ی «{X}»، فوراً محیط یا کارمو عوض کردم",
     "یه مانع عملی جلوی دسترسی آسون به «{X}» گذاشتم","این هفته پیشرفت محسوسی نسبت به هفته‌ی قبل در «{X}» داشتم",
     "کنترل «{X}» دیگه نیاز به جنگ روزانه نداره","«{X}» دیگه واقعاً از زندگی روزمره‌ام کنار رفته"]
@@ -570,6 +516,10 @@ const MARITAL_COPING_ITEMS = {
     single: "نگرانی امروزمو به‌جای نگه‌داشتن تو دلم، تو یه دفترچه نوشتم تا تنها باهاش کلنجار نرم",
     married: "نگرانی امروزمو با همسرم در میون گذاشتم، به‌جای تنها نگه‌داشتنش تو دلم"
   },
+  aggression: {
+    single: "چون کسی نیست بعد از عصبانیت باهام صحبت کنه، خودم قبل از واکنش یه لحظه مکث کردم و به دلیل واقعی عصبانیتم فکر کردم",
+    married: "وقتی عصبانی شدم، به‌جای پرخاش به همسرم، بهش گفتم لازمه چند دقیقه تنها باشم و بعد آروم صحبت کردیم"
+  },
   other: {
     single: "چون فعلاً مجردم، رو خودکنترلی و حمایت دوستان/خانواده برای «{X}» تمرکز کردم، نه یه راه‌حل رابطه‌ای",
     married: "درباره‌ی «{X}» با همسرم صادق بودم و باهم دنبال راه‌حل مشترک گشتیم"
@@ -590,6 +540,7 @@ const MARITAL_AVOID_EXTRA = {
   shopping: { single: "خرید تکانشی برای پر کردن یه خلأ یا تنهایی", married: "خرید بدون هماهنگی با همسر و پنهون‌کردن هزینه‌ها ازش" },
   nailbiting: { single: "نبود کسی که موقع جویدن ناخن یادآوریم کنه", married: "نادیده گرفتن یادآوری‌های همسرم وقتی حواسم به جویدن ناخن نیست" },
   anxiety: { single: "غرق شدن تنها تو نگرانی‌ها بدون در میون گذاشتنش با کسی", married: "نگه‌داشتن اضطرابم برای خودم به‌جای درددل کردن با همسرم" },
+  aggression: { single: "خالی کردن عصبانیت روی اطرافیان یا خودم، فقط چون کسی نزدیکم نیست که باهاش حرف بزنم", married: "پرخاش یا تندی به همسرم به‌جای گفتن آرومِ چیزی که ناراحتم کرده" },
   other: { single: "تنها موندن با «{X}» بدون هیچ حمایتی از بیرون", married: "پنهون‌کردن «{X}» از همسرم به‌جای کمک خواستن ازش" }
 };
 
@@ -606,6 +557,68 @@ const STRESS_COPING_ITEM = "امروز به‌جای فرار به عادت قد
 const TRIGGER_MAP_ITEM = "موقعیت‌ها و محرک‌هایی که بیشتر وسوسه‌ام می‌کنن رو امروز یه‌جا یادداشت کردم (نقشه‌ی محرک‌ها)";
 /* tied to the sleep-pattern question from onboarding (step 6) — previously collected but never used in the checklist */
 const SLEEP_HYGIENE_ITEM = "ساعت خواب و بیداریم رو نسبت به دیروز باثبات‌تر نگه داشتم و قبل خواب صفحه‌نمایش رو کنار گذاشتم";
+/* ---- the one extra item driven purely by actual behavior over the last week,
+   not by anything answered in onboarding — see recentCompletionTrend() and its
+   use in getPersonalizedPhaseItems(). Kept deliberately distinct in wording
+   from the existing motivationLevel>=9 bonus line above so the two can coexist
+   without reading like duplicates. ---- */
+const ADAPTIVE_SUPPORT_ITEM = "چون این چند روز برام سخت‌تر از معمول بوده، امروز فقط رو همین چک‌لیست کوچیک تمرکز کردم و همینو هم به خودم حساب آوردم";
+const ADAPTIVE_STRETCH_ITEM = "با توجه به ثبات خوب این مدتم، امروز یه قدم اضافه، فراتر از حداقل چک‌لیست، به‌خاطر همین روند خوب برداشتم";
+/* ---- looks at the last 7 real calendar days (never today, which is still in
+   progress) and returns whether this specific person has recently been
+   struggling or excelling, purely from their own completion history —
+   independent of anything they answered in onboarding. Same conservative
+   "not enough history yet -> neutral" guard as computeMotivationRisk
+   elsewhere in the file, so brand-new profiles are unaffected. ---- */
+function recentCompletionTrend(){
+  if(!storeData.startDate) return 'neutral';
+  let sum = 0, count = 0;
+  for(let i=1;i<=7;i++){
+    const e = storeData.entries[addDaysToKey(today, -i)];
+    if(!e || !e.total) continue;
+    const done = Object.values(e.done||{}).filter(Boolean).length + Object.values(e.avoidDone||{}).filter(Boolean).length;
+    sum += Math.min(1, done / e.total);
+    count++;
+  }
+  if(count < 4) return 'neutral';
+  const avg = sum / count;
+  if(avg < 0.4) return 'struggling';
+  if(avg >= 0.9) return 'excelling';
+  return 'neutral';
+}
+/* ---- real adaptive phase pacing: on top of the behavioral trend above, this
+   nudges WHICH PHASE's item pool currently applies (currentPhase), so someone
+   who's been consistently finishing their whole list moves into a harder,
+   less-repetitive phase a little sooner, and someone going through a rough
+   patch gets to stay in the gentler, more foundational phase a little longer
+   — instead of every user landing on the exact same phase on the exact same
+   calendar day regardless of how it's actually going for them.
+   Deliberately bounded to at most ~1/3 of the CURRENT phase's own width (and
+   never more than 10 days either direction) so it's a nudge, not a leapfrog —
+   nobody skips an entire extra phase in one go, in either direction.
+   This only ever changes currentPhase (checklist content, the phase badge,
+   library articles, AI-mentor framing) — programDay() itself is untouched
+   everywhere else (streaks, "day X of Y" labels, the mountain marker's
+   physical position, and the goals roadmap in buildGoalGroups, which stays a
+   fixed calendar-day "suggested plan" on purpose, exactly like it already
+   says it is — see the comment above buildGoalGroups). ---- */
+function phasePaceOffsetDays(){
+  if(!storeData.startDate) return 0;
+  const trend = recentCompletionTrend();
+  if(trend === 'neutral') return 0;
+  const day = (typeof programDay==='function') ? programDay() : 1;
+  const phases = scaledPhases();
+  const idx = Math.max(0, phases.findIndex(p=>day<=p.max));
+  const prevMax = idx>0 ? phases[idx-1].max : 0;
+  const curMax = phases[idx].max===Infinity ? day+30 : phases[idx].max;
+  const width = Math.max(1, curMax - prevMax);
+  const cap = Math.max(1, Math.min(10, Math.round(width/3)));
+  return trend === 'excelling' ? cap : -cap;
+}
+function pacedProgramDay(){
+  const raw = (typeof programDay==='function') ? programDay() : 1;
+  return Math.max(1, raw + phasePaceOffsetDays());
+}
 
 function otherLabel(){ return (storeData.profile && storeData.profile.otherAddictionText) ? storeData.profile.otherAddictionText : "این موضوع"; }
 function fillX(text){ return text.replace(/\{X\}/g, otherLabel()); }
@@ -689,22 +702,503 @@ const CORE_VARIANTS = {
   "خواب باکیفیت و منظم": "یه خواب باکیفیت و منظم داشتم",
   "یادداشت رشدی که این هفته کردی": "رشدی که این هفته داشتم رو یادداشت کردم"
 };
-function personalizeCoreLine(text, profile, idx){
+/* ================= Deep personalization engine v2 =================
+   Everything above (CORE_VARIANTS, HABIT_ITEM_VARIANTS) only ever swaps a
+   line for ONE fixed paraphrase of the exact same task — so two people with
+   different onboarding answers who happen to land on the same phase/habit
+   still did, word for word, the same underlying checklist. This section adds
+   a real second layer on top: for each "slot" below (wake-up, movement,
+   outdoor time, meals, social, screen, journaling, goal-progress, sleep) a
+   user can get a genuinely DIFFERENT concrete task, chosen by how well it
+   matches their own onboarding signals (chronotype/mainObstacle/motivationType/
+   goal/stress/support-style/health flags — see activeProfileTags), not just a
+   reworded version of the default. It also carries a slow-moving behavioral
+   signal (tagAffinity, below) that nudges selection further based on which
+   *kinds* of tasks this specific person actually keeps checking off over the
+   life of their program — so two users who answered onboarding identically
+   can still end up on visibly different paths a month in.
+   Nothing here replaces PHASES/ADDICTION_ITEMS/GOOD_HABIT_ITEMS or touches
+   their canonical strings — buildGoalGroups (the roadmap) and the AI-prompt
+   summaries keep reading those stable base pools directly, unaffected. And if
+   a slot below has no entry, or no candidate for it scores above the neutral
+   default, the result is byte-identical to the old CORE_VARIANTS behavior —
+   this only ever adds variety, it never removes the previous fallback. */
+
+/* storeData.tagAffinity: {tag: {done, shown}} — a slowly-accumulating, per-user
+   record of which tag-categories this person tends to actually complete once
+   they see them, updated live every time an item is checked/unchecked (see
+   recordItemFeedback, wired into renderList's toggle handler below). */
+function ensureTagAffinity(){
+  if(!storeData.tagAffinity) storeData.tagAffinity = {};
+  return storeData.tagAffinity;
+}
+function tagAffinityScore(tag){
+  const a = ensureTagAffinity()[tag];
+  if(!a || a.shown < 3) return 0; // not enough signal yet for this tag — stay neutral
+  const rate = a.done / a.shown;
+  // centered on 0 and capped to +/-1 so behavior can nudge which variant wins
+  // a close call, but a strong onboarding-signal match (worth +2, see
+  // scoreVariant) can never be fully overridden by behavior alone.
+  return Math.max(-1, Math.min(1, (rate - 0.5) * 2));
+}
+function recordItemFeedback(tags, turnedOn){
+  if(!tags || !tags.length) return;
+  const aff = ensureTagAffinity();
+  tags.forEach(tag=>{
+    if(!aff[tag]) aff[tag] = { done:0, shown:0 };
+    aff[tag].shown++;
+    if(turnedOn) aff[tag].done++;
+  });
+}
+/* One place that turns a profile into the set of tags currently "active" for
+   that person — every new onboarding signal only ever needs to be wired in
+   here once to affect every tagged pool (core slots, habit items, extras). */
+function activeProfileTags(profile){
+  const p = profile || storeData.profile || {};
+  const tags = [];
+  if(p.chronotype) tags.push('chrono:'+p.chronotype);
+  if(p.mainObstacle) tags.push('obstacle:'+p.mainObstacle);
+  if(p.motivationType) tags.push('motiv:'+p.motivationType);
+  if(p.exerciseAccess) tags.push('exaccess:'+p.exerciseAccess);
+  if(p.exerciseLevel) tags.push('exlevel:'+p.exerciseLevel);
+  if(p.goal) tags.push('goal:'+p.goal);
+  if(p.gender) tags.push('gender:'+p.gender);
+  if(p.sleepPattern) tags.push('sleep:'+p.sleepPattern);
+  if(p.supportStyle) tags.push('support:'+p.supportStyle);
+  if((p.stressLevel||0) >= 4) tags.push('stress:high');
+  if(typeof getHealthFlags==='function'){
+    try{ if(getHealthFlags().hasMoodTag) tags.push('mood:flagged'); }catch(e){}
+  }
+  return tags;
+}
+/* A candidate with no tags always scores exactly 0 — the same as the
+   untagged default line — so an empty/unanswered profile never loses to a
+   tagged variant it doesn't actually match. */
+function scoreVariant(candidateTags, activeTags, seedStr){
+  if(!candidateTags || !candidateTags.length) return 0;
+  let score = 0, matched = 0;
+  candidateTags.forEach(t=>{
+    if(activeTags.indexOf(t) >= 0){ score += 2 + tagAffinityScore(t); matched++; }
+  });
+  if(matched === 0) return 0; // no genuine signal at all — must stay at 0 so it can never outscore the untagged default
+  // tiny deterministic jitter, only among candidates that already have at least
+  // one real match, so ties between two equally-matching candidates don't
+  // always resolve the same way for every user with an identical tag combo.
+  score += (hashSeed(seedStr) % 97) / 1000;
+  return score;
+}
+function pickTaggedVariant(baseText, candidates, profile, seedSuffix, day){
+  const activeTags = activeProfileTags(profile);
+  let bestText = baseText, bestScore = 0;
+  (candidates||[]).forEach(c=>{
+    const s = scoreVariant(c.tags, activeTags, baseText+'|'+seedSuffix+'|'+(day||1)+'|'+c.text);
+    if(s > bestScore){ bestScore = s; bestText = c.text; }
+  });
+  return { text: bestText };
+}
+
+/* ---- tagged real-alternative pools for the universal core slots. Each key is
+   the exact default line from PHASES; each candidate is a genuinely different
+   concrete task (not a paraphrase) that only wins for someone whose profile
+   actually matches its tags. Slots not listed here simply keep the existing
+   CORE_VARIANTS wording-rotation behavior. ---- */
+const CORE_LINE_VARIANTS = {
+  "بیدار شدن سر ساعت مشخص": [
+    { text:"همون اولین لحظه‌ی بیداری، بدون چرت دوباره، از جام بلند شدم", tags:['chrono:morning'] },
+    { text:"یه ساعت بیداری ثابت برای خودم تعریف کردم که به ریتم شبی‌ام واقعاً بخوره، نه لزوماً خیلی زود", tags:['chrono:night'] },
+    { text:"اگه دقیقاً سر همون ساعت بیدار نشدم، به‌جای سرزنش خودم فقط برگشتم رو ریتم عادی", tags:['obstacle:perfectionism'] }
+  ],
+  "بیدار شدن سر ساعت مشخص، بدون تأخیر زیاد": [
+    { text:"صبح، همون اول انرژی روز، بدون چرت دوباره بیدار شدم", tags:['chrono:morning'] },
+    { text:"ساعت بیداریمو با ریتم شبیم هماهنگ نگه داشتم، نه با یه استاندارد بیرونی", tags:['chrono:night'] }
+  ],
+  "بیدار شدن سر ساعت مشخص، بدون کم و زیاد": [
+    { text:"صبح‌ها دیگه بدون کشمکش با خودم، سرحال از جام بلند می‌شم", tags:['chrono:morning'] },
+    { text:"حتی به‌عنوان یه آدم شبی، ساعت بیداریم این هفته کاملاً ثابت موند", tags:['chrono:night'] }
+  ],
+  "بیدار شدن ثابت، بدون نیاز به یادآوری": [
+    { text:"بیدار شدن سرساعت دیگه واقعاً بخشی از هویت صبح‌گاهی‌امه، نه یه تلاش", tags:['chrono:morning'] },
+    { text:"حتی با ریتم شبی خودم، ثبات ساعت بیداری دیگه بدون تلاش اتفاق می‌افته", tags:['chrono:night'] }
+  ],
+  "۱۰-۱۵ دقیقه بیرون از اتاق": [
+    { text:"همون صبح زود، همون بهترین ساعت انرژیم، رفتم بیرون و نور طبیعی گرفتم", tags:['chrono:morning'] },
+    { text:"بیرون رفتنمو گذاشتم برای بعدازظهر/عصر، وقتی واقعاً حالم بهتره", tags:['chrono:night'] },
+    { text:"به‌جای فقط ایستادن بیرون، یه قدم کوتاه و بی‌هدف زدم تا حس رخوت بشکنه", tags:['obstacle:boredom'] }
+  ],
+  "۲۰-۲۵ دقیقه بیرون از خونه": [
+    { text:"صبح زود، تو بهترین ساعت انرژیم، ۲۰-۲۵ دقیقه بیرون بودم و نور روز گرفتم", tags:['chrono:morning'] },
+    { text:"بیرون‌بودنمو برای عصر گذاشتم؛ اونجا واقعاً بیشتر حالم جا می‌افته", tags:['chrono:night'] }
+  ],
+  "وعده صبحانه سر وقت": [
+    { text:"صبحانه رو کامل و متناسب با هدف کاهش وزنم خوردم، بدون حذفش", tags:['goal:lose'] },
+    { text:"صبحانه رو کامل و پرانرژی خوردم — برای هدف افزایش وزنم مهمه که هیچ وعده‌ای جا نیفته", tags:['goal:gain'] }
+  ],
+  "وعده ناهار سر وقت": [
+    { text:"ناهار رو حتی تو یه روز پراسترس، سر وقت و بدون جا انداختنش خوردم", tags:['stress:high'] }
+  ],
+  "سه وعده غذایی سر وقت": [
+    { text:"هر سه وعده رو سر وقت و متناسب با هدف کاهش وزنم، بدون حذف کامل هیچ‌کدوم خوردم", tags:['goal:lose'] },
+    { text:"هر سه وعده رو کامل و سر وقت خوردم — برای افزایش وزن سالم نباید هیچ وعده‌ای جا بیفته", tags:['goal:gain'] }
+  ],
+  "سه وعده غذایی منظم و متنوع": [
+    { text:"حتی تو یه هفته‌ی پراسترس، سه وعده‌مو منظم و بدون حذف کامل نگه داشتم", tags:['stress:high'] }
+  ],
+  "پیاده‌روی ۱۵-۲۰ دقیقه": [
+    { text:"پیاده‌روی امروزمو صبح، همون اول انرژی روزم، انجام دادم", tags:['chrono:morning'] },
+    { text:"پیاده‌روی امروزمو عصر یا شب، وقتی بدنم واقعاً گرمه، انجام دادم", tags:['chrono:night'] },
+    { text:"پیاده‌روی امروزمو با یه پادکست یا آهنگی که واقعاً دوست دارم انجام دادم تا حوصله‌م سر نره", tags:['obstacle:boredom'] }
+  ],
+  "۲۵-۳۰ دقیقه پیاده‌روی یا ورزش سبک": [
+    { text:"ورزش امروزمو صبح، تو اوج انرژیم، انجام دادم", tags:['chrono:morning'] },
+    { text:"ورزش امروزمو عصر، وقتی واقعاً بهترین حالتمه، انجام دادم", tags:['chrono:night'] }
+  ],
+  "۳۰ دقیقه فعالیت بدنی (پیاده‌روی سریع یا باشگاه)": [
+    { text:"۳۰ دقیقه فعالیت بدنی رو صبح زود، قبل از شروع مشغله‌های روز، انجام دادم", tags:['chrono:morning'] },
+    { text:"۳۰ دقیقه فعالیت بدنی رو عصر/شب، تو بهترین ساعت بدنم، انجام دادم", tags:['chrono:night'] }
+  ],
+  "جلسه ورزش واقعی حداقل ۳۰-۴۵ دقیقه": [
+    { text:"جلسه‌ی ورزش امروزمو صبح، اول از هر مشغله‌ی دیگه، تموم کردم", tags:['chrono:morning'] },
+    { text:"جلسه‌ی ورزش امروزمو عصر/شب، وقتی بدنم واقعاً آماده‌ست، انجام دادم", tags:['chrono:night'] }
+  ],
+  "یک گفتگوی واقعی با یکی از اطرافیان": [
+    { text:"با یه نفر که واقعاً باهاش راحتم، حتی فقط یه پیام کوتاه ولی واقعی رد و بدل کردم", tags:['obstacle:social'] },
+    { text:"با یکی از عزیزترین آدمای زندگیم، بدون عجله، یه گفتگوی واقعی داشتم", tags:['motiv:relationships'] }
+  ],
+  "یک فعالیت اجتماعی واقعی (تماس یا دیدار حضوری)": [
+    { text:"چون جمع‌های بزرگ برام سخته، با یه نفر، فقط یه نفر، یه تماس یا دیدار واقعی داشتم", tags:['obstacle:social'] },
+    { text:"با خانواده یا کسی که واقعاً برام مهمه، یه تماس یا دیدار حضوری داشتم", tags:['motiv:relationships'] }
+  ],
+  "حداقل یک تعامل اجتماعی معنادار": [
+    { text:"تعامل اجتماعی امروزمو کوچیک و قابل‌مدیریت نگه داشتم، ولی واقعی و بدون فرار", tags:['obstacle:social'] },
+    { text:"یه تعامل اجتماعی مرتبط با کار/تحصیلم داشتم که واقعاً به مسیرم کمک کرد", tags:['motiv:career'] }
+  ],
+  "حفظ ارتباط اجتماعی فعال": [
+    { text:"با وجود گرایش به کنار کشیدن، امروز خودمو برای یه ارتباط واقعی جلو کشیدم", tags:['obstacle:social'] },
+    { text:"ارتباطاتی که به آینده‌ی کاری/تحصیلی‌ام مربوطن رو امروز هم زنده نگه داشتم", tags:['motiv:career'] }
+  ],
+  "خاموش کردن گوشی سر ساعت مشخص شب": [
+    { text:"قبل از برداشتن گوشی بدون فکر، یه لحظه از خودم پرسیدم الان واقعاً چرا می‌خوامش", tags:['obstacle:automatic'] },
+    { text:"وقتی حوصله‌م سر رفت و خواستم گوشی بردارم، اول یه کار جایگزین کوتاه امتحان کردم", tags:['obstacle:boredom'] }
+  ],
+  "خاموش کردن گوشی حداقل نیم ساعت قبل خواب": [
+    { text:"همین که دستم خودکار سمت گوشی رفت، متوجه شدم و آگاهانه گذاشتمش کنار", tags:['obstacle:automatic'] }
+  ],
+  "محدود کردن بازی/گوشی به زیر ۳ ساعت آزاد": [
+    { text:"هر بار که خواستم فقط از سر بی‌حوصلگی گوشی/بازی رو باز کنم، اول یه کار جایگزین امتحان کردم", tags:['obstacle:boredom'] }
+  ],
+  "محدود کردن بازی/گوشی به زیر ۲ ساعت آزاد": [
+    { text:"دیگه گوشی/بازی اولین واکنش خودکارم به بی‌حوصلگی نیست", tags:['obstacle:boredom'] }
+  ],
+  "گوشی/بازی فقط در زمان مشخص و محدود": [
+    { text:"استفاده‌ی خودکار و بی‌فکر از گوشی رو امروز چندبار به‌موقع متوجه شدم و متوقفش کردم", tags:['obstacle:automatic'] }
+  ],
+  "یادداشت یک کار کوچیک که درست انجام دادم": [
+    { text:"یادداشت امروزمو با تمرکز روی یه انتخاب سالم که داشتم نوشتم", tags:['motiv:health'] },
+    { text:"یادداشت امروزمو با تمرکز روی یه لحظه که واقعاً به خودم افتخار کردم نوشتم", tags:['motiv:selfrespect'] }
+  ],
+  "یادداشت روزانه": [
+    { text:"یادداشت امروزمو حول یه قدم کاری/تحصیلی که برداشتم نوشتم", tags:['motiv:career'] },
+    { text:"یادداشت امروزمو حول یه لحظه‌ی خوب با یکی از آدمای مهم زندگیم نوشتم", tags:['motiv:relationships'] }
+  ],
+  "یادداشت روزانه با تمرکز روی نقطه قوت امروز": [
+    { text:"یادداشت امروزمو با تمرکز روی یه قدم واقعی سمت هدف کاری/تحصیلی‌ام نوشتم", tags:['motiv:career'] },
+    { text:"یادداشت امروزمو با تمرکز روی جایی که به‌جای دنبال «کامل»، فقط «واقعی و کافی» رفتم نوشتم", tags:['obstacle:perfectionism'] }
+  ],
+  "مرور کوتاه پیشرفت این هفته": [
+    { text:"مرور امروزمو با تمرکز روی مسیر کاری/تحصیلی‌ام انجام دادم", tags:['motiv:career'] },
+    { text:"تو مرور امروز، به‌جای دنبال کمال، فقط روی ثبات و تلاش واقعیم تمرکز کردم", tags:['obstacle:perfectionism'] }
+  ],
+  "یادداشت رشدی که این هفته کردی": [
+    { text:"رشد این هفته‌مو با تمرکز روی روابطم با آدمای اطرافم نوشتم", tags:['motiv:relationships'] },
+    { text:"رشد این هفته‌مو با تمرکز روی مسیر کاری/تحصیلی‌ام نوشتم", tags:['motiv:career'] }
+  ],
+  "یک هدف کوچیک کاری/شخصی امروز تعریف و انجام دادم": [
+    { text:"به‌جای دنبال کردن نسخه‌ی کامل هدف امروزم، فقط یه قدم کوچیک ولی واقعی برداشتم", tags:['obstacle:perfectionism'] },
+    { text:"هدف کوچیک امروزمو مستقیم مرتبط با مسیر کاری/تحصیلی‌ام تعریف و تمومش کردم", tags:['motiv:career'] }
+  ],
+  "پیشرفت در یک هدف بزرگ‌تر (کاری/تحصیلی/شخصی)": [
+    { text:"به‌جای منتظر موندن برای شرایط «کامل»، با همین امکانات ناقص هم یه قدم جلو رفتم", tags:['obstacle:perfectionism'] }
+  ],
+  "پیگیری اهداف بلندمدتت": [
+    { text:"یه قدم واقعی، هرچقدرم کوچیک، تو مسیر بلندمدت کاری/تحصیلی‌ام برداشتم", tags:['motiv:career'] }
+  ],
+  "خواب قبل از ساعت ۱۲": [
+    { text:"با اینکه آدم شبی‌ام، ساعت خوابمو به یه حد منطقی‌تر نزدیک‌تر کردم، نه لزوماً خیلی زود", tags:['chrono:night'] },
+    { text:"با وجود یه روز پراسترس، بازم برای خواب وقت گذاشتم و بهش اولویت دادم", tags:['stress:high'] }
+  ],
+  "رعایت زمان خواب سالم": [
+    { text:"ریتم خواب شبیمو به‌جای جنگیدن باهاش، به یه نسخه‌ی سالم‌تر از خودش نزدیک کردم", tags:['chrono:night'] }
+  ],
+  "خواب باکیفیت و منظم": [
+    { text:"حتی به‌عنوان یه آدم شبی، الان یه ریتم خواب سالم و ثابت مخصوص خودمو پیدا کردم", tags:['chrono:night'] }
+  ]
+};
+function personalizeCoreLine(text, profile, idx, day){
+  const tagged = CORE_LINE_VARIANTS[text];
+  if(tagged && tagged.length){
+    const picked = pickTaggedVariant(text, tagged, profile, 'core'+idx, day);
+    if(picked.text !== text) return picked.text; // a real profile-matched variant won — already reads distinct, skip the generic rotation below
+  }
   const variant = CORE_VARIANTS[text];
   if(!variant) return text;
-  const pick = (profileSeed(profile) + idx*2654435761) % 2;
+  // day is mixed into the pick (not just the user's fixed seed) so a routine line
+  // that has a paraphrase doesn't read identically for the same person on every
+  // single day of a phase — see HABIT_ITEM_VARIANTS below for the same idea
+  // applied to the habit-specific items.
+  const pick = (profileSeed(profile) + idx*2654435761 + (day||1)) % 2;
   return pick === 0 ? text : variant;
+}
+/* ---- day-rotating rewording for the one evolving item that represents each
+   selected addiction-to-quit or good-habit-to-build inside a phase. Without
+   this, that exact sentence repeats verbatim every day for as long as the
+   phase lasts (phases 3-5 run 15-30+ days), which is the main source of the
+   checklist feeling repetitive. Each canonical phase line optionally has one
+   alternate phrasing of the identical action/difficulty; rotateHabitLine
+   picks between the canonical text and its alternate based on the program
+   day, so the same person sees varied wording day to day while still doing
+   the same underlying task. This is a lookup keyed by the exact base string,
+   layered on top of ADDICTION_ITEMS/GOOD_HABIT_ITEMS rather than replacing
+   them, so every other place that reads those pools directly for a fixed,
+   canonical label (phase-milestone goals in buildGoalGroups, AI-prompt
+   summaries) is completely unaffected and keeps showing the one stable
+   string that phase has always used. ---- */
+const HABIT_ITEM_VARIANTS = {
+  // ---- addictions to quit ----
+  "امروز از محتوای محرک جنسی دوری کردم": "امروز به‌طور کامل از محرک‌های جنسی فاصله گرفتم",
+  "وقتی محرک دیدم، به‌جای واکنش خودکار، چند دقیقه صبر کردم": "وقتی یه محرک جلوی چشمم اومد، نگاه نکردم و بلافاصله ردش کردم",
+  "به‌جای دنبال محرک گشتن، یه فعالیت جایگزین از قبل‌برنامه‌ریزی‌شده انجام دادم": "به‌جای گشتن دنبال محرک، سراغ یه کار جایگزین که از قبل براش برنامه داشتم رفتم",
+  "این هفته بدون نیاز به یادآوری، از محرک‌ها فاصله گرفتم": "این هفته حتی بدون هیچ یادآوری‌ای خودم از محرک‌ها دور موندم",
+  "این عادت داره بخشی خودکار از روزم می‌شه، نه یه جنگ روزانه": "دیگه نیازی به جنگیدن روزانه با این وسوسه ندارم؛ خودش داره طبیعی می‌شه",
+  "حتی تو یه روز سخت یا استرس‌زا هم این کنترل رو حفظ کردم": "حتی یه روز پراسترس هم نتونست این کنترلمو بشکنه",
+
+  "مصرف سیگار امروزمو نسبت به روال قبلی ثبت و کم‌تر کردم": "امروز تعداد نخ‌های سیگارمو ثبت کردم و نسبت به همیشه کمتر کشیدم",
+  "یه بار وسوسه‌ی سیگار اومد و بدون کشیدن ازش رد شدم": "یه وسوسه‌ی سیگار سراغم اومد و بدون کشیدن گذشت",
+  "یه روز کامل با مصرف خیلی کمتر یا صفر سیگار داشتم": "امروز مصرفم رو تقریباً صفر یا خیلی کم نگه داشتم",
+  "این هفته مصرفم محسوس کمتر از هفته‌ی قبل بود": "این هفته نسبت به هفته‌ی قبل واقعاً کمتر سیگار کشیدم",
+  "دیگه سیگار اولین واکنشم به استرس نیست": "استرس دیگه اولین بهونه‌ام برای سیگار کشیدن نیست",
+  "تو یه موقعیت اجتماعی که قبلاً حتماً می‌کشیدم، امروز نکشیدم": "تو یه جمع که همیشه اونجا می‌کشیدم، امروز کاملاً بی‌سیگار رد شدم",
+
+  "مصرف امروزمو صادقانه ثبت کردم": "امروز دقیق و صادقانه ثبت کردم چقدر مصرف داشتم",
+  "یه موقعیت اجتماعی داشتم و بدون نوشیدن الکل ازش لذت بردم": "تو یه جمع بودم و بدون هیچ الکلی خوش گذروندم",
+  "یه روز کامل بدون الکل رو تجربه کردم": "امروز رو کاملاً بدون الکل گذروندم",
+  "دیگه برای آروم شدن اول سراغ الکل نمی‌رم": "برای آروم شدن دیگه اول یاد الکل نمی‌افتم",
+  "حتی تو یه شب سخت هم بدون الکل از پسش براومدم": "حتی یه شب سخت هم بدون الکل باهاش کنار اومدم",
+
+  "زمان بازی امروز رو از قبل مشخص کردم و بهش پایبند موندم": "امروز از قبل یه سقف زمانی برای بازی گذاشتم و رعایتش کردم",
+  "بازی رو به یه بازه‌ی مشخص و محدود از روز منتقل کردم": "بازی کردنمو فقط تو یه بازه‌ی کوتاه و مشخص از روز جا دادم",
+  "یه روز بدون بازی رو تجربه کردم و به‌جاش یه کار دیگه کردم": "امروز اصلاً بازی نکردم و وقتشو صرف یه کار دیگه کردم",
+  "بازی دیگه اولین کاری نیست که سراغش می‌رم وقتی بیکارم": "وقتی بیکارم دیگه اول سراغ بازی نمی‌رم",
+  "بازی برام یه سرگرمی کنترل‌شده‌ست، نه یه فرار روزانه": "بازی الان یه سرگرمی کنترل‌شده‌ست، نه راه فرارم از روز",
+  "حتی تو یه روز پرحوصله یا بیکار هم به سقف زمانی بازی پایبند موندم": "حتی تو یه روز کاملاً بیکار هم از سقف زمانی بازی رد نشدم",
+
+  "قبل از خوردن به‌خاطر حس بد، یه لحظه مکث کردم و پرسیدم واقعاً گرسنمه؟": "قبل از خوردن هیجانی یه لحظه مکث کردم و از خودم پرسیدم واقعاً گرسنمه",
+  "به‌جای خوردن هیجانی، یه واکنش جایگزین امتحان کردم": "به‌جای هجوم به غذا وقتی حالم بد بود، یه کار جایگزین امتحان کردم",
+  "وعده‌هامو بدون حواس‌پرتی گوشی/تلویزیون خوردم": "غذامو با تمرکز کامل و بدون گوشی یا تلویزیون خوردم",
+  "این هفته کمتر به‌خاطر استرس یا خلق بد پرخوری کردم": "این هفته سراغ خوردن هیجانی به‌خاطر استرس کمتر رفتم",
+  "غذا خوردنم بیشتر بر اساس گرسنگی واقعیه، نه احساسات": "الان بیشتر به‌خاطر گرسنگی واقعی می‌خورم، نه احساسات",
+  "تو یه روز پراسترس هم بدون پرخوری از پسش براومدم": "یه روز پراسترس داشتم و بدون پرخوری ازش رد شدم",
+
+  "امشب حداقل نیم ساعت زودتر از معمول به رختخواب رفتم": "امشب نیم ساعت زودتر از حد معمول خوابیدم",
+  "یه ساعت مشخص برای خواب تعیین کردم و بهش نزدیک موندم": "یه ساعت خواب مشخص گذاشتم و تقریباً سرِ همون موقع خوابیدم",
+  "قبل خواب گوشی رو کنار گذاشتم و یه کار آرامش‌بخش انجام دادم": "قبل خواب گوشی رو کنار گذاشتم و به‌جاش یه کار آرومش‌بخش کردم",
+  "این هفته ساعت خوابم نسبت به قبل باثبات‌تر بود": "این هفته ساعت خوابم نسبت به هفته‌ی قبل ثابت‌تر بود",
+  "خوابیدن سرساعت دیگه نیاز به تلاش نداره": "سرساعت خوابیدن دیگه خودکار شده، نیازی به تلاش نداره",
+  "حتی یه شب پراسترس یا شلوغ هم ساعت خوابمو حفظ کردم": "حتی یه شب شلوغ و پراسترس هم ساعت خوابم به‌هم نخورد",
+
+  "سخت‌ترین کار امروزمو اول صبح شروع کردم، حتی کوچیک": "همون اول صبح، سخت‌ترین کارمو شروع کردم، هرچند کوچیک",
+  "یه کار مهم عقب‌افتاده رو امروز جلو بردم": "یه کار عقب‌افتاده‌ی مهم رو امروز واقعاً جلو بردم",
+  "یه هدف مشخص روزانه تعیین کردم و تا انتها پیش بردمش": "یه هدف مشخص برای امروز گذاشتم و تا آخر پیگیریش کردم",
+  "این هفته کمتر کارامو به لحظه‌ی آخر موکول کردم": "این هفته کمتر کارامو تا آخرین لحظه عقب انداختم",
+  "شروع کردن کارها دیگه اونقدر سخت نیست که قبلاً بود": "شروع کردن کارها دیگه اون‌قدر سنگین نیست که قبلاً بود",
+  "حتی سخت‌ترین و کسل‌کننده‌ترین کارمم رو امروز بدون معطلی شروع کردم": "حتی کسل‌کننده‌ترین کارمم رو امروز بدون هیچ معطلی شروع کردم",
+
+  "قبل از خرید، ۱۰ دقیقه صبر کردم و پرسیدم واقعاً لازمه؟": "قبل از خرید یه چیز غیرضروری، ۱۰ دقیقه صبر کردم",
+  "اپ‌های خرید رو از صفحه‌ی اول گوشیم برداشتم": "اپ‌های فروشگاهی رو از صفحه‌ی اول گوشیم دور کردم",
+  "یه روز کامل بدون خرید غیرضروری رو تجربه کردم": "امروز هیچ خرید غیرضروری‌ای نداشتم",
+  "این هفته خرید تفننی‌ام محسوس کمتر از قبل بود": "این هفته خرید تفننی‌ام نسبت به هفته‌ی قبل واقعاً کمتر شد",
+  "دیگه برای پر کردن یه حس خالی، اول سراغ خرید نمی‌رم": "برای پر کردن یه حس خالی، دیگه اول یاد خرید نمی‌افتم",
+  "حتی وسط یه تخفیف یا پیشنهاد وسوسه‌انگیز هم به لیست خریدم پایبند موندم": "حتی جلوی یه تخفیف وسوسه‌انگیز هم فقط چیزهای تو لیستمو خریدم",
+
+  "دقیقاً ثبت کردم کِی، کجا و با چه حسی شروع به جویدن ناخن می‌کنم (آموزش آگاهی)": "امروز دقیق نوشتم کی و با چه حسی شروع به جویدن ناخن می‌کنم",
+  "به‌محض اولین نشونه‌ی هشدار (کشش/ناهمواری لبه‌ی ناخن)، به‌جاش مشت کردم یا یه فیجت تو دستم گرفتم": "همین که اولین نشونه‌ی جویدن اومد، دستمو مشت کردم یا یه فیجت گرفتم دستم",
+  "از لاک تلخ‌مزه یا ناخن کوتاه و صاف استفاده کردم تا جویدن سخت‌تر بشه": "از لاک تلخ یا کوتاه نگه‌داشتن ناخن استفاده کردم تا جویدن سخت‌تر بشه",
+  "وقتی استرس یا بی‌حوصلگی محرک جویدن بود، به‌جاش یه تکنیک آرامش‌بخش (نفس عمیق، فشردن یه توپ استرس) امتحان کردم": "وقتی استرس باعث جویدن ناخنم می‌شد، به‌جاش یه تکنیک آرامش‌بخش امتحان کردم",
+  "دیگه نیازی به یادآوری مداوم ندارم؛ دستام خودکار از دهنم دور می‌مونن": "دستام دیگه خودشون، بدون یادآوری، از دهنم فاصله می‌گیرن",
+  "حتی تو یه موقعیت پراسترس (امتحان، جلسه، ترافیک) هم دستام سمت دهنم نرفت": "حتی تو یه موقعیت پراسترس هم دستام سمت دهنم نرفت",
+
+  "افکار نگران‌کننده‌ی امروزمو بدون قضاوت تو یه دفترچه نوشتم": "نگرانی‌های امروزمو بدون قضاوت خودم تو یه دفترچه نوشتم",
+  "وقتی اضطراب اومد سراغم، یه تکنیک تنفسی (مثلاً ۴ ثانیه دم، ۷ ثانیه نگه‌داشتن، ۸ ثانیه بازدم) امتحان کردم": "وقتی اضطراب گرفتم، یه تمرین تنفسی مشخص رو امتحان کردم",
+  "یکی از افکار نگران‌کننده‌ام رو نوشتم و شواهد موافق و مخالفش رو کنار هم گذاشتم": "یه فکر نگران‌کننده رو نوشتم و شواهد له و علیه‌شو کنار هم گذاشتم",
+  "قبل از یه موقعیت که معمولاً اضطرابم می‌ده، از قبل یه برنامه‌ی آرامش‌بخش آماده داشتم": "قبل از یه موقعیت اضطراب‌آور، از قبل یه برنامه‌ی آروم‌سازی آماده کردم",
+  "اضطراب دیگه کنترل کل روزمو دست نمی‌گیره؛ باهاش خیلی آروم‌تر کنار میام": "دیگه اضطراب کل روزمو قبضه نمی‌کنه؛ خیلی آروم‌تر باهاش کنار میام",
+  "حتی تو یه روز پراضطراب هم از تکنیک آرام‌سازیم به‌موقع استفاده کردم": "حتی یه روز پراضطراب هم به‌موقع سراغ تکنیک آرام‌سازیم رفتم",
+
+  "امروز وقتی عصبانی شدم، قبل از هر واکنشی چند ثانیه مکث کردم": "قبل از جواب دادن به چیزی که عصبانیم کرد، چند نفس عمیق کشیدم",
+  "به‌جای داد زدن یا تند حرف زدن، حرفمو با لحن آروم‌تر گفتم": "وقتی حس کردم صدام داره بالا می‌ره، آگاهانه لحنمو پایین آوردم",
+  "قبل از عصبانی شدن، نشونه‌های اولیه‌ی بدنم (تنش فک، ضربان قلب) رو شناختم و عقب کشیدم": "به‌محض حس کردن اولین نشونه‌ی خشم تو بدنم، از موقعیت یه قدم فاصله گرفتم",
+  "این هفته دفعات از کوره در رفتنم نسبت به قبل کمتر بود": "این هفته کمتر از قبل با تندی یا داد به چیزی واکنش نشون دادم",
+  "کنترل خشمم دیگه نیاز به تلاش آگاهانه‌ی زیاد نداره": "آروم موندن جلوی چیزهایی که قبلاً عصبانیم می‌کرد، برام طبیعی‌تر شده",
+  "حتی تو یه بحث یا موقعیت واقعاً عصبی‌کننده هم آرامشمو حفظ کردم": "حتی وقتی حق با من بود و عصبانیت منطقی به نظر می‌رسید، بازم کنترلمو حفظ کردم",
+
+  "امروز قبل از خواب گوشی رو دور از تخت گذاشتم": "امشب گوشی رو کاملاً از دسترس تخت دور نگه داشتم",
+  "یه اپ حواس‌پرت‌کننده رو محدود یا موقتاً حذف کردم": "یه اپ که بیشتر وقتمو می‌گرفت رو موقتاً محدود یا حذف کردم",
+  "یه بازه‌ی مشخص و کامل از روز رو بدون گوشی گذروندم": "یه بخش کامل از امروز رو کاملاً بدون گوشی گذروندم",
+  "زمان استفاده‌ام از شبکه‌های اجتماعی رو ثبت و نسبت به قبل کمتر کردم": "زمان اسکرول تو شبکه‌های اجتماعی رو نسبت به قبل کمتر کردم",
+  "گوشی دیگه اولین و آخرین کاری نیست که تو روزم انجام می‌دم": "دیگه گوشی اولین و آخرین چیزی نیست که سراغش می‌رم",
+  "حتی تو یه لحظه‌ی بی‌حوصلگی هم گوشی اولین واکنشم نبود": "حتی تو یه لحظه‌ی بی‌حوصلگی هم اول سراغ گوشی نرفتم",
+
+  // ---- good habits to build ----
+  "امروز حداقل چند صفحه یا ۱۰ دقیقه کتاب خوندم": "امروز حداقل ۱۰ دقیقه وقت گذاشتم و کتاب خوندم",
+  "یه کتاب مشخص رو شروع کردم و بهش پایبند موندم": "یه کتاب مشخص رو دنبال کردم و رهاش نکردم",
+  "یه روتین ثابت مطالعه (مثلاً قبل خواب) رو رعایت کردم": "مطالعه رو تو یه بازه‌ی ثابت از روزم (مثلاً قبل خواب) جا دادم",
+  "این هفته حجم مطالعه‌ام نسبت به قبل بیشتر شد": "این هفته نسبت به هفته‌ی قبل بیشتر مطالعه کردم",
+  "مطالعه‌ی روزانه دیگه بخش خودکار روزمه، نه یه تلاش اضافه": "کتاب خوندن دیگه بدون فکر کردن تو روزم جا افتاده",
+  "کتاب خوندن دیگه بخش خودکار روزمه؛ حتی دلم براش تنگ می‌شه اگه یه روز نخونم": "اگه یه روز کتاب نخونم واقعاً دلم براش تنگ می‌شه",
+
+  "امروز چند دقیقه تمرین صداسازی و تلفظ انجام دادم": "چند دقیقه‌ای رو صرف تمرین صداسازی و تلفظ کردم",
+  "یه تمرین مشخص فن بیان (خوندن بلند، ضبط صدا) رو تکرار کردم": "یه تمرین مشخص فن بیان مثل خوندن بلند یا ضبط صدا رو تکرار کردم",
+  "از ضبط صدای خودم بازخورد گرفتم و نقطه‌ضعفمو پیدا کردم": "صدای خودمو ضبط و گوش کردم و نقطه‌ضعفمو پیدا کردم",
+  "این هفته اعتماد به نفسم تو صحبت جلوی جمع بیشتر شد": "این هفته صحبت جلوی جمع برام راحت‌تر شد",
+  "صحبت کردن رسا و شمرده دیگه نیاز به تلاش آگاهانه نداره": "رسا و شمرده حرف زدن دیگه برام خودکار شده",
+  "فن بیان خوب دیگه بخشی از شخصیتمه؛ دیگه نیاز به تمرین آگاهانه‌ی هرروزه نداره": "فن بیان خوب دیگه واقعاً بخشی از شخصیتم شده",
+
+  "امروز حداقل ۱۵ تا ۲۰ دقیقه رو مهارت جدیدم گذاشتم": "حداقل ۱۵ دقیقه از امروز رو صرف یادگیری مهارت جدیدم کردم",
+  "یه بخش مشخص از دوره یا منبع آموزشیم رو جلو بردم": "یه بخش از دوره یا منبع آموزشیم رو امروز جلو بردم",
+  "یه تمرین عملی از چیزی که یاد گرفتم رو انجام دادم": "چیزی که یاد گرفته بودم رو عملاً تمرین کردم",
+  "این هفته پیشرفت محسوسی تو این مهارت داشتم": "این هفته تو این مهارت واقعاً پیشرفت کردم",
+  "تمرین این مهارت دیگه بخش طبیعی و روزمره‌ی زندگیمه": "تمرین این مهارت دیگه بدون فکر کردن تو روزم جا افتاده",
+  "این مهارت دیگه واقعاً بخشی از توانایی‌های روزمره‌امه": "این مهارت الان واقعاً یکی از توانایی‌های روزمره‌ام شده",
+
+  "امروز با یه نفر جدید یا آشنا یه گفتگوی واقعی داشتم": "با یه نفر جدید یا آشنا امروز یه گفتگوی واقعی داشتم",
+  "تو یه موقعیت اجتماعی خودمو جلو کشیدم به‌جای کنار کشیدن": "تو یه جمع، به‌جای کنار کشیدن، خودمو جلو کشیدم",
+  "با یه دوست یا اعضای خانواده وقت باکیفیت گذروندم": "یه وقت باکیفیت با یه دوست یا خانواده‌ام گذروندم",
+  "این هفته ارتباطات اجتماعیم فعال‌تر از قبل بود": "این هفته رابطه‌های اجتماعیم نسبت به قبل فعال‌تر بود",
+  "برقراری ارتباط با آدم‌های جدید دیگه اونقدر که قبلاً بود سخت نیست": "آشنا شدن با آدم‌های جدید دیگه اون‌قدر سخت نیست که قبلاً بود",
+  "برقراری ارتباط با آدم‌های جدید دیگه اضطراب نداره؛ برام طبیعی و راحته": "با آدم‌های جدید حرف زدن دیگه برام کاملاً طبیعی و راحته",
+
+  "امروز چند لغت یا یه درس کوتاه از زبان دوم یاد گرفتم": "چند لغت یا یه درس کوتاه از زبان دومم رو امروز یاد گرفتم",
+  "یه تمرین گوش‌دادن یا صحبت‌کردن به زبان جدید انجام دادم": "امروز یه تمرین شنیداری یا گفتاری به زبان جدید داشتم",
+  "لغات جدیدمو مرور و تکرار کردم تا یادم نره": "لغات تازه‌مو مرور کردم تا از یادم نره",
+  "این هفته واژگان و مهارت زبانیم نسبت به قبل بیشتر شد": "این هفته دایره‌ی لغاتم نسبت به قبل بیشتر شد",
+  "تمرین روزانه‌ی زبان دوم دیگه یه عادت جا افتاده‌ست": "تمرین روزانه‌ی زبان دیگه برام عادت شده",
+  "تمرین روزانه‌ی زبان دیگه بدون فکر کردن اتفاق می‌افته؛ بخشی از روتینمه": "تمرین زبان دیگه بدون فکر کردن تو روتینم جا افتاده",
+
+  "امروز حداقل ۱۰ تا ۱۵ دقیقه با سازم تمرین کردم": "حداقل ۱۰ دقیقه‌ای رو با سازم تمرین کردم",
+  "یه قطعه یا تکنیک مشخص رو تمرین کردم": "یه قطعه یا تکنیک مشخص رو امروز تمرین کردم",
+  "یه بخش از قطعه رو بدون نگاه به نت از حفظ زدم": "یه بخش از قطعه رو بدون نگاه به نت، از حفظ نواختم",
+  "این هفته مهارتم با ساز نسبت به قبل بهتر شد": "این هفته با ساز نسبت به هفته‌ی قبل بهتر شدم",
+  "نشستن پای ساز دیگه نیاز به انگیزه‌ی اضافه نداره": "نشستن پای ساز دیگه نیازی به انگیزه‌ی اضافه نداره",
+  "نواختن دیگه نیاز به انگیزه نداره؛ خودش بخشی از روز خوبمه": "نواختن ساز دیگه خودش بخشی از یه روز خوب برامه",
+
+  "امروز یه جلسه نرمش یا ورزش سبک انجام دادم": "یه جلسه نرمش یا ورزش سبک رو امروز انجام دادم",
+  "یه برنامه‌ی ورزشی مشخص رو دنبال کردم": "امروز طبق یه برنامه‌ی ورزشی مشخص پیش رفتم",
+  "حرکات کششی و نرمشی رو با تمرکز بیشتری انجام دادم": "حرکات کششی رو امروز با تمرکز بیشتری انجام دادم",
+  "این هفته منظم‌تر از هفته‌ی قبل ورزش کردم": "این هفته نسبت به هفته‌ی قبل منظم‌تر ورزش کردم",
+  "ورزش کردن دیگه نیاز به اراده‌ی زیاد نداره، بخشی از روتینمه": "ورزش دیگه بدون نیاز به اراده‌ی زیاد، بخشی از روتینمه",
+  "ورزش دیگه بخش خودکار روزمه؛ حتی دلم می‌خواد اگه یه روز نکنم": "اگه یه روز ورزش نکنم، الان واقعاً دلم براش تنگ می‌شه",
+
+  "امروز با پدر یا مادرم تماس گرفتم یا حضوری احوالشونو پرسیدم": "زنگ زدم یا رفتم دیدن پدر و مادرم و واقعاً حالشونو پرسیدم",
+  "تو صحبت با پدر و مادرم، لحن آروم و محترمانه‌مو حتی وقتی نظرمون فرق داشت حفظ کردم": "حتی وقتی حرفشون به دلم ننشست، جوابمو با احترام و بدون تندی دادم",
+  "یه کار کوچیک برای کمک به پدر یا مادرم انجام دادم، بدون اینکه ازم بخوان": "بدون اینکه بگن، یه کمک کوچیک بهشون کردم (کار خونه، خرید، همراهی)",
+  "این هفته وقت بیشتری رو نسبت به قبل با پدر و مادرم گذروندم یا باهاشون در ارتباط بودم": "این هفته سراغشونو بیشتر از هفته‌ی قبل گرفتم",
+  "احترام و رسیدگی به پدر و مادرم دیگه بخش طبیعی و روزمره‌ی زندگیمه": "دیگه نیاز نیست به خودم یادآوری کنم قدردانشون باشم؛ خودش تو رفتارم جاری شده",
+  "حتی وقتی سرم شلوغ یا خسته بودم، بازم برای پدر و مادرم وقت و احترام گذاشتم": "حتی تو یه روز پر از خستگی و مشغله هم بازم باهاشون تماس گرفتم یا کنارشون بودم",
+
+  // ---- custom "یه موضوع/هدف دیگه" lines: {X} is filled in later by fillX/fillGoodX,
+  // so these two small sets are shared across every addiction/good-habit «other» pick
+  "امروز یه قدم کوچیک در مسیر کنترل «{X}» برداشتم": "امروز یه قدم کوچیک، هرچقدرم ناچیز، تو کنترل «{X}» برداشتم",
+  "وقتی وسوسه‌ی «{X}» اومد سراغم، یه فعالیت جایگزین انجام دادم": "به‌محض اینکه وسوسه‌ی «{X}» سراغم اومد، رفتم سراغ یه کار جایگزین",
+  "یه روز کامل با کنترل بهتر روی «{X}» داشتم": "امروز کنترلم روی «{X}» نسبت به روزهای قبل بهتر بود",
+  "این هفته پیشرفت محسوسی نسبت به «{X}» داشتم": "این هفته واقعاً نسبت به «{X}» پیشرفت کردم",
+  "کنترل «{X}» داره برام عادی و خودکار می‌شه": "کنترل «{X}» دیگه نیاز به تلاش آگاهانه‌ی زیاد نداره",
+  "حتی تو سخت‌ترین موقعیت‌ها هم رو کنترل «{X}» موندم": "حتی تو سخت‌ترین موقعیت‌های ممکن هم رو «{X}» کنترلمو از دست ندادم",
+  "امروز یه قدم کوچیک در مسیر «{X}» برداشتم": "امروز یه قدم کوچیک، هرچقدرم ناچیز، تو مسیر «{X}» برداشتم",
+  "یه تمرین مشخص برای پیشرفت تو «{X}» انجام دادم": "یه تمرین مشخص برای پیشرفت تو «{X}» امروز انجام دادم",
+  "زمان مشخصی رو به «{X}» اختصاص دادم": "امروز یه زمان مشخص رو کامل به «{X}» اختصاص دادم",
+  "این هفته پیشرفت محسوسی تو «{X}» داشتم": "این هفته واقعاً تو «{X}» جلو رفتم",
+  "کار کردن رو «{X}» دیگه بخش طبیعی از روزمه": "کار کردن رو «{X}» دیگه بدون فکر کردن تو روزم جا افتاده",
+  "«{X}» دیگه واقعاً بخشی از روتین روزمره‌امه": "«{X}» الان واقعاً یکی از بخش‌های ثابت روزمه"
+};
+function rotateHabitLine(text, day){
+  const alt = HABIT_ITEM_VARIANTS[text];
+  if(!alt) return text;
+  const pick = (hashSeed(text) + (day||1)) % 2;
+  return pick === 0 ? text : alt;
+}
+/* ---- same tagged-real-alternative idea as CORE_LINE_VARIANTS above, but for
+   the one evolving item that represents each selected addiction-to-quit or
+   good-habit-to-build. Only the day-1 line of each pool is covered here for
+   now (the one most people see first and most often, since early phases run
+   longest before someone upgrades programs) — the pattern is generic, so any
+   more entries can be added the same way later without touching the selector
+   itself. Falls back to rotateHabitLine's day-rotation exactly as before
+   whenever nothing here matches. ---- */
+const HABIT_LINE_VARIANTS_V2 = {
+  "امروز قبل از خواب گوشی رو دور از تخت گذاشتم": [
+    { text:"قبل از برداشتن گوشی بدون فکر، امروز چندبار خودمو به‌موقع متوجه شدم و گذاشتمش کنار", tags:['obstacle:automatic'] },
+    { text:"هر بار که خواستم فقط از سر بی‌حوصلگی گوشی رو بردارم، اول یه کار جایگزین امتحان کردم", tags:['obstacle:boredom'] }
+  ],
+  "امروز از محتوای محرک جنسی دوری کردم": [
+    { text:"وقتی استرس باعث شد سراغ محرک برم، به‌جاش یه تکنیک آرامش‌بخش امتحان کردم", tags:['obstacle:stress'] },
+    { text:"وقتی فقط از سر بی‌حوصلگی وسوسه شدم، یه فعالیت جایگزین از قبل‌برنامه‌ریزی‌شده انجام دادم", tags:['obstacle:boredom'] }
+  ],
+  "زمان بازی امروز رو از قبل مشخص کردم و بهش پایبند موندم": [
+    { text:"هر بار حوصله‌م سر رفت و خواستم بازی کنم، اول یه کار کوتاه جایگزین امتحان کردم", tags:['obstacle:boredom'] },
+    { text:"به‌جای بازی برای فرار از تنهایی، امروز یه ارتباط واقعی با یه آدم واقعی امتحان کردم", tags:['obstacle:social'] }
+  ],
+  "مصرف سیگار امروزمو نسبت به روال قبلی ثبت و کم‌تر کردم": [
+    { text:"به‌جای سیگار برای آروم شدن از استرس، یه تکنیک تنفسی امتحان کردم", tags:['obstacle:stress'] },
+    { text:"تو یه جمع که همیشه اونجا می‌کشیدم، امروز آگاهانه ازش فاصله گرفتم", tags:['obstacle:social'] }
+  ],
+  "مصرف امروزمو صادقانه ثبت کردم": [
+    { text:"تو یه جمع الکل‌محور، بدون نیاز به توضیح زیاد، نوشیدنی غیرالکلی خودمو انتخاب کردم", tags:['obstacle:social'] }
+  ],
+  "قبل از خوردن به‌خاطر حس بد، یه لحظه مکث کردم و پرسیدم واقعاً گرسنمه؟": [
+    { text:"وقتی استرس باعث شد سراغ غذا برم، اول یه واکنش جایگزین امتحان کردم", tags:['obstacle:stress'] }
+  ],
+  "سخت‌ترین کار امروزمو اول صبح شروع کردم، حتی کوچیک": [
+    { text:"به‌جای منتظر «حال کامل» موندن، سخت‌ترین کارمو با همون حال ناقص هم شروع کردم", tags:['obstacle:perfectionism'] },
+    { text:"سخت‌ترین کارمو تو ساعت اوج انرژی خودم — نه لزوماً صبح — شروع کردم", tags:['chrono:night'] }
+  ],
+  "افکار نگران‌کننده‌ی امروزمو بدون قضاوت تو یه دفترچه نوشتم": [
+    { text:"به‌جای دنبال کردن یه روز «کامل بدون اضطراب»، فقط یه قدم کوچیک آرامش‌بخش برداشتم", tags:['obstacle:perfectionism'] }
+  ],
+  "امروز حداقل چند صفحه یا ۱۰ دقیقه کتاب خوندم": [
+    { text:"مطالعه‌ی امروزمو شب، تو بهترین ساعت تمرکزم، انجام دادم", tags:['chrono:night'] },
+    { text:"امروز رو یه کتاب/منبع مرتبط با مسیر کاری/تحصیلی‌ام وقت گذاشتم", tags:['motiv:career'] }
+  ],
+  "امروز یه جلسه نرمش یا ورزش سبک انجام دادم": [
+    { text:"نرمش امروزمو صبح، همون اول روز، انجام دادم", tags:['chrono:morning'] },
+    { text:"نرمش امروزمو عصر/شب، وقتی بدنم واقعاً آماده‌ست، انجام دادم", tags:['chrono:night'] }
+  ],
+  "امروز حداقل ۱۵ تا ۲۰ دقیقه رو مهارت جدیدم گذاشتم": [
+    { text:"زمان امروزمو رو مهارتی گذاشتم که مستقیم به مسیر کاری/تحصیلی‌ام کمک می‌کنه", tags:['motiv:career'] }
+  ],
+  "امروز با یه نفر جدید یا آشنا یه گفتگوی واقعی داشتم": [
+    { text:"با یه نفر که باهاش راحتم، یه گفتگوی کوچیک ولی واقعی داشتم — قدم به قدم پیش می‌رم", tags:['obstacle:social'] }
+  ]
+};
+function applyHabitVariant(text, profile, seedSuffix, day){
+  const tagged = HABIT_LINE_VARIANTS_V2[text];
+  if(tagged && tagged.length){
+    const picked = pickTaggedVariant(text, tagged, profile, seedSuffix, day);
+    if(picked.text !== text) return picked.text;
+  }
+  return rotateHabitLine(text, day);
 }
 function getPersonalizedPhaseItems(basePhase, phaseIdx){
   const profile = storeData.profile || defaultProfile();
   const isHeavy = profile.frequency==='f3' || profile.frequency==='f4';
-  const core = basePhase.items.map((t,i)=>personalizeExerciseLine(personalizeCoreLine(t, profile, i), profile));
+  const day = (typeof programDay==='function') ? programDay() : 1;
+  const core = basePhase.items.map((t,i)=>personalizeExerciseLine(personalizeCoreLine(t, profile, i, day), profile));
 
-  // one main item per selected addiction — this is the core personalization signal, always kept
+  // one main item per selected addiction — this is the core personalization signal, always kept.
+  // rotateHabitLine reworks the wording day to day (see its comment above) so this doesn't
+  // read identically for the whole length of a phase.
   const addictions = profile.addictions || [];
   const addictionMain = addictions.map(id=>{
     const pool = ADDICTION_ITEMS[id];
-    return pool ? fillX(pool[Math.min(phaseIdx, pool.length-1)]) : null;
+    return pool ? fillX(applyHabitVariant(pool[Math.min(phaseIdx, pool.length-1)], profile, 'habit-'+id, day)) : null;
   }).filter(Boolean);
 
   // one main item per selected good habit to build — the complementary opposite
@@ -712,7 +1206,7 @@ function getPersonalizedPhaseItems(basePhase, phaseIdx){
   const goodHabits = profile.goodHabits || [];
   const goodHabitMain = goodHabits.map(id=>{
     const pool = GOOD_HABIT_ITEMS[id];
-    return pool ? fillGoodX(pool[Math.min(phaseIdx, pool.length-1)]) : null;
+    return pool ? fillGoodX(applyHabitVariant(pool[Math.min(phaseIdx, pool.length-1)], profile, 'good-'+id, day)) : null;
   }).filter(Boolean);
   const primary = addictionMain.concat(goodHabitMain);
 
@@ -752,6 +1246,12 @@ function getPersonalizedPhaseItems(basePhase, phaseIdx){
   // considered: same 'only ever nudges tone/adds supportive framing, never medical' rule
   // that getHealthFlags is already used for elsewhere (coach messages, workout tone).
   if(getHealthFlags().hasMoodTag) extras.push('امروز یه کار کوچیک برای مراقبت از حال روانیم انجام دادم (چند نفس عمیق، یه وقفه‌ی کوتاه، یا صحبت با یکی)');
+  // ---- the one purely-behavioral signal in the engine: based on actual
+  // completion history, not onboarding answers, so it can only ever diverge
+  // between two users AFTER they've been using the app for a while. ----
+  const trend = recentCompletionTrend();
+  if(trend === 'struggling') extras.push(ADAPTIVE_SUPPORT_ITEM);
+  else if(trend === 'excelling') extras.push(ADAPTIVE_STRETCH_ITEM);
 
   // interleave the habit-specific items with the generic routine items so the
   // most personally relevant tasks (the actual reasons someone is using the
@@ -892,7 +1392,11 @@ function getTomorrowProgramDay(){
 function getTomorrowPreviewDoItems(){
   const tDay = getTomorrowProgramDay();
   if(tDay <= 0) return [];
-  const phase = getPhase(tDay);
+  // phase content: paced (an estimate — tomorrow's actual offset is recomputed fresh
+  // when the day rolls over, same caveat as the existing "special day" note below).
+  // item COUNT stays on the real day via revealCounts(tDay) — pacing only ever changes
+  // which items apply, never how many are shown.
+  const phase = getPhase(Math.max(1, pacedProgramDay()+1));
   const phases = scaledPhases();
   const phaseIdx = Math.max(0, phases.findIndex(p=>p.key===phase.key));
   const fullPool = getPersonalizedPhaseItems(phase, phaseIdx);
@@ -1030,7 +1534,7 @@ function renderGoalsRoadmap(){
     else { stateClass='is-future'; stateLabel='پیش رو'; filterKey='future'; }
     if(filter !== 'all' && filter !== filterKey) return '';
     const itemsHtml = g.items.map(it=>{
-      const delBtn = editing ? '<button type="button" class="goal-item-del" data-goal-id="'+it.id+'">✕</button>' : '';
+      const delBtn = editing ? '<button type="button" class="goal-item-del" data-goal-id="'+it.id+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>' : '';
       const srcHtml = it.srcLabel ? '<span class="goal-item-src">'+escapeHtml(it.srcLabel)+'</span>' : '';
       const ic = stateClass==='is-done' ? '✅' : '🎯';
       return '<div class="goal-item"><span class="goal-item-ic">'+ic+'</span><span class="goal-item-text">'+escapeHtml(it.text)+srcHtml+'</span>'+delBtn+'</div>';
@@ -1160,6 +1664,7 @@ function defaultProfile(){
   return { firstName:"", lastName:"", age:null, gender:"", maritalStatus:"", height:null, weight:null, goalWeight:null,
     goal:"", addictions:[], otherAddictionText:"", goodHabits:[], otherGoodHabitText:"", exerciseAccess:"", exerciseLevel:"",
     sleepPattern:"", stressLevel:3, motivationLevel:7, supportStyle:"gentle",
+    chronotype:"", mainObstacle:"", motivationType:"",
     goalShort:"", goalLong:"", ifThenPlan:"", duration:"", frequency:"", riskTimes:[],
     commitmentReward:"", commitmentRewardOther:"", commitmentPunishment:"", commitmentPunishOther:"",
     health:{ hasCondition:false, tags:[], otherTagText:"", detailsText:"", medicationsText:"", considerInPlan:true },
@@ -1173,12 +1678,13 @@ function defaultStoreData(){
     supportContact:{name:"", phone:""}, lastModified:null,
     premium:false, premiumPhone:"", aiUsage:{}, firstDayCompleteShown:false,
     lifeJournal:{}, lifeAnalyzerReport:null, inviteNudge:{lastShownAt:null, count:0},
-    musicEnabled:true, musicVolume:35,
+    musicEnabled:true, musicVolume:15,
     sfxEnabled:true, sfxVolume:10, specialDays:[],
     tomorrowPlan:{forKey:null, doItems:[], avoidItems:[]},
     lbPrivacy:{age:false, habit:false, programLen:false, titles:false}, lbLastRank:null,
     reportSentDates:{}, aiFeatureUseCount:{}, xpPenaltyStartDate:null,
-    riskNudge:{dismissedKey:null, lastNotifLevel:null} };
+    riskNudge:{dismissedKey:null, lastNotifLevel:null},
+    tagAffinity:{} };
 }
 let storeData = defaultStoreData();
 let today = todayKey();
@@ -1234,7 +1740,9 @@ const PREMIUM_LOCK_SELECTORS = [
   '#tab-meditation .subseg button[data-sub="bodyscan"]',
   '#tab-meditation .subseg button[data-sub="gratitude"]',
   '#tab-meditation .subseg button[data-sub="voidmind"]',
-  '#tab-today .subseg button[data-sub="tomorrow"]'
+  '#tab-today .subseg button[data-sub="tomorrow"]',
+  // تب «تقویت هوش»: فقط بازی اول (محاسبه‌ی سریع) رایگانه؛ این سه‌تا پشت پرمیومن.
+  '#brainStroopStartBtn', '#brainSeqStartBtn', '#brainNbackStartBtn'
 ];
 function applyPremiumLocksUI(){
   const locked = !(storeData.premium || isInTrial());
@@ -1247,10 +1755,15 @@ function applyPremiumLocksUI(){
   updatePlanBadge();
   if(typeof renderFocusModeGrid === 'function') renderFocusModeGrid();
 }
-/* Header plan badge (🆓 پلن رایگان / 👑 پرمیوم). Kept in sync from applyPremiumLocksUI,
+/* Header plan badge (custom SVG icon: open lock = پلن رایگان / gold crown = پرمیوم). Kept in sync from applyPremiumLocksUI,
    which already runs on every event that can change premium status (session load,
    purchase success, restore success). Trial time also shows as premium, matching
    every other premium check in the app. */
+/* Custom SVG icons for the header plan badge (replaces the old 🆓 / 👑 emoji).
+   Free = outline "open lock" (currentColor, follows the badge's own text color).
+   Premium = filled gold-gradient crown, matching the .is-premium amber theme. */
+const PLAN_ICON_FREE = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg>';
+const PLAN_ICON_PREMIUM = '<svg viewBox="0 0 24 24" width="13" height="13"><defs><linearGradient id="planCrownGrad" x1="4" y1="5" x2="20" y2="19" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffe9b8"/><stop offset="1" stop-color="#e2a53a"/></linearGradient></defs><path d="M4 17 L4 9 L8 12 L12 5 L16 12 L20 9 L20 17 Z" fill="url(#planCrownGrad)" stroke="url(#planCrownGrad)" stroke-width="0.6" stroke-linejoin="round"/><rect x="4" y="17" width="16" height="2.4" rx="1" fill="url(#planCrownGrad)"/><circle cx="4" cy="9" r="1.15" fill="url(#planCrownGrad)"/><circle cx="12" cy="5" r="1.3" fill="url(#planCrownGrad)"/><circle cx="20" cy="9" r="1.15" fill="url(#planCrownGrad)"/></svg>';
 function updatePlanBadge(){
   const badge = document.getElementById('planBadge');
   if(!badge) return;
@@ -1260,12 +1773,12 @@ function updatePlanBadge(){
   badge.classList.toggle('is-premium', isPremiumNow);
   badge.classList.toggle('is-free', !isPremiumNow);
   if(isPremiumNow){
-    iconEl.textContent = '👑';
+    iconEl.innerHTML = PLAN_ICON_PREMIUM;
     textEl.textContent = 'پرمیوم';
     badge.title = 'اشتراک پرمیوم فعاله';
     badge.onclick = null;
   } else {
-    iconEl.textContent = '🆓';
+    iconEl.innerHTML = PLAN_ICON_FREE;
     textEl.textContent = 'پلن رایگان';
     badge.title = 'برای ارتقا بزن';
     badge.onclick = ()=>{ if(typeof openPremiumPage === 'function') openPremiumPage(); };
@@ -2281,7 +2794,7 @@ function showCelebration(info){
   sfxSuccess();
   const coachEl = document.getElementById('celebrateCoach');
   if(coachEl){ const genderCel = (storeData.profile && storeData.profile.gender) || ''; coachEl.innerHTML = buildCoachSVG('excited', 'celebrate', genderCel); coachEl.dataset.mood = 'excited'; coachEl.dataset.gender = genderCel; }
-  document.getElementById('celebrateEmoji').textContent=info.emoji;
+  document.getElementById('celebrateEmoji').innerHTML=info.emoji;
   document.getElementById('celebrateTitle').textContent=info.title;
   document.getElementById('celebrateText').textContent=info.text;
   document.getElementById('celebrateOverlay').classList.add('show');
@@ -2530,7 +3043,7 @@ function checkDayRollover(){
   if(freshKey === today) return;
   today = freshKey;
   applyTomorrowPlanIfDue();
-  currentPhase = getPhase(programDay());
+  currentPhase = getPhase(pacedProgramDay());
   entry = storeData.entries[today] || { done:{}, avoidDone:{}, momentDone:{}, note:"", lesson:"", milestonesHit:{}, total: totalToday(),
     phoneHours:null, meals:{b:"",l:"",d:"",snacks:""}, nightReview:null, mood:null, energy:null, weight:null, symptoms:{} };
   if(!entry.milestonesHit) entry.milestonesHit={};
@@ -2627,7 +3140,7 @@ function renderCustomCounters(){
         <span class="custom-counter-days">${toFa(days)}</span>
         <span class="custom-counter-days-label">روز</span>
       </div>
-      <button class="counter-del-btn" data-del-id="${c.id}" title="حذف">✕</button>
+      <button class="counter-del-btn" data-del-id="${c.id}" title="حذف"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>`;
   }).join('');
   slot.querySelectorAll('.counter-del-btn').forEach(btn=>{
@@ -2719,7 +3232,7 @@ function checkCustomCounterMilestones(){
 
 function updateMountain(){
   const day = programDay();
-  currentPhase = getPhase(day);
+  currentPhase = getPhase(pacedProgramDay()); // phase badge/content: paced. the marker's position on the path below stays on the real day count on purpose.
   const phIdx = PHASES.findIndex(p=>p.key===currentPhase.key);
   if(phIdx > (storeData.maxPhaseIndex||0)) storeData.maxPhaseIndex = phIdx;
   const progLen = storeData.programLength || 90;
@@ -3247,6 +3760,22 @@ function updateSpeechCoach(){
   avatarEl.dataset.mood = 'cheer';
   avatarEl.dataset.gender = genderSp;
 }
+function updateBrainCoach(){
+  const avatarEl = document.getElementById('coachAvatarBrain');
+  const msgEl = document.getElementById('coachMsgBrain');
+  if(!avatarEl || !msgEl) return;
+  const seed = todayKey()+'-brain';
+  const msgs = [
+    'مغزت هم مثل عضله‌ست؛ هرچی بیشتر تمرین بدیش، سریع‌تر کار می‌کنه.',
+    'چند دقیقه تمرین سرعت پردازش، تمرکز بقیه‌ی روزتو بهتر می‌کنه.',
+    'سعی کن هر روز رکوردتو بشکنی، حتی یه امتیاز بیشتر.'
+  ];
+  msgEl.textContent = seededPick(msgs, seed);
+  const genderBr = (storeData.profile && storeData.profile.gender) || '';
+  avatarEl.innerHTML = buildCoachSVG('cheer', 'brain', genderBr);
+  avatarEl.dataset.mood = 'cheer';
+  avatarEl.dataset.gender = genderBr;
+}
 /* ---- تمرین‌های فن بیانِ پرمیوم: از ۵ تمرین این تب، فقط ۲ تای اول (شافل کارت احساسات و
    بداهه‌گویی) تو پلن رایگان بازن؛ داستان‌سازی با کلمات، گرم کردن صدا و شاخه‌ی کلمات
    مخصوص پرمیوم/دوره‌ی آزمایشی‌ان. ---- */
@@ -3313,7 +3842,7 @@ function renderList(containerId, items, stateObj, avoid){
     const row=document.createElement('div');
     row.className='item'+(avoid?' avoid':'')+(stateObj[idx]?' checked':'');
     row.innerHTML=`<div class="box">${CHECK_SVG}</div><span class="label">${label}</span>
-      <button type="button" class="item-edit-btn" aria-label="ویرایش این کار">✏️</button>`;
+      <button type="button" class="item-edit-btn" aria-label="ویرایش این کار"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 4.5l4 4-11 11H4.5v-4z"/><path d="M13.5 6.5l4 4"/></svg></button>`;
     row.addEventListener('click',(e)=>{
       if(e.target.closest('.item-edit-btn')) return; // handled by its own listener below
       const wasStarted = !!storeData.startDate;
@@ -3331,6 +3860,15 @@ function renderList(containerId, items, stateObj, avoid){
       } else {
         sfxTap();
       }
+      // ---- behavioral affinity hook: these two labels are the fixed constant
+      // strings from the adaptive support/stretch layer (see
+      // recentCompletionTrend + getPersonalizedPhaseItems) — recording
+      // feedback on them here is what lets tagAffinityScore actually learn,
+      // over the life of the program, instead of just reading a value nobody
+      // ever writes. Every other label is a normal do/avoid/custom item and
+      // isn't tagged in v1, so this is a no-op for it. ----
+      if(label === ADAPTIVE_SUPPORT_ITEM) recordItemFeedback(['trend:struggling'], turningOn);
+      else if(label === ADAPTIVE_STRETCH_ITEM) recordItemFeedback(['trend:excelling'], turningOn);
       entry.total = totalToday();
       updateMiniRing();
       updateStreakUI();
@@ -3490,6 +4028,8 @@ function showToast(msg, kind){
   showToast._t=setTimeout(()=>t.classList.remove('show'),1500);
   if(kind==='error') sfxError();
   else if(kind==='success') sfxSuccess();
+  else sfxPop(); // neutral toasts (no explicit kind) still get a soft confirmation sound
+  if(typeof voiceAllowed==='function' && voiceAllowed()) speakText(msg);
 }
 
 async function loadData(){
@@ -3547,7 +4087,10 @@ function normalizeAndRenderStoreData(){
   // never retroactively dock XP for days logged before the penalty existed.
   if(!storeData.xpPenaltyStartDate) storeData.xpPenaltyStartDate = today;
   if(storeData.musicEnabled === undefined) storeData.musicEnabled = true;
-  if(storeData.musicVolume === undefined) storeData.musicVolume = 35;
+  if(storeData.musicVolume === undefined) storeData.musicVolume = 15;
+  // خوانده‌شدن پیام‌ها (TTS با صدای ElevenLabs) — دیفالت خاموش، چون هر پخش هزینه‌ی
+  // کاراکتر ElevenLabs داره؛ کاربر خودش از تنظیمات باید روشنش کنه.
+  if(storeData.voiceEnabled === undefined) storeData.voiceEnabled = false;
   if(!storeData.appLock) storeData.appLock = {enabled:false, method:'pin', pinHash:null, salt:null, recoveryHash:null, recoverySalt:null};
   if(storeData.appLock && !storeData.appLock.method) storeData.appLock.method = 'pin';
   if(storeData.startDate && !storeData.startTimestamp){
@@ -3559,7 +4102,7 @@ function normalizeAndRenderStoreData(){
   }
   ensureTomorrowPlan();
   applyTomorrowPlanIfDue();
-  currentPhase = getPhase(programDay());
+  currentPhase = getPhase(pacedProgramDay());
   entry = storeData.entries[today] || { done:{}, avoidDone:{}, momentDone:{}, note:"", lesson:"", milestonesHit:{}, total: totalToday(),
     phoneHours:null, meals:{b:"",l:"",d:"",snacks:""}, nightReview:null, mood:null, energy:null, weight:null, symptoms:{} };
   if(!entry.milestonesHit) entry.milestonesHit={};
@@ -3653,6 +4196,7 @@ function normalizeAndRenderStoreData(){
   safeRun(renderThemeRow, 'renderThemeRow');
   safeRun(renderSfxSettings, 'renderSfxSettings');
   safeRun(renderMusicSettings, 'renderMusicSettings');
+  safeRun(renderVoiceSettings, 'renderVoiceSettings');
   safeRun(initAmbientMusicAutoplay, 'initAmbientMusicAutoplay');
   safeRun(renderAppLockUI, 'renderAppLockUI');
   safeRun(()=>{ if(storeData.appLock && storeData.appLock.enabled) openLockScreen('unlock'); }, 'appLockInitialCheck');
@@ -3702,6 +4246,7 @@ function render(){
   renderIntensitySection();
   updateMeditationCoach();
   updateSpeechCoach();
+  updateBrainCoach();
   applyPremiumLocksUI();
   updatePersonalizeHints();
 }
@@ -3882,7 +4427,7 @@ const bgMusicEl = document.getElementById('bgMusic');
 let musicOn = false;
 
 function musicVolumeLevel(){
-  const v = (storeData && storeData.musicVolume !== undefined) ? storeData.musicVolume : 35;
+  const v = (storeData && storeData.musicVolume !== undefined) ? storeData.musicVolume : 15;
   return Math.max(0, Math.min(100, v)) / 100;
 }
 function applyMusicVolume(){
@@ -3937,13 +4482,13 @@ function initAmbientMusicAutoplay(){
   document.addEventListener('touchstart', startOnFirstGesture, {once:true});
 }
 
-/* ---------------- Voice narrations (app intro / today-tab explainer / premium explainer) ----------------
-   Three short pre-recorded voice-overs. Premium's button always lives inside the premium panel.
-   The intro and today-tab ones are offered once as a dismissible "می‌خوای گوش بدی؟" suggestion
-   (intro: when onboarding opens; today-tab: the first time the کاربر opens "برنامه‌ی روزانه"),
-   and after that stay reachable only from the Guide tab. Playing one pauses the background music
-   (and any other narration) and resumes it afterwards if it was on. Multiple buttons can control
-   the same audio element (e.g. a suggestion banner + its Guide-tab counterpart) and stay in sync. */
+/* ---------------- Voice narrations (app intro / today-tab / workout / speech / ai-coach / public-chat / premium explainers) ----------------
+   Short pre-recorded voice-overs, one per tab. Premium's button always lives inside the premium panel.
+   The intro, today-tab, workout, speech, ai-coach and public-chat ones are each offered once as a
+   dismissible "می‌خوای گوش بدی؟" suggestion the first time the کاربر opens that tab, and after that
+   stay reachable only from the Guide tab. Playing one pauses the background music (and any other
+   narration) and resumes it afterwards if it was on. Multiple buttons can control the same audio
+   element (e.g. a suggestion banner + its Guide-tab counterpart) and stay in sync. */
 const narrationButtonRegistry = {}; // audioId -> [{btn, baseLabel}]
 let narrationMusicWasOn = false;
 
@@ -3988,6 +4533,10 @@ function registerNarrationButton(audioId, btn){
 registerNarrationButton('narrationIntroAudio', document.getElementById('narrationIntroGuideBtn'));
 registerNarrationButton('narrationTodayAudio', document.getElementById('narrationTodayGuideBtn'));
 registerNarrationButton('narrationPremiumAudio', document.getElementById('narrationPremiumBtn'));
+registerNarrationButton('narrationWorkoutAudio', document.getElementById('narrationWorkoutGuideBtn'));
+registerNarrationButton('narrationSpeechAudio', document.getElementById('narrationSpeechGuideBtn'));
+registerNarrationButton('narrationAiAudio', document.getElementById('narrationAiGuideBtn'));
+registerNarrationButton('narrationChatAudio', document.getElementById('narrationChatGuideBtn'));
 
 function buildNarrationSuggestBanner(audioId, text, playLabel){
   const wrap = document.createElement('div');
@@ -4019,6 +4568,46 @@ function maybeSuggestTodayNarration(){
   slot.appendChild(buildNarrationSuggestBanner('narrationTodayAudio',
     'اولین باره اینجایی — می‌خوای یه توضیح صوتی کوتاه از این بخش بشنوی؟', '▶️ گوش بده'));
   storeData.narrationTodaySuggested = true;
+  saveData();
+}
+function maybeSuggestWorkoutNarration(){
+  if(storeData.narrationWorkoutSuggested) return;
+  const slot = document.getElementById('narrationWorkoutSuggestSlot');
+  if(!slot) return;
+  slot.innerHTML = '';
+  slot.appendChild(buildNarrationSuggestBanner('narrationWorkoutAudio',
+    'اولین باره اومدی تب تمرین — می‌خوای یه توضیح صوتی کوتاه از این بخش بشنوی؟', '▶️ گوش بده'));
+  storeData.narrationWorkoutSuggested = true;
+  saveData();
+}
+function maybeSuggestSpeechNarration(){
+  if(storeData.narrationSpeechSuggested) return;
+  const slot = document.getElementById('narrationSpeechSuggestSlot');
+  if(!slot) return;
+  slot.innerHTML = '';
+  slot.appendChild(buildNarrationSuggestBanner('narrationSpeechAudio',
+    'اولین باره اومدی تب فن بیان — می‌خوای یه توضیح صوتی کوتاه از این بخش بشنوی؟', '▶️ گوش بده'));
+  storeData.narrationSpeechSuggested = true;
+  saveData();
+}
+function maybeSuggestAiNarration(){
+  if(storeData.narrationAiSuggested) return;
+  const slot = document.getElementById('narrationAiSuggestSlot');
+  if(!slot) return;
+  slot.innerHTML = '';
+  slot.appendChild(buildNarrationSuggestBanner('narrationAiAudio',
+    'اولین باره اومدی تب مشاور شخصی — می‌خوای یه توضیح صوتی کوتاه از این بخش بشنوی؟', '▶️ گوش بده'));
+  storeData.narrationAiSuggested = true;
+  saveData();
+}
+function maybeSuggestChatNarration(){
+  if(storeData.narrationChatSuggested) return;
+  const slot = document.getElementById('narrationChatSuggestSlot');
+  if(!slot) return;
+  slot.innerHTML = '';
+  slot.appendChild(buildNarrationSuggestBanner('narrationChatAudio',
+    'اولین باره وارد چت عمومی شدی — می‌خوای یه توضیح صوتی کوتاه از این بخش بشنوی؟', '▶️ گوش بده'));
+  storeData.narrationChatSuggested = true;
   saveData();
 }
 
@@ -4108,6 +4697,7 @@ function resetLockInputUI(){
   if(recInput) recInput.value = '';
 }
 function lockError(msg){
+  sfxError();
   const errEl = document.getElementById('lockError');
   if(errEl) errEl.textContent = msg;
   const shakeTarget = lockRecoveryMode ? document.getElementById('lockRecoveryWrap')
@@ -4211,6 +4801,7 @@ async function processLockCode(code){
   if(lockMode === 'unlock'){
     const hash = await hashPin(code, storeData.appLock.salt);
     if(hash === storeData.appLock.pinHash){
+      sfxSuccess();
       appLockSessionUnlocked = true;
       closeLockScreen();
     } else {
@@ -4232,6 +4823,7 @@ async function processLockCode(code){
       saveData();
       appLockSessionUnlocked = true;
       renderAppLockUI();
+      sfxSuccess();
       closeLockScreen();
       showRecoveryCodeModal(recoveryCode);
     } else {
@@ -4240,6 +4832,7 @@ async function processLockCode(code){
       const mismatchMsg = targetMethod === 'pattern' ? 'الگوها یکسان نبودن، دوباره امتحان کن'
                          : targetMethod === 'color' ? 'ترتیب رنگ‌ها یکسان نبودن، دوباره امتحان کن'
                          : 'پین‌ها یکسان نبودن، دوباره امتحان کن';
+      sfxError();
       applyLockModeUI('setup1', mismatchMsg);
     }
   } else if(lockMode === 'change-verify'){
@@ -4259,6 +4852,7 @@ async function processLockCode(code){
       storeData.appLock.recoverySalt = null;
       saveData();
       renderAppLockUI();
+      sfxSuccess();
       closeLockScreen();
     } else {
       lockError(wrongMsg);
@@ -4271,6 +4865,7 @@ async function processLockCode(code){
       storeData.appLock.recoveryHash = await hashPin(newCode, newSalt);
       storeData.appLock.recoverySalt = newSalt;
       saveData();
+      sfxSuccess();
       closeLockScreen();
       showRecoveryCodeModal(newCode);
     } else {
@@ -4299,6 +4894,7 @@ async function handleRecoverySubmit(){
     storeData.appLock.recoverySalt = null;
     saveData();
     renderAppLockUI();
+    sfxSuccess();
     closeLockScreen();
   } else if(lockMode === 'recovery-verify'){
     const newCode = genRecoveryCode();
@@ -4306,16 +4902,19 @@ async function handleRecoverySubmit(){
     storeData.appLock.recoveryHash = await hashPin(newCode, newSalt);
     storeData.appLock.recoverySalt = newSalt;
     saveData();
+    sfxSuccess();
     closeLockScreen();
     showRecoveryCodeModal(newCode);
   } else {
     // unlock or change-verify → let them in, then have them pick a fresh code
     appLockSessionUnlocked = true;
     lockRecoveryMode = false;
+    sfxSuccess();
     applyLockModeUI('setup1', 'رمز قبلی پاک شد؛ یه رمز جدید انتخاب کن');
   }
 }
 function lockRecoveryInputError(msg){
+  sfxError();
   const errEl = document.getElementById('lockError');
   if(errEl) errEl.textContent = msg;
   const wrap = document.getElementById('lockRecoveryWrap');
@@ -4328,6 +4927,7 @@ if(lockKeypadEl){
     if(!btn) return;
     const k = btn.getAttribute('data-k');
     const errEl = document.getElementById('lockError');
+    sfxTap();
     if(k === 'del'){
       lockEnteredDigits.pop();
       renderLockDots();
@@ -4348,6 +4948,7 @@ if(lockColorGridEl){
     const tile = e.target.closest('.lock-color-tile');
     if(tile){
       if(lockEnteredColors.length >= 4) return;
+      sfxTap();
       const errEl = document.getElementById('lockError');
       if(lockEnteredColors.length === 0 && errEl) errEl.textContent = '';
       lockEnteredColors.push(tile.getAttribute('data-color'));
@@ -4358,6 +4959,7 @@ if(lockColorGridEl){
       return;
     }
     if(e.target.closest('#lockColorUndo')){
+      sfxTap();
       lockEnteredColors.pop();
       renderLockDots();
     }
@@ -4383,6 +4985,7 @@ function addPatternDot(dotEl){
   if(patternPath.includes(idx)) return;
   patternPath.push(idx);
   dotEl.classList.add('active');
+  sfxTap();
 }
 const patternSvgEl = document.getElementById('patternSvg');
 if(patternSvgEl){
@@ -4987,6 +5590,9 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     document.getElementById('tab-'+targetTab).classList.add('active');
     document.getElementById('tabbar').scrollIntoView({block:'nearest'});
     lastMainTab = targetTab;
+    if(targetTab === 'workout') maybeSuggestWorkoutNarration();
+    if(targetTab === 'speech') maybeSuggestSpeechNarration();
+    if(targetTab === 'ai') maybeSuggestAiNarration();
     // همون ضامنی که setAppMode/showPublicTabInner در انتهاشون صدا می‌زنن، این‌جا هم صدا
     // می‌زنیم: تضمین می‌کنه با سوییچ بین تب‌های خصوصی (امروز/تمرین/...) هیچ‌وقت یه پنل یا
     // دکمه‌ی بخش عمومی جا نمونه فعال، حتی اگه از یه مسیر غیرمنتظره به این‌جا رسیده باشیم.
@@ -4999,11 +5605,76 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
    یه صفحه‌ی اختصاصی می‌شه: تایمر کار عمیق + راهنما/انگیزش + چک‌لیست مخصوص
    همون کار. کاربر با دکمه‌ی «پایان» خودش از حالت خارج می‌شه.
    حالت‌های جدید همینجا به FOCUS_MODES اضافه می‌شن. */
+// آیکون‌های SVG حرفه‌ای برای تب «حالت‌ها» — جایگزین ایموجی‌های قبلی
+const FM_ICON = {
+  gym: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12h1.8M19.7 12h1.8"/><path d="M4.3 9.2v5.6M19.7 9.2v5.6"/><path d="M6.4 12h11.2"/><rect x="6.1" y="8.3" width="2.2" height="7.4" rx="0.8"/><rect x="15.7" y="8.3" width="2.2" height="7.4" rx="0.8"/></svg>',
+  sleep: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-5.2a3 3 0 0 1 3-3h9.4a3.6 3.6 0 0 1 3.6 3.6V18"/><path d="M3 18.5h18"/><path d="M5.6 9.8V7.4a1.4 1.4 0 0 1 1.4-1.4h3.4a1.4 1.4 0 0 1 1.4 1.4v2"/></svg>',
+  morning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13.2" r="3.6"/><path d="M12 4.5v2M4.6 8.4l1.4 1.4M19.4 8.4l-1.4 1.4"/><path d="M2.5 19h19"/></svg>',
+  walk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.6" cy="4.6" r="1.7" fill="currentColor" stroke="none"/><path d="M11.8 8.2l-2.6 3 1.8 2 -0.9 5.4"/><path d="M11.8 8.2l3.7 1.4 1.9 3.4"/><path d="M10.2 13.2l-3.4 2 -1.4 3.6"/><path d="M10.1 18.6l3.4-1.2 2.9 2.6"/></svg>',
+  football: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8.4l3.4 2.4-1.3 4h-4.2l-1.3-4z"/><path d="M12 8.4V4.3M15.4 10.8l3.7-1.6M13.9 14.8l2.3 3.6M10.1 14.8l-2.3 3.6M8.6 10.8l-3.7-1.6"/></svg>',
+  nap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15.5a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5"/><path d="M3 15.5h18M4.5 15.5V18M19.5 15.5V18"/><path d="M15.5 5.2h3.8l-3 3.3h3"/></svg>',
+  travel: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="7.5" width="15" height="11.5" rx="2"/><path d="M9 7.5V5.3a1.5 1.5 0 0 1 1.5-1.5h3a1.5 1.5 0 0 1 1.5 1.5v2.2"/><path d="M4.5 12.5h15"/></svg>',
+  cooking: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="13" r="6"/><path d="M17.7 9.5l3.8-3.8"/><path d="M14.2 8.6a2.6 2.6 0 0 1 0 3.7"/></svg>',
+  coffeeshop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9.5h11v5.2a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4z"/><path d="M16 10.5h1.8a2.3 2.3 0 0 1 0 4.6H16"/><path d="M8 5.2c0 1-1 1-1 2M11.3 5.2c0 1-1 1-1 2"/></svg>',
+  clothesShopping: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5.2a3 3 0 0 0 6 0"/><path d="M9 5.2l-5 2.6 2 3 2.4-1.3V19.5h11.2V9.5L22 8.2l-5-3"/></svg>',
+  supermarket: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h2.2l1.7 10.3a2 2 0 0 0 2 1.7h7.6a2 2 0 0 0 2-1.6l1.2-6.4H6.4"/><circle cx="9.8" cy="19.6" r="1.3"/><circle cx="16.6" cy="19.6" r="1.3"/></svg>',
+  onlineShopping: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.2L12 3.8l8.5 4.4L12 12.6z"/><path d="M3.5 8.2v8L12 20.5l8.5-4.3v-8"/><path d="M12 12.6v7.9"/></svg>',
+  friendHangout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.3" cy="8" r="2.7"/><path d="M3.3 18.3c0-3 2.2-5.1 5-5.1s5 2.1 5 5.1"/><circle cx="16.6" cy="7.6" r="2.2"/><path d="M14.8 13.6c2.2.2 4 1.9 4 4.7"/></svg>',
+  restaurant: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5v6.4a1.8 1.8 0 0 0 3.6 0V3.5M7.8 9.9V20.5"/><path d="M16.6 3.5c-1.4 0-2.2 1.7-2.2 4.2 0 2 .8 3 1.6 3.4v9.4"/></svg>',
+  pool: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="6.2" r="1.6" fill="currentColor" stroke="none"/><path d="M4 12l3.4-2.6 3.4 2.2 3-2.2 3.2 2.4"/><path d="M2.5 16.4c1.4 1 2.8 1 4.2 0s2.8-1 4.2 0 2.8 1 4.2 0 2.8-1 4.2 0"/><path d="M2.5 20c1.4 1 2.8 1 4.2 0s2.8-1 4.2 0 2.8 1 4.2 0 2.8-1 4.2 0"/></svg>',
+  gamingCafe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 8.5h11a4 4 0 0 1 3.9 4.9l-.6 2.6a2.1 2.1 0 0 1-3.8.8l-1.4-2H8.4l-1.4 2a2.1 2.1 0 0 1-3.8-.8l-.6-2.6a4 4 0 0 1 3.9-4.9z"/><path d="M7.6 11v3M6.1 12.5h3M15.6 11.3h.01M18 12.8h.01"/></svg>',
+  freeStudy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.2c-1.6-1.2-3.6-1.7-5.7-1.7v12.7c2.1 0 4.1.5 5.7 1.7 1.6-1.2 3.6-1.7 5.7-1.7V4.5c-2.1 0-4.1.5-5.7 1.7z"/><path d="M12 6.2v12.7"/></svg>',
+  exam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8.3 8.5h7.4M8.3 12h7.4M8.3 15.5h4.6"/><path d="M17.5 14l1.6 1.6 3-3.4" transform="translate(-1.5 3)"/></svg>',
+  war: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.3l7 2.6v5.4c0 4.6-3 7.6-7 9.4-4-1.8-7-4.8-7-9.4V5.9z"/><path d="M12 8v4.5M12 15.3h.01"/></svg>',
+  loneliness: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 13.5a6 6 0 1 1-6-9.3 7.2 7.2 0 1 0 6 9.3z"/><path d="M18.5 4.3l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></svg>',
+  cleaning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 3.5L6 15"/><path d="M6 15c-2 0-3.5 1.6-3.5 4.5 1.7-1 2.7-.6 3.3.2.7.9 2 1 2.9 0a2.7 2.7 0 0 0-.1-3.8z"/><path d="M11.8 5.6l5 3.3"/></svg>',
+  editing: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.2l1-3.6 15.8 4.3-1 3.6z"/><rect x="3.5" y="9.2" width="17" height="9.8" rx="1.4"/><path d="M6.6 6.1l2 3.1M10.4 7.1l2 3.1M14.2 8.1l2 3.1"/></svg>',
+  party: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l3.3-11.4L17 12.7z"/><path d="M13 3.5l.6 1.9M17.5 6l1.9.6M19.5 10.5l1.9.6"/><circle cx="9.5" cy="12.5" r="0.6" fill="currentColor" stroke="none"/><circle cx="7.6" cy="16.2" r="0.6" fill="currentColor" stroke="none"/></svg>',
+  youtube: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="3.5"/><path d="M10.3 9.6l4.6 2.4-4.6 2.4z" fill="currentColor" stroke="none"/></svg>',
+  instagram: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5l4.5-5h7l4.5 5"/><path d="M3 8.5h18v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="14" r="3.2"/></svg>',
+  instrumentPractice: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.3" cy="16.5" r="3.2"/><path d="M11.3 16.5V6.8l7-2.3v9.4"/><circle cx="15.5" cy="14" r="2.7"/></svg>',
+  salon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6.2" r="2.2"/><circle cx="6" cy="17.8" r="2.2"/><path d="M20.5 4.5L7.7 14M9.6 10l10.9 8.5"/></svg>',
+  hospital: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M12 7.5v9M7.5 12h9"/></svg>',
+  calligraphy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 4.5c1 1 1 2.3 0 3.3l-9.6 9.6-4.4 1.1 1.1-4.4 9.6-9.6c1-1 2.3-1 3.3 0z"/><path d="M14 7.4l2.6 2.6"/></svg>',
+  painting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5c-5 0-8.5-3.6-8.5-8.1C3.5 7.6 7.6 4 12.4 4c4.4 0 8.1 3 8.1 6.7 0 2.2-1.7 3.5-3.6 3.5h-2a1.7 1.7 0 0 0-1.2 2.9c.6.6.3 1.7-.6 2a8 8 0 0 1-1.1.4z"/><circle cx="8" cy="10.5" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="10.5" r="1" fill="currentColor" stroke="none"/></svg>',
+  languageLearning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.2 2.2 3.4 5.3 3.4 8.5s-1.2 6.3-3.4 8.5c-2.2-2.2-3.4-5.3-3.4-8.5S9.8 5.7 12 3.5z"/></svg>',
+  amusementPark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="11" r="7.5"/><circle cx="12" cy="11" r="1.3" fill="currentColor" stroke="none"/><path d="M12 3.5v15M4.5 11h15M6.7 5.7l10.6 10.6M17.3 5.7L6.7 16.3"/><path d="M12 18.5v3M9.5 21.5h5"/></svg>',
+  movie: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 9.5L7.6 3.8a1.6 1.6 0 0 1 2-1.2l8.8 2.3a1.6 1.6 0 0 1 1.2 2l-1.4 5.5"/><path d="M5 9.5h14l1.3 9.4a1.8 1.8 0 0 1-1.8 2H5.5a1.8 1.8 0 0 1-1.8-2z"/><path d="M9.5 3.2l2 4.4M14.3 4.4l2 4.4"/></svg>',
+  dance: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.3" cy="4.5" r="1.7" fill="currentColor" stroke="none"/><path d="M13 7.8l-4.4 2 1 3.4-4 4.3M13 7.8l3.6 1 2 5.4M9.6 13.2l4.6 1 1.3 5.3"/></svg>',
+  date: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.3-4.4-7.3-9.7A4 4 0 0 1 12 7.5a4 4 0 0 1 7.3 2.8C19.3 15.6 12 20 12 20z"/></svg>',
+  meeting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3v3M15 3v3"/><path d="M8.3 11h7.4M8.3 14.4h7.4M8.3 17.8h4.6"/></svg>',
+  gardening: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5V11"/><path d="M12 11c0-4-3-6.5-7.3-6.5C4.7 8.7 7.4 11 12 11z"/><path d="M12 13.5c0-3.4 2.5-5.6 6.2-5.6.3 3.5-1.9 5.6-6.2 5.6z"/></svg>',
+  worship: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v6.5"/><path d="M12 11c-1.4 3-3.8 4.7-7 5.3.7 2.6 3.4 4.7 7 4.7s6.3-2.1 7-4.7c-3.2-.6-5.6-2.3-7-5.3z"/></svg>',
+  driving: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><path d="M12 3.5v4.6M6 17l2.9-2.9M18 17l-2.9-2.9"/></svg>',
+  daydream: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14.5a4 4 0 0 1 .3-8 5 5 0 0 1 9.6-1.7 4.3 4.3 0 0 1 1.6 8.3"/><circle cx="7.5" cy="18.2" r="1" fill="currentColor" stroke="none"/><circle cx="5.2" cy="20.7" r="0.6" fill="currentColor" stroke="none"/></svg>',
+  sales: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 10.5l4-2.8 4.3 3.2"/><path d="M21.5 10.5l-4-2.8-4.3 3.2"/><path d="M10.8 10.9l-3.6 3.2a1.5 1.5 0 0 0 2 2.2l.6-.5"/><path d="M13.2 10.9l3.6 3.2a1.5 1.5 0 0 1-2 2.2l-.6-.5"/><path d="M9.6 15.4l1 .9a1.6 1.6 0 0 0 2.2 0"/></svg>',
+  familyTime: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.3" cy="7" r="2"/><circle cx="17.3" cy="7" r="2"/><circle cx="12" cy="10.5" r="1.5"/><path d="M2.8 18.5c0-2.6 1.6-4.4 3.5-4.4s3.5 1.8 3.5 4.4M14.2 18.5c0-2.2 1.3-3.7 2.9-3.9M20.5 18.5c0-2.2-1.3-3.7-2.9-3.9"/><path d="M9.3 19.5c0-1.9 1.2-3.2 2.7-3.2s2.7 1.3 2.7 3.2"/></svg>',
+  photography: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3.3l1.4-2h6.6l1.4 2H20a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.3" r="3.4"/></svg>',
+  trading: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 19.5h17"/><path d="M4.5 15.5l4.5-5 3.5 3 6-6.5"/><path d="M14.5 6.5h4.5v4.5"/></svg>',
+  farming: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="M12 9c1.8-.3 3-1.7 3-4.5-2.8 0-4.2 1.2-4.5 3M12 9c-1.8-.3-3-1.7-3-4.5 2.8 0 4.2 1.2 4.5 3"/><path d="M12 14.5c1.8-.3 3-1.7 3-4.5-2.8 0-4.2 1.2-4.5 3M12 14.5c-1.8-.3-3-1.7-3-4.5 2.8 0 4.2 1.2 4.5 3"/></svg>',
+  livestock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 6.2c-1.3-.5-2.5.4-2.2 1.8l.5 2M18.5 6.2c1.3-.5 2.5.4 2.2 1.8l-.5 2"/><rect x="5.5" y="7" width="13" height="9.5" rx="4.5"/><circle cx="9.3" cy="11.3" r="0.7" fill="currentColor" stroke="none"/><circle cx="14.7" cy="11.3" r="0.7" fill="currentColor" stroke="none"/><path d="M10.5 14h3"/></svg>',
+  accounting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8"/><path d="M8 11h.01M12 11h.01M16 11h.01M8 14.5h.01M12 14.5h.01M16 14.5h.01M8 18h.01M12 18h.01M16 18h.01"/></svg>',
+  secretary: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5a2 2 0 0 1 2-2h4l1.6 2H18.5a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg>',
+  consulting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18.5h6M10 21h4"/><path d="M12 3a5.7 5.7 0 0 0-3.3 10.3c.7.5 1.1 1.2 1.1 2h4.4c0-.8.4-1.5 1.1-2A5.7 5.7 0 0 0 12 3z"/></svg>',
+  construction: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 13a8.5 8.5 0 0 1 17 0z"/><path d="M2.5 13h19"/><path d="M4.5 13c0-3 2.5-7.3 7.5-8"/></svg>',
+  programming: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 8L3.8 12l4.7 4M15.5 8l4.7 4-4.7 4M13.3 6l-2.6 12"/></svg>',
+  writing: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l.9-4L16.7 4.2a2 2 0 0 1 2.8 0l.3.3a2 2 0 0 1 0 2.8L8 19.1z"/><path d="M14.8 6.2l2.9 2.9"/></svg>',
+  sewing: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4L9.5 14.5"/><circle cx="7" cy="17" r="2.3"/><path d="M12.5 8.5c2 .5 4.5 2 5.5 4.5-2.7.6-5.3-.3-6.8-1.8"/></svg>',
+  makeup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.3 14.7L16.8 7.2a1.8 1.8 0 0 1 2.5 0l.5.5a1.8 1.8 0 0 1 0 2.5l-7.5 7.5z"/><path d="M9.3 14.7l-1.6 4.4c-.2.6.4 1.2 1 1l4.4-1.6z"/></svg>',
+  wedding: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.7" cy="13.5" r="4.3"/><circle cx="15.3" cy="13.5" r="4.3"/></svg>',
+  marketing: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5v3l3 .6v4.4a1.2 1.2 0 0 0 2.3.4l.7-1.9 8 2.8V4.7l-8 3.3-3 .6z"/><path d="M17 8.7a3.5 3.5 0 0 1 0 6.6"/></svg>',
+  voiceOver: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9.3" y="3.5" width="5.4" height="9.5" rx="2.7"/><path d="M6.2 11c0 3.2 2.6 5.2 5.8 5.2s5.8-2 5.8-5.2M12 16.2v4.3M9.3 20.5h5.4"/><path d="M3.5 10c0 2 .8 3.6 2 4.8M20.5 10c0 2-.8 3.6-2 4.8"/></svg>',
+  singing: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9.3" y="3.5" width="5.4" height="9.5" rx="2.7"/><path d="M6.2 11c0 3.2 2.6 5.2 5.8 5.2s5.8-2 5.8-5.2M12 16.2v4.3M9.3 20.5h5.4"/></svg>',
+  freelancing: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5.5" width="17" height="11" rx="1.6"/><path d="M2 19.5h20M9.5 5.5V4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5"/></svg>',
+  massage: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13.5c0-4 2.7-7 6-7 1 0 1.8.6 1.8 1.6 0 1.6-1.8 1.9-1.8 3.9"/><path d="M20 13.5c0-4-2.7-7-6-7-1 0-1.8.6-1.8 1.6 0 1.6 1.8 1.9 1.8 3.9"/><path d="M4 13.5c0 4 3.5 6 8 6s8-2 8-6"/></svg>',
+  mobileGaming: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="2.5" width="11" height="19" rx="2.3"/><circle cx="9" cy="14.5" r="0.9" fill="currentColor" stroke="none"/><circle cx="15" cy="14.5" r="0.9" fill="currentColor" stroke="none"/><path d="M12 12.8v3.4M10.3 14.5h3.4"/></svg>',
+  knitting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4"/><path d="M6.3 6.4c1.7 1 2.9 2.6 3.4 4.5M9.6 5.6c-1.4 1.4-2.1 3.2-2.1 5.2"/><path d="M14.5 12.5l6-1.7M14.5 17l6.5.6"/></svg>',
+};
 const FOCUS_MODES = {
   gym: {
     title: 'حالت باشگاه',
     free: true,
-    icon: '🏋️',
+    icon: FM_ICON.gym,
     subtitle: 'رو فرم درست تمرکز کن، نه فقط عدد وزنه',
     color: ['#f97316','#ef4444'],
     timerLabel: 'زمان تمرکز',
@@ -5021,7 +5692,7 @@ const FOCUS_MODES = {
   sleep: {
     title: 'حالت خواب',
     free: true,
-    icon: '😴',
+    icon: FM_ICON.sleep,
     subtitle: 'یه پایان آروم برای امروز',
     color: ['#5b4b9a','#293868'],
     timerLabel: 'زمان آماده‌شدن برای خواب',
@@ -5039,7 +5710,7 @@ const FOCUS_MODES = {
   morning: {
     title: 'حالت بیداری صبح',
     free: true,
-    icon: '🌅',
+    icon: FM_ICON.morning,
     subtitle: 'یه شروع تازه، با آرامش',
     color: ['#fb923c','#f472b6'],
     timerLabel: 'زمان روتین صبحگاهی',
@@ -5056,7 +5727,7 @@ const FOCUS_MODES = {
   },
   walk: {
     title: 'حالت پیاده‌روی',
-    icon: '🚶',
+    icon: FM_ICON.walk,
     subtitle: 'هر قدم، یه لحظه حضور',
     color: ['#22c55e','#0d9488'],
     timerLabel: 'زمان پیاده‌روی',
@@ -5073,7 +5744,7 @@ const FOCUS_MODES = {
   },
   football: {
     title: 'حالت سالن فوتبال',
-    icon: '⚽',
+    icon: FM_ICON.football,
     subtitle: 'رو بازی و هم‌تیمی‌هات تمرکز کن',
     color: ['#16a34a','#0ea5e9'],
     timerLabel: 'زمان بازی',
@@ -5090,7 +5761,7 @@ const FOCUS_MODES = {
   },
   nap: {
     title: 'حالت چرت بعد از ظهر',
-    icon: '💤',
+    icon: FM_ICON.nap,
     subtitle: 'یه چرت کوتاه، نه یه خواب بلند',
     color: ['#60a5fa','#818cf8'],
     timerLabel: 'زمان چرت',
@@ -5107,7 +5778,7 @@ const FOCUS_MODES = {
   },
   travel: {
     title: 'حالت مسافرت',
-    icon: '🧳',
+    icon: FM_ICON.travel,
     subtitle: 'سفرتو زندگی کن، نه فقط ثبتش کن',
     color: ['#38bdf8','#6366f1'],
     timerLabel: 'زمان سفر',
@@ -5124,7 +5795,7 @@ const FOCUS_MODES = {
   },
   cooking: {
     title: 'حالت آشپزی',
-    icon: '🍳',
+    icon: FM_ICON.cooking,
     subtitle: 'تمرکز رو دستور پخت، نه رو گوشی',
     color: ['#f59e0b','#ef4444'],
     timerLabel: 'زمان آشپزی',
@@ -5141,7 +5812,7 @@ const FOCUS_MODES = {
   },
   coffeeshop: {
     title: 'حالت کافی شاپ',
-    icon: '☕',
+    icon: FM_ICON.coffeeshop,
     subtitle: 'یه محیط تازه برای کار یا مطالعه‌ی عمیق',
     color: ['#b45309','#78350f'],
     timerLabel: 'زمان تمرکز',
@@ -5158,7 +5829,7 @@ const FOCUS_MODES = {
   },
   clothesShopping: {
     title: 'حالت خرید لباس',
-    icon: '👕',
+    icon: FM_ICON.clothesShopping,
     subtitle: 'خرید هدفمند، نه خرید احساسی',
     color: ['#ec4899','#f97316'],
     timerLabel: 'زمان خرید',
@@ -5175,7 +5846,7 @@ const FOCUS_MODES = {
   },
   supermarket: {
     title: 'حالت خرید سوپرمارکت',
-    icon: '🛒',
+    icon: FM_ICON.supermarket,
     subtitle: 'با شکم سیر برو، نه با چشم گشنه',
     color: ['#65a30d','#22c55e'],
     timerLabel: 'زمان خرید',
@@ -5192,7 +5863,7 @@ const FOCUS_MODES = {
   },
   onlineShopping: {
     title: 'حالت خرید آنلاین',
-    icon: '📦',
+    icon: FM_ICON.onlineShopping,
     subtitle: 'یه سفارش فکرشده، نه یه کلیک لحظه‌ای',
     color: ['#0ea5e9','#8b5cf6'],
     timerLabel: 'زمان خرید',
@@ -5209,7 +5880,7 @@ const FOCUS_MODES = {
   },
   friendHangout: {
     title: 'حالت گشت و گذار با رفیق',
-    icon: '🧑‍🤝‍🧑',
+    icon: FM_ICON.friendHangout,
     subtitle: 'با کسی که کنارته باش، نه با گوشیت',
     color: ['#fbbf24','#fb7185'],
     timerLabel: 'زمان با رفیق',
@@ -5226,7 +5897,7 @@ const FOCUS_MODES = {
   },
   restaurant: {
     title: 'حالت رستوران',
-    icon: '🍽️',
+    icon: FM_ICON.restaurant,
     subtitle: 'لذت از غذا و لحظه، نه فقط عکس براش',
     color: ['#dc2626','#f59e0b'],
     timerLabel: 'زمان رستوران',
@@ -5243,7 +5914,7 @@ const FOCUS_MODES = {
   },
   pool: {
     title: 'حالت استخر',
-    icon: '🏊',
+    icon: FM_ICON.pool,
     subtitle: 'شنا و آرامش، دور از گوشی',
     color: ['#06b6d4','#3b82f6'],
     timerLabel: 'زمان شنا',
@@ -5260,7 +5931,7 @@ const FOCUS_MODES = {
   },
   gamingCafe: {
     title: 'حالت گیم‌نت',
-    icon: '🎮',
+    icon: FM_ICON.gamingCafe,
     subtitle: 'بازی با کنترل، نه بی‌حدومرز',
     color: ['#8b5cf6','#ec4899'],
     timerLabel: 'زمان بازی',
@@ -5277,7 +5948,7 @@ const FOCUS_MODES = {
   },
   freeStudy: {
     title: 'حالت مطالعه آزاد',
-    icon: '📖',
+    icon: FM_ICON.freeStudy,
     subtitle: 'یادگیری با کنجکاوی، نه استرس',
     color: ['#4f46e5','#06b6d4'],
     timerLabel: 'زمان مطالعه',
@@ -5294,7 +5965,7 @@ const FOCUS_MODES = {
   },
   exam: {
     title: 'حالت امتحان',
-    icon: '📝',
+    icon: FM_ICON.exam,
     subtitle: 'آروم و متمرکز، برای بهترین نتیجه',
     color: ['#7c3aed','#2563eb'],
     timerLabel: 'زمان آماده‌سازی',
@@ -5313,7 +5984,7 @@ const FOCUS_MODES = {
   war: {
     title: 'حالت جنگ',
     free: true,
-    icon: '🛡️',
+    icon: FM_ICON.war,
     subtitle: 'آروم موندن وسط صدای آژیر و انفجار، قدم‌به‌قدم',
     color: ['#0f766e','#1e293b'],
     timerLabel: 'زمان آرام‌سازی',
@@ -5333,7 +6004,7 @@ const FOCUS_MODES = {
   },
   loneliness: {
     title: 'حالت تنهایی',
-    icon: '🌙',
+    icon: FM_ICON.loneliness,
     subtitle: 'تنها بودن، نه لزوماً تنهاییِ دردناک',
     color: ['#6366f1','#a855f7'],
     timerLabel: 'زمان با خودم',
@@ -5350,7 +6021,7 @@ const FOCUS_MODES = {
   },
   cleaning: {
     title: 'حالت نظافت',
-    icon: '🧹',
+    icon: FM_ICON.cleaning,
     subtitle: 'قدم به قدم، بدون فرار به گوشی',
     color: ['#10b981','#059669'],
     timerLabel: 'زمان نظافت',
@@ -5367,7 +6038,7 @@ const FOCUS_MODES = {
   },
   editing: {
     title: 'حالت ادیت و تدوین',
-    icon: '🎬',
+    icon: FM_ICON.editing,
     subtitle: 'کار عمیق و دقیق، فریم به فریم',
     color: ['#111827','#6366f1'],
     timerLabel: 'زمان تدوین',
@@ -5385,7 +6056,7 @@ const FOCUS_MODES = {
   },
   party: {
     title: 'حالت میهمانی',
-    icon: '🎉',
+    icon: FM_ICON.party,
     subtitle: 'حضور واقعی، نه فقط عکس یادگاری',
     color: ['#ec4899','#f59e0b'],
     timerLabel: 'زمان میهمانی',
@@ -5403,7 +6074,7 @@ const FOCUS_MODES = {
   },
   youtube: {
     title: 'حالت یوتیوب',
-    icon: '▶️',
+    icon: FM_ICON.youtube,
     subtitle: 'تماشای هدفمند، نه اسکرول بی‌پایان پیشنهادها',
     color: ['#dc2626','#7f1d1d'],
     timerLabel: 'زمان تماشا',
@@ -5421,7 +6092,7 @@ const FOCUS_MODES = {
   instagram: {
     title: 'حالت اینستاگرام',
     free: true,
-    icon: '📸',
+    icon: FM_ICON.instagram,
     subtitle: 'چک کردن هدفمند، نه اسکرول بی‌هدف',
     color: ['#f59e0b','#d6249f'],
     timerLabel: 'زمان استفاده',
@@ -5438,7 +6109,7 @@ const FOCUS_MODES = {
   },
   instrumentPractice: {
     title: 'حالت تمرین ساز',
-    icon: '🎸',
+    icon: FM_ICON.instrumentPractice,
     subtitle: 'تمرکز رو نت‌ها و حس آهنگ، نه فقط پر کردن وقت',
     color: ['#b45309','#78350f'],
     timerLabel: 'زمان تمرین',
@@ -5455,7 +6126,7 @@ const FOCUS_MODES = {
   },
   salon: {
     title: 'حالت آرایشگاه',
-    icon: '💈',
+    icon: FM_ICON.salon,
     subtitle: 'یه وقفه‌ی آروم، بدون عجله',
     color: ['#ec4899','#a855f7'],
     timerLabel: 'زمان حضور تو آرایشگاه',
@@ -5472,7 +6143,7 @@ const FOCUS_MODES = {
   },
   hospital: {
     title: 'حالت بیمارستان',
-    icon: '🏥',
+    icon: FM_ICON.hospital,
     subtitle: 'آروم بمون، حواست به همینجا و همین لحظه باشه',
     color: ['#0ea5e9','#14b8a6'],
     timerLabel: 'زمان حضور تو بیمارستان',
@@ -5489,7 +6160,7 @@ const FOCUS_MODES = {
   },
   calligraphy: {
     title: 'حالت خوشنویسی',
-    icon: '🖋️',
+    icon: FM_ICON.calligraphy,
     subtitle: 'تمرکز رو حرکت قلم و نفس، نه عجله برای تموم کردن',
     color: ['#1e293b','#475569'],
     timerLabel: 'زمان تمرین خوشنویسی',
@@ -5506,7 +6177,7 @@ const FOCUS_MODES = {
   },
   painting: {
     title: 'حالت نقاشی',
-    icon: '🎨',
+    icon: FM_ICON.painting,
     subtitle: 'رو لحظه‌ی کشیدن تمرکز کن، نه نتیجه‌ی نهایی',
     color: ['#f472b6','#a855f7'],
     timerLabel: 'زمان نقاشی',
@@ -5523,7 +6194,7 @@ const FOCUS_MODES = {
   },
   languageLearning: {
     title: 'حالت یادگیری زبان',
-    icon: '🗣️',
+    icon: FM_ICON.languageLearning,
     subtitle: 'کمی هر روز، به‌جای خیلی یه‌بار',
     color: ['#0891b2','#7c3aed'],
     timerLabel: 'زمان تمرین زبان',
@@ -5540,7 +6211,7 @@ const FOCUS_MODES = {
   },
   amusementPark: {
     title: 'حالت شهربازی',
-    icon: '🎡',
+    icon: FM_ICON.amusementPark,
     subtitle: 'هیجان و خنده، دور از گوشی',
     color: ['#f43f5e','#fbbf24'],
     timerLabel: 'زمان شهربازی',
@@ -5557,7 +6228,7 @@ const FOCUS_MODES = {
   },
   movie: {
     title: 'حالت تماشای فیلم',
-    icon: '🍿',
+    icon: FM_ICON.movie,
     subtitle: 'تماشای آگاهانه، نه فقط پر کردن وقت',
     color: ['#1e1b4b','#9333ea'],
     timerLabel: 'زمان تماشا',
@@ -5574,7 +6245,7 @@ const FOCUS_MODES = {
   },
   dance: {
     title: 'حالت رقص',
-    icon: '💃',
+    icon: FM_ICON.dance,
     subtitle: 'حرکت با بدن، حضور با ریتم',
     color: ['#db2777','#f97316'],
     timerLabel: 'زمان تمرین رقص',
@@ -5591,7 +6262,7 @@ const FOCUS_MODES = {
   },
   date: {
     title: 'حالت قرار ملاقات',
-    icon: '🌹',
+    icon: FM_ICON.date,
     subtitle: 'حضور واقعی، نه فقط عکس یا نمایش',
     color: ['#e11d48','#fb7185'],
     timerLabel: 'زمان قرار',
@@ -5609,7 +6280,7 @@ const FOCUS_MODES = {
   },
   meeting: {
     title: 'حالت جلسه کاری',
-    icon: '📋',
+    icon: FM_ICON.meeting,
     subtitle: 'حضور کامل، گوشی کنار',
     color: ['#0f172a','#0891b2'],
     timerLabel: 'زمان جلسه',
@@ -5627,7 +6298,7 @@ const FOCUS_MODES = {
   },
   gardening: {
     title: 'حالت باغبانی',
-    icon: '🌱',
+    icon: FM_ICON.gardening,
     subtitle: 'دستات تو خاک، ذهنت تو آرامش',
     color: ['#65a30d','#166534'],
     timerLabel: 'زمان باغبانی',
@@ -5644,7 +6315,7 @@ const FOCUS_MODES = {
   },
   worship: {
     title: 'حالت عبادت',
-    icon: '🤲',
+    icon: FM_ICON.worship,
     subtitle: 'چند دقیقه فقط برای دل و روحت',
     color: ['#065f46','#0f766e'],
     timerLabel: 'زمان عبادت',
@@ -5661,7 +6332,7 @@ const FOCUS_MODES = {
   },
   driving: {
     title: 'حالت رانندگی',
-    icon: '🚗',
+    icon: FM_ICON.driving,
     subtitle: 'گوشی کنار، چشم به جاده',
     color: ['#1e3a8a','#facc15'],
     timerLabel: 'زمان رانندگی',
@@ -5679,7 +6350,7 @@ const FOCUS_MODES = {
   },
   daydream: {
     title: 'حالت خیال‌پردازی',
-    icon: '💭',
+    icon: FM_ICON.daydream,
     subtitle: 'به‌جای فرار از واقعیت، رویاتو دقیق‌تر ببین',
     color: ['#a78bfa','#67e8f9'],
     timerLabel: 'زمان خیال‌پردازی',
@@ -5696,7 +6367,7 @@ const FOCUS_MODES = {
   },
   sales: {
     title: 'حالت فروشندگی',
-    icon: '🤝',
+    icon: FM_ICON.sales,
     subtitle: 'با اعتمادبه‌نفس بفروش، نه با اصرار',
     color: ['#f59e0b','#16a34a'],
     timerLabel: 'زمان فروش',
@@ -5713,7 +6384,7 @@ const FOCUS_MODES = {
   },
   familyTime: {
     title: 'حالت وقت گذرانی با خانواده',
-    icon: '👨‍👩‍👧‍👦',
+    icon: FM_ICON.familyTime,
     subtitle: 'گوشی کنار، توجهت واقعی',
     color: ['#f97316','#fbbf24'],
     timerLabel: 'زمان با خانواده',
@@ -5729,7 +6400,7 @@ const FOCUS_MODES = {
   },
   photography: {
     title: 'حالت عکاسی',
-    icon: '📷',
+    icon: FM_ICON.photography,
     subtitle: 'با چشم ببین، نه فقط با لنز',
     color: ['#1f2937','#38bdf8'],
     timerLabel: 'زمان عکاسی',
@@ -5745,7 +6416,7 @@ const FOCUS_MODES = {
   },
   trading: {
     title: 'حالت ترید',
-    icon: '📈',
+    icon: FM_ICON.trading,
     subtitle: 'با برنامه معامله کن، نه با احساس',
     color: ['#16a34a','#dc2626'],
     timerLabel: 'زمان معامله',
@@ -5762,7 +6433,7 @@ const FOCUS_MODES = {
   },
   farming: {
     title: 'حالت کشاورزی',
-    icon: '🌾',
+    icon: FM_ICON.farming,
     subtitle: 'صبر و پیوستگی، رمز محصول خوب',
     color: ['#84cc16','#a16207'],
     timerLabel: 'زمان کار مزرعه',
@@ -5778,7 +6449,7 @@ const FOCUS_MODES = {
   },
   livestock: {
     title: 'حالت دام‌داری',
-    icon: '🐄',
+    icon: FM_ICON.livestock,
     subtitle: 'یه رسیدگی منظم برای موجوداتی که بهت وابسته‌ن',
     color: ['#78350f','#ca8a04'],
     timerLabel: 'زمان رسیدگی به دام',
@@ -5794,7 +6465,7 @@ const FOCUS_MODES = {
   },
   accounting: {
     title: 'حالت حسابداری',
-    icon: '🧮',
+    icon: FM_ICON.accounting,
     subtitle: 'دقت الان، دردسر کمتر بعداً',
     color: ['#0f766e','#facc15'],
     timerLabel: 'زمان حسابداری',
@@ -5810,7 +6481,7 @@ const FOCUS_MODES = {
   },
   secretary: {
     title: 'حالت منشی‌گری',
-    icon: '🗂️',
+    icon: FM_ICON.secretary,
     subtitle: 'هماهنگ و منظم، پشت‌صحنه‌ی کار رو نگه دار',
     color: ['#0ea5e9','#f472b6'],
     timerLabel: 'زمان منشی‌گری',
@@ -5826,7 +6497,7 @@ const FOCUS_MODES = {
   },
   consulting: {
     title: 'حالت مشاوره',
-    icon: '💡',
+    icon: FM_ICON.consulting,
     subtitle: 'اول بفهم، بعد راه‌حل بده',
     color: ['#6366f1','#22c55e'],
     timerLabel: 'زمان مشاوره',
@@ -5842,7 +6513,7 @@ const FOCUS_MODES = {
   },
   construction: {
     title: 'حالت کارگری ساختمان',
-    icon: '👷',
+    icon: FM_ICON.construction,
     subtitle: 'ایمنی اول، بعد سرعت',
     color: ['#eab308','#1f2937'],
     timerLabel: 'زمان کار ساختمانی',
@@ -5858,7 +6529,7 @@ const FOCUS_MODES = {
   },
   programming: {
     title: 'حالت برنامه‌نویسی',
-    icon: '💻',
+    icon: FM_ICON.programming,
     subtitle: 'یه مسئله رو در یه لحظه حل کن',
     color: ['#0f172a','#22d3ee'],
     timerLabel: 'زمان برنامه‌نویسی',
@@ -5874,7 +6545,7 @@ const FOCUS_MODES = {
   },
   writing: {
     title: 'حالت نویسندگی',
-    icon: '✍️',
+    icon: FM_ICON.writing,
     subtitle: 'اول بنویس، بعد ویرایش کن',
     color: ['#1e293b','#f59e0b'],
     timerLabel: 'زمان نویسندگی',
@@ -5890,7 +6561,7 @@ const FOCUS_MODES = {
   },
   sewing: {
     title: 'حالت خیاطی',
-    icon: '🧵',
+    icon: FM_ICON.sewing,
     subtitle: 'اندازه رو دوبار چک کن، یه‌بار ببر',
     color: ['#be185d','#f59e0b'],
     timerLabel: 'زمان خیاطی',
@@ -5906,7 +6577,7 @@ const FOCUS_MODES = {
   },
   makeup: {
     title: 'حالت آرایش و میکاپ',
-    icon: '💄',
+    icon: FM_ICON.makeup,
     subtitle: 'نور خوب و دست آروم، رمز کار تمیز',
     color: ['#ec4899','#fde68a'],
     timerLabel: 'زمان آرایش',
@@ -5922,7 +6593,7 @@ const FOCUS_MODES = {
   },
   wedding: {
     title: 'حالت جشن عروسی',
-    icon: '💍',
+    icon: FM_ICON.wedding,
     subtitle: 'تو لحظه بمون، نگران عکس و برنامه نباش',
     color: ['#fbbf24','#db2777'],
     timerLabel: 'زمان جشن عروسی',
@@ -5938,7 +6609,7 @@ const FOCUS_MODES = {
   },
   marketing: {
     title: 'حالت بازاریابی',
-    icon: '📣',
+    icon: FM_ICON.marketing,
     subtitle: 'پیام روشن برای مخاطب درست',
     color: ['#f43f5e','#6366f1'],
     timerLabel: 'زمان بازاریابی',
@@ -5954,7 +6625,7 @@ const FOCUS_MODES = {
   },
   voiceOver: {
     title: 'حالت گویندگی',
-    icon: '🎙️',
+    icon: FM_ICON.voiceOver,
     subtitle: 'صدا رو گرم کن، بعد ضبط کن',
     color: ['#7c2d12','#f97316'],
     timerLabel: 'زمان گویندگی',
@@ -5970,7 +6641,7 @@ const FOCUS_MODES = {
   },
   singing: {
     title: 'حالت خوانندگی',
-    icon: '🎤',
+    icon: FM_ICON.singing,
     subtitle: 'قبل از خوندن، صدات رو باز کن',
     color: ['#9333ea','#ec4899'],
     timerLabel: 'زمان تمرین خوانندگی',
@@ -5986,7 +6657,7 @@ const FOCUS_MODES = {
   },
   freelancing: {
     title: 'حالت فریلنسری',
-    icon: '🧑‍💻',
+    icon: FM_ICON.freelancing,
     subtitle: 'خودتی و خودت، برنامه‌ی خودتو بچین',
     color: ['#0891b2','#facc15'],
     timerLabel: 'زمان فریلنسری',
@@ -6002,7 +6673,7 @@ const FOCUS_MODES = {
   },
   massage: {
     title: 'حالت ماساژوری',
-    icon: '💆',
+    icon: FM_ICON.massage,
     subtitle: 'با فشار درست، نه فقط دست تند',
     color: ['#134e4a','#5eead4'],
     timerLabel: 'زمان ماساژ',
@@ -6018,7 +6689,7 @@ const FOCUS_MODES = {
   },
   mobileGaming: {
     title: 'حالت گیم موبایل',
-    icon: '🎮',
+    icon: FM_ICON.mobileGaming,
     subtitle: 'بازی کن، نه اینکه بازی وقتتو بخوره',
     color: ['#8b5cf6','#3b82f6'],
     timerLabel: 'زمان بازی',
@@ -6034,7 +6705,7 @@ const FOCUS_MODES = {
   },
   knitting: {
     title: 'حالت بافتنی',
-    icon: '🧶',
+    icon: FM_ICON.knitting,
     subtitle: 'هر رج، آروم و با دقت',
     color: ['#f472b6','#a855f7'],
     timerLabel: 'زمان بافتنی',
@@ -6170,7 +6841,7 @@ function startFocusMode(mode){
   const colorStyle = focusModeColorStyle(m);
   document.getElementById('focusSessionIconBadge').setAttribute('style', colorStyle);
   document.getElementById('focusTimerCard').setAttribute('style', colorStyle);
-  document.getElementById('focusSessionIcon').textContent = m.icon;
+  document.getElementById('focusSessionIcon').innerHTML = m.icon;
   document.getElementById('focusSessionTitle').textContent = m.title;
   document.getElementById('focusSessionSubtitle').textContent = m.subtitle || '';
   document.getElementById('focusTimerLabel').textContent = m.timerLabel || 'زمان تمرکز';
@@ -6201,7 +6872,7 @@ function endFocusMode(){
   focusPendingEnd = { mode, minutes };
   const m = FOCUS_MODES[mode];
   const fqIcon = document.getElementById('fqIcon');
-  if(fqIcon) fqIcon.textContent = m ? m.icon : '🎯';
+  if(fqIcon) fqIcon.innerHTML = m ? m.icon : LB_SVG_TARGET;
   document.querySelectorAll('#fqStars .fq-star').forEach(b=> b.classList.remove('active'));
   const modal = document.getElementById('focusQualityModal');
   if(modal) modal.classList.add('visible');
@@ -6753,6 +7424,888 @@ if(wtInputsWrap){
   });
 }
 
+/* ================= Brain tab (تقویت هوش): سرعت پردازش =================
+   دو بازی مستقل، هر کدوم یه راند زمان‌دار دارن که توش هرچقدر بتونی سوال جواب
+   می‌دی. سوال بعدی همیشه رندومه (نوع عملیات/رنگ‌ها عوض می‌شه و از تکرار عین
+   سوال قبلی جلوگیری می‌کنیم) تا زود تکراری و خسته‌کننده نشه. */
+function brainRandInt(max){ return 1 + Math.floor(Math.random()*max); }
+function brainShuffle(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+  return a;
+}
+
+/* ---- محاسبه‌ی سریع ---- */
+const BRAIN_MATH_LEVELS = {
+  easy:   { label:'ساده',  ops:['add','sub','cmp','tf'],                    range:10, seconds:45 },
+  medium: { label:'متوسط', ops:['add','sub','mul','div','missing','tf'],    range:20, seconds:45 },
+  hard:   { label:'سخت',   ops:['add','sub','mul','div','cmp','missing','tf'], range:50, seconds:40 }
+};
+let brainMathLevel = 'easy';
+let brainMathTimerId = null;
+let brainMathRunning = false;
+let brainMathScore = 0;
+let brainMathStreak = 0;
+let brainMathLastKey = '';
+let brainMathOpHistory = [];
+
+function brainGetMathStats(){
+  storeData.brainStats = storeData.brainStats || {};
+  storeData.brainStats.math = storeData.brainStats.math || { bestByLevel:{}, rounds:0 };
+  return storeData.brainStats.math;
+}
+
+// یه عملیات پایه (جمع/تفریق/ضرب) با متن و جواب واقعی می‌سازه؛ برای بازسازی توسط
+// حالت‌های «جای‌خالی» و «درست/غلط» هم استفاده می‌شه تا اون دوتا هم متنوع بمونن.
+function brainGenBaseArith(cfg, forceOp){
+  const ops = ['add','sub','mul'];
+  const op = forceOp || ops[Math.floor(Math.random()*ops.length)];
+  if(op === 'mul'){
+    const capForMul = Math.min(cfg.range, 12);
+    const a = brainRandInt(capForMul), b = brainRandInt(capForMul);
+    return { op, a, b, text: faDigits(a)+' × '+faDigits(b), answer: a*b };
+  } else if(op === 'sub'){
+    const a = brainRandInt(cfg.range), b = brainRandInt(a);
+    return { op, a, b, text: faDigits(a)+' − '+faDigits(b), answer: a-b };
+  } else {
+    const a = brainRandInt(cfg.range), b = brainRandInt(cfg.range);
+    return { op, a, b, text: faDigits(a)+' + '+faDigits(b), answer: a+b };
+  }
+}
+
+function brainGenMathQuestion(){
+  const cfg = BRAIN_MATH_LEVELS[brainMathLevel];
+  let op, tries = 0;
+  do{
+    op = cfg.ops[Math.floor(Math.random()*cfg.ops.length)];
+    tries++;
+  } while(brainMathOpHistory.length>=2 && brainMathOpHistory[0]===op && brainMathOpHistory[1]===op && tries<8);
+  brainMathOpHistory.push(op);
+  if(brainMathOpHistory.length>2) brainMathOpHistory.shift();
+
+  let key, question, tries2 = 0;
+  do{
+    if(op === 'cmp'){
+      let a = brainRandInt(cfg.range), b = brainRandInt(cfg.range);
+      while(b === a) b = brainRandInt(cfg.range);
+      key = 'cmp-'+a+'-'+b;
+      question = { type:'cmp', a, b, answer: Math.max(a,b) };
+    } else if(op === 'div'){
+      const capForDiv = Math.min(cfg.range, 12);
+      const b = brainRandInt(Math.max(2, Math.min(capForDiv, 9)));
+      const k = brainRandInt(capForDiv);
+      const a = b*k;
+      key = 'div-'+a+'-'+b;
+      question = { type:'num', text: faDigits(a)+' ÷ '+faDigits(b), answer: k };
+    } else if(op === 'missing'){
+      const useSub = Math.random() < 0.5;
+      if(!useSub){
+        const a = brainRandInt(cfg.range), b = brainRandInt(cfg.range), c = a+b;
+        if(Math.random() < 0.5){
+          key = 'msadd-a-'+a+'-'+b;
+          question = { type:'num', text: '؟ + '+faDigits(b)+' = '+faDigits(c), answer: a };
+        } else {
+          key = 'msadd-b-'+a+'-'+b;
+          question = { type:'num', text: faDigits(a)+' + ؟ = '+faDigits(c), answer: b };
+        }
+      } else {
+        const big = brainRandInt(cfg.range), small = brainRandInt(big), c = big-small;
+        if(Math.random() < 0.5){
+          key = 'mssub-big-'+big+'-'+small;
+          question = { type:'num', text: '؟ − '+faDigits(small)+' = '+faDigits(c), answer: big };
+        } else {
+          key = 'mssub-small-'+big+'-'+small;
+          question = { type:'num', text: faDigits(big)+' − ؟ = '+faDigits(c), answer: small };
+        }
+      }
+    } else if(op === 'tf'){
+      const base = brainGenBaseArith(cfg);
+      const showCorrect = Math.random() < 0.55;
+      let shown = base.answer;
+      if(!showCorrect){
+        const deltas = [1,2,3,-1,-2,-3];
+        let delta = deltas[Math.floor(Math.random()*deltas.length)];
+        shown = base.answer + delta;
+        if(shown < 0) shown = base.answer + Math.abs(delta);
+      }
+      key = 'tf-'+base.op+'-'+base.a+'-'+base.b+'-'+shown;
+      question = { type:'tf', text: base.text+' = '+faDigits(shown), answer: shown === base.answer };
+    } else if(op === 'add'){
+      const a = brainRandInt(cfg.range), b = brainRandInt(cfg.range);
+      key = 'add-'+a+'-'+b;
+      question = { type:'num', text: faDigits(a)+' + '+faDigits(b), answer: a+b };
+    } else if(op === 'sub'){
+      const a = brainRandInt(cfg.range), b = brainRandInt(a);
+      key = 'sub-'+a+'-'+b;
+      question = { type:'num', text: faDigits(a)+' − '+faDigits(b), answer: a-b };
+    } else { // mul
+      const capForMul = Math.min(cfg.range, 12);
+      const a = brainRandInt(capForMul), b = brainRandInt(capForMul);
+      key = 'mul-'+a+'-'+b;
+      question = { type:'num', text: faDigits(a)+' × '+faDigits(b), answer: a*b };
+    }
+    tries2++;
+  } while(key === brainMathLastKey && tries2 < 6);
+  brainMathLastKey = key;
+  return question;
+}
+
+function brainMathChoicesFor(q){
+  const correct = q.answer;
+  const deltas = brainShuffle([1,2,3,4,-1,-2,-3,-4]);
+  const set = new Set([correct]);
+  let i = 0;
+  while(set.size < 4 && i < deltas.length){
+    let v = correct + deltas[i];
+    if(v < 0) v = correct + Math.abs(deltas[i]) + 4;
+    set.add(v);
+    i++;
+  }
+  return brainShuffle(Array.from(set)).slice(0,4);
+}
+
+function brainRenderMathQuestion(){
+  const q = brainGenMathQuestion();
+  const qCard = document.getElementById('brainMathQCard');
+  const qText = document.getElementById('brainMathQText');
+  const choicesWrap = document.getElementById('brainMathChoices');
+  qCard.style.display = 'block';
+  choicesWrap.innerHTML = '';
+  if(q.type === 'cmp'){
+    qText.textContent = 'کدوم عدد بزرگ‌تره؟';
+    choicesWrap.className = 'brain-choices brain-choices-2';
+    brainShuffle([q.a, q.b]).forEach(v=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'brain-choice-btn';
+      btn.textContent = faDigits(v);
+      btn.dataset.val = v;
+      btn.addEventListener('click', ()=> brainHandleMathAnswer(btn, q));
+      choicesWrap.appendChild(btn);
+    });
+  } else if(q.type === 'tf'){
+    qText.textContent = q.text;
+    choicesWrap.className = 'brain-choices brain-choices-2';
+    [{label:'درسته ✅', val:'true'}, {label:'غلطه ❌', val:'false'}].forEach(o=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'brain-choice-btn';
+      btn.textContent = o.label;
+      btn.dataset.val = o.val;
+      btn.addEventListener('click', ()=> brainHandleMathAnswer(btn, q));
+      choicesWrap.appendChild(btn);
+    });
+  } else {
+    qText.textContent = q.text;
+    choicesWrap.className = 'brain-choices';
+    brainMathChoicesFor(q).forEach(v=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'brain-choice-btn';
+      btn.textContent = faDigits(v);
+      btn.dataset.val = v;
+      btn.addEventListener('click', ()=> brainHandleMathAnswer(btn, q));
+      choicesWrap.appendChild(btn);
+    });
+  }
+}
+
+function brainUpdateMathStatsUI(){
+  document.getElementById('brainMathScore').textContent = faDigits(brainMathScore);
+  document.getElementById('brainMathStreak').textContent = faDigits(brainMathStreak);
+}
+
+function brainHandleMathAnswer(btn, q){
+  if(!brainMathRunning || btn.disabled) return;
+  let isCorrect;
+  if(q.type === 'tf'){
+    const guess = btn.dataset.val === 'true';
+    isCorrect = guess === q.answer;
+    document.querySelectorAll('#brainMathChoices .brain-choice-btn').forEach(b=>{
+      b.disabled = true;
+      if((b.dataset.val === 'true') === q.answer) b.classList.add('brain-correct');
+    });
+  } else {
+    const val = parseInt(btn.dataset.val, 10);
+    isCorrect = val === q.answer;
+    document.querySelectorAll('#brainMathChoices .brain-choice-btn').forEach(b=>{
+      b.disabled = true;
+      if(parseInt(b.dataset.val,10) === q.answer) b.classList.add('brain-correct');
+    });
+  }
+  if(isCorrect){
+    sfxSuccess();
+    brainMathScore++;
+    brainMathStreak++;
+  } else {
+    sfxError();
+    btn.classList.add('brain-wrong');
+    brainMathStreak = 0;
+  }
+  brainUpdateMathStatsUI();
+  setTimeout(()=>{ if(brainMathRunning) brainRenderMathQuestion(); }, 550);
+}
+
+function brainStartMathRound(){
+  const cfg = BRAIN_MATH_LEVELS[brainMathLevel];
+  clearInterval(brainMathTimerId);
+  brainMathRunning = true;
+  brainMathScore = 0;
+  brainMathStreak = 0;
+  brainMathLastKey = '';
+  brainMathOpHistory = [];
+  document.getElementById('brainMathStatsRow').style.display = 'flex';
+  document.getElementById('brainMathResult').style.display = 'none';
+  const stats = brainGetMathStats();
+  document.getElementById('brainMathBest').textContent = faDigits(stats.bestByLevel[brainMathLevel] || 0);
+  brainUpdateMathStatsUI();
+  const startBtn = document.getElementById('brainMathStartBtn');
+  startBtn.disabled = true;
+  startBtn.textContent = '⏱ در حال بازیه...';
+  document.getElementById('brainMathTimerWrap').style.display = 'block';
+  const fill = document.getElementById('brainMathBarFill');
+  const timerEl = document.getElementById('brainMathTimer');
+  let remaining = cfg.seconds;
+  function renderTimer(){
+    const m = String(Math.floor(remaining/60)).padStart(2,'0');
+    const s = String(remaining%60).padStart(2,'0');
+    timerEl.textContent = faDigits(m+':'+s);
+    fill.style.width = ((cfg.seconds-remaining)/cfg.seconds*100)+'%';
+  }
+  renderTimer();
+  brainRenderMathQuestion();
+  brainMathTimerId = setInterval(()=>{
+    remaining--;
+    if(remaining <= 0){
+      remaining = 0;
+      renderTimer();
+      brainFinishMathRound();
+    } else {
+      renderTimer();
+    }
+  }, 1000);
+}
+
+function brainFinishMathRound(){
+  clearInterval(brainMathTimerId);
+  brainMathRunning = false;
+  document.getElementById('brainMathQCard').style.display = 'none';
+  document.getElementById('brainMathChoices').innerHTML = '';
+  const startBtn = document.getElementById('brainMathStartBtn');
+  startBtn.disabled = false;
+  startBtn.textContent = '🔁 یه راند دیگه';
+  const stats = brainGetMathStats();
+  const prevBest = stats.bestByLevel[brainMathLevel] || 0;
+  const isNewBest = brainMathScore > prevBest;
+  if(isNewBest) stats.bestByLevel[brainMathLevel] = brainMathScore;
+  stats.rounds = (stats.rounds||0) + 1;
+  saveData();
+  renderXP();
+  document.getElementById('brainMathBest').textContent = faDigits(stats.bestByLevel[brainMathLevel]);
+  const resultEl = document.getElementById('brainMathResult');
+  resultEl.style.display = 'block';
+  resultEl.textContent = isNewBest
+    ? `🏆 رکورد جدید! ${faDigits(brainMathScore)} تا درست زدی.`
+    : `تموم شد! ${faDigits(brainMathScore)} تا درست زدی (رکوردت: ${faDigits(stats.bestByLevel[brainMathLevel])}).`;
+  if(isNewBest && typeof launchConfetti === 'function') launchConfetti();
+}
+
+const brainMathLevelSeg = document.getElementById('brainMathLevelSeg');
+if(brainMathLevelSeg){
+  brainMathLevelSeg.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(brainMathRunning) return;
+      brainMathLevelSeg.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      brainMathLevel = btn.dataset.level;
+      const stats = brainGetMathStats();
+      const bestEl = document.getElementById('brainMathBest');
+      if(bestEl) bestEl.textContent = faDigits(stats.bestByLevel[brainMathLevel] || 0);
+    });
+  });
+}
+const brainMathStartBtn = document.getElementById('brainMathStartBtn');
+if(brainMathStartBtn) brainMathStartBtn.addEventListener('click', brainStartMathRound);
+
+/* ---- تست استروپ ---- */
+const BRAIN_STROOP_COLORS = [
+  {key:'red',    name:'قرمز',   hex:'#e2665a'},
+  {key:'blue',   name:'آبی',    hex:'#3b82f6'},
+  {key:'green',  name:'سبز',    hex:'#3fb87f'},
+  {key:'yellow', name:'زرد',    hex:'#eab308'},
+  {key:'purple', name:'بنفش',   hex:'#a855f7'},
+  {key:'orange', name:'نارنجی', hex:'#f97316'}
+];
+const BRAIN_STROOP_LEVELS = {
+  easy:   { label:'ساده',  colors:4, reverseChance:0,    seconds:45 },
+  medium: { label:'متوسط', colors:5, reverseChance:0.35, seconds:45 },
+  hard:   { label:'سخت',   colors:6, reverseChance:0.55, seconds:40 }
+};
+let brainStroopLevel = 'easy';
+let brainStroopTimerId = null;
+let brainStroopRunning = false;
+let brainStroopScore = 0;
+let brainStroopStreak = 0;
+let brainStroopLastKey = '';
+let brainStroopCurrentRound = null;
+
+function brainGetStroopStats(){
+  storeData.brainStats = storeData.brainStats || {};
+  storeData.brainStats.stroop = storeData.brainStats.stroop || { bestByLevel:{}, rounds:0 };
+  return storeData.brainStats.stroop;
+}
+
+function brainGenStroopRound(){
+  const cfg = BRAIN_STROOP_LEVELS[brainStroopLevel];
+  const colorSet = BRAIN_STROOP_COLORS.slice(0, cfg.colors);
+  let wordIdx, colorIdx, key, tries = 0;
+  do{
+    wordIdx = Math.floor(Math.random()*colorSet.length);
+    // ۲۵٪ احتمال هم‌خوان (رنگِ نوشته با خودِ کلمه یکیه)، ۷۵٪ ناهم‌خوان — سختیِ واقعیِ تست استروپ
+    if(Math.random() < 0.25){
+      colorIdx = wordIdx;
+    } else {
+      do{ colorIdx = Math.floor(Math.random()*colorSet.length); } while(colorIdx === wordIdx);
+    }
+    key = wordIdx+'-'+colorIdx;
+    tries++;
+  } while(key === brainStroopLastKey && tries < 6);
+  brainStroopLastKey = key;
+  // حالت هر راند رندوم بین «رنگ واقعی» و «خودِ کلمه» عوض می‌شه که مغز نتونه رو خلبان خودکار بره
+  const mode = Math.random() < cfg.reverseChance ? 'word' : 'color';
+  return { word: colorSet[wordIdx], color: colorSet[colorIdx], mode, colorSet };
+}
+
+function brainRenderStroopRound(){
+  const round = brainGenStroopRound();
+  brainStroopCurrentRound = round;
+  const wordEl = document.getElementById('brainStroopWord');
+  wordEl.style.display = 'block';
+  wordEl.textContent = round.word.name;
+  wordEl.style.color = round.color.hex;
+  const modeEl = document.getElementById('brainStroopModeLabel');
+  modeEl.style.display = 'block';
+  if(round.mode === 'color'){
+    modeEl.textContent = '🎨 رنگِ واقعیِ نوشته رو بزن';
+    modeEl.classList.remove('brain-stroop-mode-alt');
+  } else {
+    modeEl.textContent = '🔤 خودِ کلمه رو بزن، نه رنگش!';
+    modeEl.classList.add('brain-stroop-mode-alt');
+  }
+  const choicesWrap = document.getElementById('brainStroopChoices');
+  choicesWrap.innerHTML = '';
+  brainShuffle(round.colorSet).forEach(c=>{
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'brain-stroop-choice';
+    btn.textContent = c.name;
+    btn.style.background = c.hex;
+    btn.dataset.key = c.key;
+    btn.addEventListener('click', ()=> brainHandleStroopAnswer(btn, round));
+    choicesWrap.appendChild(btn);
+  });
+}
+
+function brainUpdateStroopStatsUI(){
+  document.getElementById('brainStroopScore').textContent = faDigits(brainStroopScore);
+  document.getElementById('brainStroopStreak').textContent = faDigits(brainStroopStreak);
+}
+
+function brainHandleStroopAnswer(btn, round){
+  if(!brainStroopRunning || btn.disabled) return;
+  const correctKey = round.mode === 'color' ? round.color.key : round.word.key;
+  const isCorrect = btn.dataset.key === correctKey;
+  document.querySelectorAll('#brainStroopChoices .brain-stroop-choice').forEach(b=>{
+    b.disabled = true;
+    if(b.dataset.key !== correctKey) b.classList.add('brain-wrong');
+  });
+  if(isCorrect){
+    sfxSuccess();
+    brainStroopScore++;
+    brainStroopStreak++;
+  } else {
+    sfxError();
+    brainStroopStreak = 0;
+  }
+  brainUpdateStroopStatsUI();
+  setTimeout(()=>{ if(brainStroopRunning) brainRenderStroopRound(); }, 500);
+}
+
+function brainStartStroopRound(){
+  if(!requirePremium()) return;
+  const cfg = BRAIN_STROOP_LEVELS[brainStroopLevel];
+  clearInterval(brainStroopTimerId);
+  brainStroopRunning = true;
+  brainStroopScore = 0;
+  brainStroopStreak = 0;
+  brainStroopLastKey = '';
+  document.getElementById('brainStroopStatsRow').style.display = 'flex';
+  document.getElementById('brainStroopResult').style.display = 'none';
+  const stats = brainGetStroopStats();
+  document.getElementById('brainStroopBest').textContent = faDigits(stats.bestByLevel[brainStroopLevel] || 0);
+  brainUpdateStroopStatsUI();
+  const startBtn = document.getElementById('brainStroopStartBtn');
+  startBtn.disabled = true;
+  startBtn.textContent = '⏱ در حال بازیه...';
+  document.getElementById('brainStroopTimerWrap').style.display = 'block';
+  const fill = document.getElementById('brainStroopBarFill');
+  const timerEl = document.getElementById('brainStroopTimer');
+  let remaining = cfg.seconds;
+  function renderTimer(){
+    const m = String(Math.floor(remaining/60)).padStart(2,'0');
+    const s = String(remaining%60).padStart(2,'0');
+    timerEl.textContent = faDigits(m+':'+s);
+    fill.style.width = ((cfg.seconds-remaining)/cfg.seconds*100)+'%';
+  }
+  renderTimer();
+  brainRenderStroopRound();
+  brainStroopTimerId = setInterval(()=>{
+    remaining--;
+    if(remaining <= 0){
+      remaining = 0;
+      renderTimer();
+      brainFinishStroopRound();
+    } else {
+      renderTimer();
+    }
+  }, 1000);
+}
+
+function brainFinishStroopRound(){
+  clearInterval(brainStroopTimerId);
+  brainStroopRunning = false;
+  document.getElementById('brainStroopWord').style.display = 'none';
+  document.getElementById('brainStroopModeLabel').style.display = 'none';
+  document.getElementById('brainStroopChoices').innerHTML = '';
+  const startBtn = document.getElementById('brainStroopStartBtn');
+  startBtn.disabled = false;
+  startBtn.textContent = '🔁 یه راند دیگه';
+  const stats = brainGetStroopStats();
+  const prevBest = stats.bestByLevel[brainStroopLevel] || 0;
+  const isNewBest = brainStroopScore > prevBest;
+  if(isNewBest) stats.bestByLevel[brainStroopLevel] = brainStroopScore;
+  stats.rounds = (stats.rounds||0) + 1;
+  saveData();
+  renderXP();
+  document.getElementById('brainStroopBest').textContent = faDigits(stats.bestByLevel[brainStroopLevel]);
+  const resultEl = document.getElementById('brainStroopResult');
+  resultEl.style.display = 'block';
+  resultEl.textContent = isNewBest
+    ? `🏆 رکورد جدید! ${faDigits(brainStroopScore)} تا درست زدی.`
+    : `تموم شد! ${faDigits(brainStroopScore)} تا درست زدی (رکوردت: ${faDigits(stats.bestByLevel[brainStroopLevel])}).`;
+  if(isNewBest && typeof launchConfetti === 'function') launchConfetti();
+}
+
+const brainStroopLevelSeg = document.getElementById('brainStroopLevelSeg');
+if(brainStroopLevelSeg){
+  brainStroopLevelSeg.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(brainStroopRunning) return;
+      brainStroopLevelSeg.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      brainStroopLevel = btn.dataset.level;
+      const stats = brainGetStroopStats();
+      const bestEl = document.getElementById('brainStroopBest');
+      if(bestEl) bestEl.textContent = faDigits(stats.bestByLevel[brainStroopLevel] || 0);
+    });
+  });
+}
+const brainStroopStartBtn = document.getElementById('brainStroopStartBtn');
+if(brainStroopStartBtn) brainStroopStartBtn.addEventListener('click', brainStartStroopRound);
+
+/* ---- توالی رنگی (Simon-style working memory game) ---- */
+const BRAIN_SEQ_LEVELS = {
+  easy:   { label:'ساده',  colors:4, flashMs:650, gapMs:300 },
+  medium: { label:'متوسط', colors:5, flashMs:520, gapMs:240 },
+  hard:   { label:'سخت',   colors:6, flashMs:400, gapMs:190 }
+};
+// هر پَد یه نتِ موسیقیِ مخصوص خودش داره (مثل Simon واقعی) تا حافظه هم از راه گوش کمک بگیره
+const BRAIN_SEQ_NOTE_FREQS = [261.6, 329.6, 392.0, 466.2, 523.3, 587.3];
+let brainSeqLevel = 'easy';
+let brainSeqSequence = [];
+let brainSeqInputIdx = 0;
+let brainSeqRunning = false;
+let brainSeqAccepting = false;
+let brainSeqPadEls = [];
+let brainSeqReverseActive = false;
+
+function brainGetSeqStats(){
+  storeData.brainStats = storeData.brainStats || {};
+  storeData.brainStats.sequence = storeData.brainStats.sequence || { bestByLevel:{}, rounds:0 };
+  return storeData.brainStats.sequence;
+}
+
+function brainSeqBuildPads(){
+  const cfg = BRAIN_SEQ_LEVELS[brainSeqLevel];
+  const wrap = document.getElementById('brainSeqPads');
+  wrap.innerHTML = '';
+  brainSeqPadEls = [];
+  BRAIN_STROOP_COLORS.slice(0, cfg.colors).forEach((c, idx)=>{
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'brain-seq-pad';
+    btn.style.background = c.hex;
+    btn.dataset.idx = idx;
+    btn.addEventListener('click', ()=> brainSeqHandlePadClick(idx));
+    wrap.appendChild(btn);
+    brainSeqPadEls.push(btn);
+  });
+}
+
+function brainSeqPlayTone(idx){
+  const freq = BRAIN_SEQ_NOTE_FREQS[idx] || 440;
+  sfxTone(freq, 0.26, 'sine');
+}
+
+function brainSeqFlashPad(idx, ms){
+  return new Promise(resolve=>{
+    const pad = brainSeqPadEls[idx];
+    if(!pad) return resolve();
+    pad.classList.add('active');
+    brainSeqPlayTone(idx);
+    setTimeout(()=>{
+      pad.classList.remove('active');
+      resolve();
+    }, ms);
+  });
+}
+
+function brainSeqUpdateStatsUI(){
+  document.getElementById('brainSeqLevel').textContent = faDigits(brainSeqSequence.length);
+}
+
+// از مرحله‌ی ۴ به بعد، هر ۴ مرحله یکی «برعکس» می‌شه — باید توالی رو از آخر به اول بزنی
+function brainSeqComputeReverse(){
+  return brainSeqSequence.length >= 4 && brainSeqSequence.length % 4 === 0;
+}
+
+function brainSeqExpectedSeq(){
+  return brainSeqReverseActive ? brainSeqSequence.slice().reverse() : brainSeqSequence;
+}
+
+async function brainSeqPlaySequence(){
+  const cfg = BRAIN_SEQ_LEVELS[brainSeqLevel];
+  brainSeqAccepting = false;
+  brainSeqReverseActive = brainSeqComputeReverse();
+  const statusEl = document.getElementById('brainSeqStatus');
+  statusEl.style.display = 'block';
+  statusEl.classList.remove('brain-seq-reverse');
+  statusEl.textContent = '👀 نگاه کن...';
+  await new Promise(r=>setTimeout(r, 450));
+  for(const idx of brainSeqSequence){
+    if(!brainSeqRunning) return;
+    await brainSeqFlashPad(idx, cfg.flashMs);
+    await new Promise(r=>setTimeout(r, cfg.gapMs));
+  }
+  if(!brainSeqRunning) return;
+  brainSeqInputIdx = 0;
+  brainSeqAccepting = true;
+  if(brainSeqReverseActive){
+    statusEl.textContent = '🔄 این دفعه برعکس بزن؛ از آخر به اول!';
+    statusEl.classList.add('brain-seq-reverse');
+  } else {
+    statusEl.textContent = '👆 نوبت توئه، همون ترتیب رو بزن';
+  }
+}
+
+function brainSeqAddStep(){
+  const cfg = BRAIN_SEQ_LEVELS[brainSeqLevel];
+  brainSeqSequence.push(Math.floor(Math.random()*cfg.colors));
+}
+
+function brainSeqHandlePadClick(idx){
+  if(!brainSeqRunning || !brainSeqAccepting) return;
+  const pad = brainSeqPadEls[idx];
+  pad.classList.add('active');
+  brainSeqPlayTone(idx);
+  setTimeout(()=> pad.classList.remove('active'), 160);
+  const expectedSeq = brainSeqExpectedSeq();
+  const expected = expectedSeq[brainSeqInputIdx];
+  if(idx === expected){
+    brainSeqInputIdx++;
+    if(brainSeqInputIdx === expectedSeq.length){
+      sfxSuccess();
+      brainSeqAccepting = false;
+      document.getElementById('brainSeqStatus').textContent = '✅ درسته! برو مرحله‌ی بعد...';
+      setTimeout(()=>{
+        if(!brainSeqRunning) return;
+        brainSeqAddStep();
+        brainSeqUpdateStatsUI();
+        brainSeqPlaySequence();
+      }, 700);
+    }
+  } else {
+    sfxError();
+    brainSeqAccepting = false;
+    brainSeqFinishRound();
+  }
+}
+
+function brainSeqStartRound(){
+  if(!requirePremium()) return;
+  brainSeqBuildPads();
+  brainSeqRunning = true;
+  brainSeqSequence = [];
+  brainSeqInputIdx = 0;
+  brainSeqReverseActive = false;
+  document.getElementById('brainSeqStatsRow').style.display = 'flex';
+  document.getElementById('brainSeqResult').style.display = 'none';
+  const stats = brainGetSeqStats();
+  document.getElementById('brainSeqBest').textContent = faDigits(stats.bestByLevel[brainSeqLevel] || 0);
+  brainSeqUpdateStatsUI();
+  const startBtn = document.getElementById('brainSeqStartBtn');
+  startBtn.disabled = true;
+  startBtn.textContent = '🧠 در حال بازیه...';
+  brainSeqAddStep();
+  brainSeqUpdateStatsUI();
+  brainSeqPlaySequence();
+}
+
+function brainSeqFinishRound(){
+  brainSeqRunning = false;
+  document.getElementById('brainSeqStatus').style.display = 'none';
+  const startBtn = document.getElementById('brainSeqStartBtn');
+  startBtn.disabled = false;
+  startBtn.textContent = '🔁 یه راند دیگه';
+  const finalLevel = Math.max(0, brainSeqSequence.length - 1);
+  const stats = brainGetSeqStats();
+  const prevBest = stats.bestByLevel[brainSeqLevel] || 0;
+  const isNewBest = finalLevel > prevBest;
+  if(isNewBest) stats.bestByLevel[brainSeqLevel] = finalLevel;
+  stats.rounds = (stats.rounds||0) + 1;
+  saveData();
+  renderXP();
+  document.getElementById('brainSeqBest').textContent = faDigits(stats.bestByLevel[brainSeqLevel]);
+  const resultEl = document.getElementById('brainSeqResult');
+  resultEl.style.display = 'block';
+  resultEl.textContent = isNewBest
+    ? `🏆 رکورد جدید! تا مرحله‌ی ${faDigits(finalLevel)} پیش رفتی.`
+    : `باختی! تا مرحله‌ی ${faDigits(finalLevel)} پیش رفتی (رکوردت: ${faDigits(stats.bestByLevel[brainSeqLevel])}).`;
+  if(isNewBest && typeof launchConfetti === 'function') launchConfetti();
+}
+
+const brainSeqLevelSeg = document.getElementById('brainSeqLevelSeg');
+if(brainSeqLevelSeg){
+  brainSeqLevelSeg.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(brainSeqRunning) return;
+      brainSeqLevelSeg.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      brainSeqLevel = btn.dataset.level;
+      const stats = brainGetSeqStats();
+      const bestEl = document.getElementById('brainSeqBest');
+      if(bestEl) bestEl.textContent = faDigits(stats.bestByLevel[brainSeqLevel] || 0);
+    });
+  });
+}
+const brainSeqStartBtn = document.getElementById('brainSeqStartBtn');
+if(brainSeqStartBtn) brainSeqStartBtn.addEventListener('click', brainSeqStartRound);
+
+/* ---- N-back (حافظه‌ی کاری) ---- */
+const BRAIN_NBACK_ITEMS = ['ب','پ','ت','ج','د','ر','س','ک'];
+const BRAIN_NBACK_LEVELS = {
+  1:{ seconds:50, paceMs:2600 },
+  2:{ seconds:55, paceMs:3000 },
+  3:{ seconds:60, paceMs:3400 }
+};
+let brainNbackN = 1;
+let brainNbackTimerId = null;
+let brainNbackItemTimerId = null;
+let brainNbackRunning = false;
+let brainNbackWaiting = false;
+let brainNbackScore = 0;
+let brainNbackStreak = 0;
+let brainNbackHistory = [];
+let brainNbackCurrentIsMatch = false;
+
+function brainGetNbackStats(){
+  storeData.brainStats = storeData.brainStats || {};
+  storeData.brainStats.nback = storeData.brainStats.nback || { bestByLevel:{}, rounds:0 };
+  return storeData.brainStats.nback;
+}
+
+// علاوه بر تطبیق واقعیِ N تا قبل، گاهی یه «حرفِ گول‌زننده» می‌سازیم که شبیهِ تطبیقه
+// (مثلاً N-1 یا N+1 تا قبل تکرار شده) ولی واقعاً match نیست — همون تکنیکِ lure trial
+// که تست‌های واقعیِ N-back استفاده می‌کنن تا صرفاً حدسِ «همین الان دیدمش» رو خنثی کنن.
+function brainNbackNextItem(){
+  const n = brainNbackN;
+  const hist = brainNbackHistory;
+  const canMatch = hist.length >= n;
+  const canLure = n >= 2 && hist.length >= (n-1);
+  const roll = Math.random();
+  let item;
+  if(canMatch && roll < 0.32){
+    item = hist[hist.length - n];
+  } else if(canLure && roll < 0.32 + 0.18){
+    const offset = Math.random() < 0.5 ? (n-1) : (n+1);
+    item = hist.length >= offset ? hist[hist.length - offset] : BRAIN_NBACK_ITEMS[Math.floor(Math.random()*BRAIN_NBACK_ITEMS.length)];
+  } else {
+    item = BRAIN_NBACK_ITEMS[Math.floor(Math.random()*BRAIN_NBACK_ITEMS.length)];
+  }
+  hist.push(item);
+  const idx = hist.length - 1;
+  brainNbackCurrentIsMatch = (idx - n >= 0) && (hist[idx-n] === item);
+  return item;
+}
+
+function brainNbackStartItemPace(){
+  clearTimeout(brainNbackItemTimerId);
+  const cfg = BRAIN_NBACK_LEVELS[brainNbackN];
+  const paceFill = document.getElementById('brainNbackPaceFill');
+  const paceTrack = document.getElementById('brainNbackPaceTrack');
+  if(paceTrack) paceTrack.style.display = 'block';
+  if(paceFill){
+    paceFill.style.transition = 'none';
+    paceFill.style.width = '100%';
+    void paceFill.offsetWidth; // reflow برای ری‌استارت انیمیشن
+    paceFill.style.transition = 'width '+cfg.paceMs+'ms linear';
+    paceFill.style.width = '0%';
+  }
+  brainNbackItemTimerId = setTimeout(()=>{
+    if(brainNbackRunning && brainNbackWaiting) brainHandleNbackAnswer(false, true);
+  }, cfg.paceMs);
+}
+
+function brainRenderNbackItem(){
+  const item = brainNbackNextItem();
+  const itemEl = document.getElementById('brainNbackItem');
+  itemEl.style.display = 'flex';
+  itemEl.textContent = item;
+  brainNbackWaiting = true;
+  brainNbackStartItemPace();
+}
+
+function brainUpdateNbackStatsUI(){
+  document.getElementById('brainNbackScore').textContent = faDigits(brainNbackScore);
+  document.getElementById('brainNbackStreak').textContent = faDigits(brainNbackStreak);
+}
+
+function brainHandleNbackAnswer(guessMatch, isTimeout){
+  if(!brainNbackRunning || !brainNbackWaiting) return;
+  clearTimeout(brainNbackItemTimerId);
+  brainNbackWaiting = false;
+  const isCorrect = guessMatch === brainNbackCurrentIsMatch;
+  const matchBtn = document.getElementById('brainNbackMatchBtn');
+  const noBtn = document.getElementById('brainNbackNoBtn');
+  const itemEl = document.getElementById('brainNbackItem');
+  matchBtn.disabled = true;
+  noBtn.disabled = true;
+  if(isTimeout){
+    itemEl.classList.add(isCorrect ? 'brain-nback-timeout-ok' : 'brain-nback-timeout-miss');
+  } else {
+    const chosenBtn = guessMatch ? matchBtn : noBtn;
+    chosenBtn.classList.add(isCorrect ? 'brain-correct' : 'brain-wrong');
+  }
+  if(isCorrect){
+    sfxSuccess();
+    brainNbackScore++;
+    brainNbackStreak++;
+  } else {
+    sfxError();
+    brainNbackStreak = 0;
+  }
+  brainUpdateNbackStatsUI();
+  setTimeout(()=>{
+    matchBtn.disabled = false;
+    noBtn.disabled = false;
+    matchBtn.classList.remove('brain-correct','brain-wrong');
+    noBtn.classList.remove('brain-correct','brain-wrong');
+    itemEl.classList.remove('brain-nback-timeout-ok','brain-nback-timeout-miss');
+    if(brainNbackRunning) brainRenderNbackItem();
+  }, 450);
+}
+
+function brainStartNbackRound(){
+  if(!requirePremium()) return;
+  clearInterval(brainNbackTimerId);
+  clearTimeout(brainNbackItemTimerId);
+  brainNbackRunning = true;
+  brainNbackScore = 0;
+  brainNbackStreak = 0;
+  brainNbackHistory = [];
+  document.getElementById('brainNbackStatsRow').style.display = 'flex';
+  document.getElementById('brainNbackResult').style.display = 'none';
+  const stats = brainGetNbackStats();
+  document.getElementById('brainNbackBest').textContent = faDigits(stats.bestByLevel[brainNbackN] || 0);
+  brainUpdateNbackStatsUI();
+  const startBtn = document.getElementById('brainNbackStartBtn');
+  startBtn.disabled = true;
+  startBtn.textContent = '⏱ در حال بازیه...';
+  const cfg = BRAIN_NBACK_LEVELS[brainNbackN];
+  document.getElementById('brainNbackTimerWrap').style.display = 'block';
+  const fill = document.getElementById('brainNbackBarFill');
+  const timerEl = document.getElementById('brainNbackTimer');
+  let remaining = cfg.seconds;
+  function renderTimer(){
+    const m = String(Math.floor(remaining/60)).padStart(2,'0');
+    const s = String(remaining%60).padStart(2,'0');
+    timerEl.textContent = faDigits(m+':'+s);
+    fill.style.width = ((cfg.seconds-remaining)/cfg.seconds*100)+'%';
+  }
+  renderTimer();
+  brainRenderNbackItem();
+  brainNbackTimerId = setInterval(()=>{
+    remaining--;
+    if(remaining <= 0){
+      remaining = 0;
+      renderTimer();
+      brainFinishNbackRound();
+    } else {
+      renderTimer();
+    }
+  }, 1000);
+}
+
+function brainFinishNbackRound(){
+  clearInterval(brainNbackTimerId);
+  clearTimeout(brainNbackItemTimerId);
+  brainNbackRunning = false;
+  brainNbackWaiting = false;
+  document.getElementById('brainNbackItem').style.display = 'none';
+  const paceTrack = document.getElementById('brainNbackPaceTrack');
+  if(paceTrack) paceTrack.style.display = 'none';
+  const startBtn = document.getElementById('brainNbackStartBtn');
+  startBtn.disabled = false;
+  startBtn.textContent = '🔁 یه راند دیگه';
+  const stats = brainGetNbackStats();
+  const prevBest = stats.bestByLevel[brainNbackN] || 0;
+  const isNewBest = brainNbackScore > prevBest;
+  if(isNewBest) stats.bestByLevel[brainNbackN] = brainNbackScore;
+  stats.rounds = (stats.rounds||0) + 1;
+  saveData();
+  renderXP();
+  document.getElementById('brainNbackBest').textContent = faDigits(stats.bestByLevel[brainNbackN]);
+  const resultEl = document.getElementById('brainNbackResult');
+  resultEl.style.display = 'block';
+  resultEl.textContent = isNewBest
+    ? `🏆 رکورد جدید! ${faDigits(brainNbackScore)} تا درست زدی.`
+    : `تموم شد! ${faDigits(brainNbackScore)} تا درست زدی (رکوردت: ${faDigits(stats.bestByLevel[brainNbackN])}).`;
+  if(isNewBest && typeof launchConfetti === 'function') launchConfetti();
+}
+
+const brainNbackLevelSeg = document.getElementById('brainNbackLevelSeg');
+if(brainNbackLevelSeg){
+  brainNbackLevelSeg.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(brainNbackRunning) return;
+      brainNbackLevelSeg.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      brainNbackN = parseInt(btn.dataset.level, 10);
+      const hintEl = document.getElementById('brainNbackHint');
+      if(hintEl) hintEl.textContent = `حرفِ الان با ${faDigits(brainNbackN)} تا قبل یکیه؟`;
+      const stats = brainGetNbackStats();
+      const bestEl = document.getElementById('brainNbackBest');
+      if(bestEl) bestEl.textContent = faDigits(stats.bestByLevel[brainNbackN] || 0);
+    });
+  });
+}
+const brainNbackMatchBtn = document.getElementById('brainNbackMatchBtn');
+if(brainNbackMatchBtn) brainNbackMatchBtn.addEventListener('click', ()=> brainHandleNbackAnswer(true));
+const brainNbackNoBtn = document.getElementById('brainNbackNoBtn');
+if(brainNbackNoBtn) brainNbackNoBtn.addEventListener('click', ()=> brainHandleNbackAnswer(false));
+const brainNbackStartBtn = document.getElementById('brainNbackStartBtn');
+if(brainNbackStartBtn) brainNbackStartBtn.addEventListener('click', brainStartNbackRound);
+
 /* ================= Public chat moderation: block + abuse filter ================= */
 function getBlockedChatUsers(){
   try{ return JSON.parse(localStorage.getItem('checklistApp:blockedChatUsers') || '[]'); }
@@ -6962,7 +8515,7 @@ async function runResearchSearch(){
     const data = await res.json();
     const papers = (data && Array.isArray(data.data)) ? data.data.filter(p => p && p.title) : [];
     if(!papers.length){
-      researchResultsWrap.innerHTML = '<div class="sub-panel-empty"><span class="spe-ic">🔬</span>چیزی برای این موضوع پیدا نشد؛ یه عبارت دیگه امتحان کن.</div>';
+      researchResultsWrap.innerHTML = '<div class="sub-panel-empty"><span class="spe-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v5.5L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 8.5V3"/><path d="M7.5 14.5h9"/></svg></span>چیزی برای این موضوع پیدا نشد؛ یه عبارت دیگه امتحان کن.</div>';
       return;
     }
     researchResultsWrap.innerHTML = '<div class="lib-research-loading">📝 در حال ترجمه‌ی خلاصه‌ها...</div>';
@@ -7000,7 +8553,7 @@ async function runResearchSearch(){
         '</div>';
     }).join('');
   }catch(e){
-    researchResultsWrap.innerHTML = '<div class="sub-panel-empty"><span class="spe-ic">📡</span>مشکلی در اتصال پیش اومد؛ اتصال اینترنتت رو چک کن و دوباره امتحان کن.</div>';
+    researchResultsWrap.innerHTML = '<div class="sub-panel-empty"><span class="spe-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-6"/><path d="M8 21h8"/><path d="M6.5 9.5a7.8 7.8 0 0 1 11 0"/><path d="M9 12a4 4 0 0 1 6 0"/><circle cx="12" cy="15" r="1" fill="currentColor" stroke="none"/></svg></span>مشکلی در اتصال پیش اومد؛ اتصال اینترنتت رو چک کن و دوباره امتحان کن.</div>';
   }finally{
     researchSearchBtn.disabled = false;
     researchSearchInput.disabled = false;
@@ -7016,7 +8569,7 @@ if(researchSearchInput){
 }
 
 /* ================= Swipe between tabs ================= */
-const SWIPE_TAB_ORDER = ['today','workout','meditation','speech','ai','library'];
+const SWIPE_TAB_ORDER = ['today','workout','meditation','speech','brain','ai','library'];
 // ترتیب تب‌های بخش عمومی، دقیقاً هم‌ترازِ دکمه‌های #pubSubnav (چت، لیدربورد، هم‌مسیر، پروفایل)
 const PUB_SWIPE_TAB_ORDER = ['chat','profile','leaderboard','buddy','sos'];
 let swipeStartX = 0, swipeStartY = 0, swipeBlocked = false;
@@ -7205,6 +8758,7 @@ function showPublicTabInner(tabId){
   if(panel) panel.classList.add('active');
   if(tabId === 'leaderboard' && typeof loadLeaderboard === 'function') loadLeaderboard();
   if(tabId === 'chat' && typeof updateChatModeUI === 'function') updateChatModeUI();
+  if(tabId === 'chat') maybeSuggestChatNarration();
   if(tabId === 'profile' && typeof renderProfileTab === 'function') renderProfileTab();
   if(tabId === 'buddy' && typeof loadBuddyTab === 'function') loadBuddyTab();
   if(tabId === 'sos' && typeof loadSosTab === 'function') loadSosTab();
@@ -7405,6 +8959,10 @@ function computeXP(){
   xp += ((storeData.goalsCustom && storeData.goalsCustom.added) || []).length*3;                      // custom goals created
   Object.values(storeData.aiFeatureUseCount||{}).forEach(c=>{ xp += (c||0)*18; });                    // AI coach features used
   xp += Object.keys(storeData.reportSentDates||{}).length*18;                                         // work reports sent
+  xp += ((storeData.brainStats && storeData.brainStats.math && storeData.brainStats.math.rounds) || 0)*5;     // راندهای محاسبه‌ی سریع
+  xp += ((storeData.brainStats && storeData.brainStats.stroop && storeData.brainStats.stroop.rounds) || 0)*5; // راندهای تست استروپ
+  xp += ((storeData.brainStats && storeData.brainStats.sequence && storeData.brainStats.sequence.rounds) || 0)*5; // راندهای توالی رنگی
+  xp += ((storeData.brainStats && storeData.brainStats.nback && storeData.brainStats.nback.rounds) || 0)*5;      // راندهای N-back
   xp = Math.max(0, xp - computeXPPenalty());
   return xp;
 }
@@ -7436,6 +8994,10 @@ function renderXP(){
 }
 
 /* ================= Badges ================= */
+/* Same gold-crown design language as the header plan badge, but sized in `em` (not
+   fixed px) so it auto-scales wherever it's dropped in — badge grid tile (19px),
+   celebration popup (44px), etc. — without needing a second icon per context. */
+const BADGE_CROWN_ICON = '<svg viewBox="0 0 24 24" style="width:1em;height:1em;vertical-align:-0.12em" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="badgeCrownGrad" x1="4" y1="5" x2="20" y2="19" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffe9b8"/><stop offset="1" stop-color="#e2a53a"/></linearGradient></defs><path d="M4 17 L4 9 L8 12 L12 5 L16 12 L20 9 L20 17 Z" fill="url(#badgeCrownGrad)" stroke="url(#badgeCrownGrad)" stroke-width="0.6" stroke-linejoin="round"/><rect x="4" y="17" width="16" height="2.4" rx="1" fill="url(#badgeCrownGrad)"/><circle cx="4" cy="9" r="1.15" fill="url(#badgeCrownGrad)"/><circle cx="12" cy="5" r="1.3" fill="url(#badgeCrownGrad)"/><circle cx="20" cy="9" r="1.15" fill="url(#badgeCrownGrad)"/></svg>';
 const BADGES = [
   {id:'first_day', emoji:'🌱', title:'اولین قدم', check:()=>Object.keys(storeData.entries||{}).length>=1},
   {id:'streak_7', emoji:'🔥', title:'۷ روز پشت‌هم', check:()=>(storeData.maxStreak||0)>=7},
@@ -7457,7 +9019,7 @@ const BADGES = [
   {id:'planner_50', emoji:'📑', title:'۵۰ برنامه‌ی دستی', check:()=>(storeData.customTasks||[]).filter(t=>t.done).length>=50},
   {id:'streak_14', emoji:'🔥', title:'۱۴ روز پشت‌هم', check:()=>(storeData.maxStreak||0)>=14},
   {id:'streak_100', emoji:'🏅', title:'۱۰۰ روز پشت‌هم', check:()=>(storeData.maxStreak||0)>=100},
-  {id:'streak_200', emoji:'👑', title:'۲۰۰ روز پشت‌هم', check:()=>(storeData.maxStreak||0)>=200},
+  {id:'streak_200', emoji:BADGE_CROWN_ICON, title:'۲۰۰ روز پشت‌هم', check:()=>(storeData.maxStreak||0)>=200},
   {id:'streak_365', emoji:'🏵️', title:'یک سال پشت‌هم', check:()=>(storeData.maxStreak||0)>=365},
   {id:'resist_25', emoji:'🗡️', title:'۲۵ بار مقاومت', check:()=>(storeData.urgeLog||[]).filter(u=>u.resisted).length>=25},
   {id:'resist_50', emoji:'🏹', title:'۵۰ بار مقاومت', check:()=>(storeData.urgeLog||[]).filter(u=>u.resisted).length>=50},
@@ -7489,7 +9051,7 @@ const BADGES = [
       const xp=computeXP(); let idx=0; for(let i=0;i<LEVELS.length;i++){ if(xp>=LEVELS[i].min) idx=i; } return (idx+1)>=20; }},
   {id:'level_50', emoji:'💫', title:'رسیدن به سطح ۵۰', check:()=>{
       const xp=computeXP(); let idx=0; for(let i=0;i<LEVELS.length;i++){ if(xp>=LEVELS[i].min) idx=i; } return (idx+1)>=50; }},
-  {id:'level_100', emoji:'👑', title:'رسیدن به سطح ۱۰۰ (حداکثر)', check:()=>{
+  {id:'level_100', emoji:BADGE_CROWN_ICON, title:'رسیدن به سطح ۱۰۰ (حداکثر)', check:()=>{
       const xp=computeXP(); let idx=0; for(let i=0;i<LEVELS.length;i++){ if(xp>=LEVELS[i].min) idx=i; } return (idx+1)>=100; }},
   {id:'badges_10', emoji:'🎖️', title:'۱۰ نشان جمع‌شده', check:()=>Object.keys(storeData.badges||{}).length>=10},
   {id:'badges_20', emoji:'🏆', title:'۲۰ نشان جمع‌شده', check:()=>Object.keys(storeData.badges||{}).length>=20},
@@ -7664,7 +9226,7 @@ function renderCustomList(){
   if(!box) return;
   if(!storeData.customItems || storeData.customItems.length===0){ box.innerHTML=''; return; }
   box.innerHTML = storeData.customItems.map((item,i)=>
-    `<div class="c-row"><span>${item}</span><span class="rm" data-idx="${i}">✕</span></div>`).join('');
+    `<div class="c-row"><span>${item}</span><span class="rm" data-idx="${i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span></div>`).join('');
   box.querySelectorAll('.rm').forEach(el=>{
     el.addEventListener('click', ()=>{
       const idx = parseInt(el.dataset.idx,10);
@@ -7685,12 +9247,12 @@ function renderTomorrowTab(){
   const autoAvoid = getTomorrowPreviewAvoidItems();
   autoDoBox.innerHTML = autoDo.length
     ? autoDo.map(item=>`<div class="c-row"><span>${item}</span></div>`).join('')
-    : '<div class="sub-panel-empty" style="padding:14px 0;"><span class="spe-ic">🌙</span>هنوز برنامه‌ی خودکار فردا مشخص نشده</div>';
+    : '<div class="sub-panel-empty" style="padding:14px 0;"><span class="spe-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4.5a7.5 7.5 0 1 0 5 13.1A8.5 8.5 0 0 1 15 4.5z"/><path d="M18.3 3.7l.4 1.3 1.3.4-1.3.4-.4 1.3-.4-1.3-1.3-.4 1.3-.4z"/></svg></span>هنوز برنامه‌ی خودکار فردا مشخص نشده</div>';
   const autoAvoidBox = document.getElementById('tmrwAutoAvoidList');
   if(autoAvoidBox){
     autoAvoidBox.innerHTML = autoAvoid.length
       ? autoAvoid.map(item=>`<div class="c-row"><span>${item}</span></div>`).join('')
-      : '<div class="sub-panel-empty" style="padding:14px 0;"><span class="spe-ic">🌙</span>هنوز پرهیز خودکاری برای فردا مشخص نشده</div>';
+      : '<div class="sub-panel-empty" style="padding:14px 0;"><span class="spe-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4.5a7.5 7.5 0 1 0 5 13.1A8.5 8.5 0 0 1 15 4.5z"/><path d="M18.3 3.7l.4 1.3 1.3.4-1.3.4-.4 1.3-.4-1.3-1.3-.4 1.3-.4z"/></svg></span>هنوز پرهیز خودکاری برای فردا مشخص نشده</div>';
   }
 
   const plan = storeData.tomorrowPlan;
@@ -7698,7 +9260,7 @@ function renderTomorrowTab(){
   const doEmpty = document.getElementById('tmrwDoEmpty');
   if(doBox){
     doBox.innerHTML = plan.doItems.map((item,i)=>
-      `<div class="c-row"><span>${item}</span><span class="rm" data-idx="${i}">✕</span></div>`).join('');
+      `<div class="c-row"><span>${item}</span><span class="rm" data-idx="${i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span></div>`).join('');
     doBox.querySelectorAll('.rm').forEach(el=>{
       el.addEventListener('click', ()=>{
         const idx = parseInt(el.dataset.idx,10);
@@ -7714,7 +9276,7 @@ function renderTomorrowTab(){
   const avoidEmpty = document.getElementById('tmrwAvoidEmpty');
   if(avoidBox){
     avoidBox.innerHTML = plan.avoidItems.map((item,i)=>
-      `<div class="c-row"><span>${item}</span><span class="rm" data-idx="${i}">✕</span></div>`).join('');
+      `<div class="c-row"><span>${item}</span><span class="rm" data-idx="${i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span></div>`).join('');
     avoidBox.querySelectorAll('.rm').forEach(el=>{
       el.addEventListener('click', ()=>{
         const idx = parseInt(el.dataset.idx,10);
@@ -7809,7 +9371,7 @@ function renderCustomTaskList(){
     const statusText = t.done ? '✅ انجام شد' : '⌛ تاریخش گذشت';
     return `<div class="c-row" data-id="${t.id}" style="cursor:pointer;">`+
       `<span style="font-size:11.5px;text-decoration:${t.done?'line-through':'none'};text-decoration-color:var(--line);">${escapeHtml(t.text)} <span style="color:var(--muted);">— ${statusText}</span></span>`+
-      `<span class="rm" data-id-rm="${t.id}">✕</span></div>`;
+      `<span class="rm" data-id-rm="${t.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span></div>`;
   }).join('') : `<div style="padding:8px 14px;font-size:11px;color:var(--muted);">چیزی هنوز اینجا نیست</div>`;
   archiveBox.querySelectorAll('.rm').forEach(el=>{
     el.addEventListener('click', (e)=>{ e.stopPropagation(); deleteCustomTask(el.dataset.idRm); });
@@ -8059,7 +9621,7 @@ function renderThemeRow(){
     const t = THEMES[name];
     const active = storeData.theme===name ? ' active' : '';
     const locked = (!FREE_THEMES[name] && !(storeData.premium || isInTrial())) ? ' theme-swatch-locked' : '';
-    const lockIcon = locked ? '<span class="theme-swatch-lock">🔒</span>' : '';
+    const lockIcon = locked ? '<span class="theme-swatch-lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg></span>' : '';
     return `<div class="theme-swatch${active}${locked}" data-theme="${name}" style="background:linear-gradient(135deg,${t.accent},${t.bg1})">${lockIcon}</div>`;
   }).join('');
   row.querySelectorAll('.theme-swatch').forEach(el=>{
@@ -8086,7 +9648,7 @@ function renderMusicSettings(){
   const row = document.getElementById('musicVolumeRow');
   if(!toggle || !slider) return;
   toggle.checked = storeData.musicEnabled !== false;
-  slider.value = storeData.musicVolume===undefined ? 35 : storeData.musicVolume;
+  slider.value = storeData.musicVolume===undefined ? 15 : storeData.musicVolume;
   if(num) num.textContent = faDigits(slider.value);
   if(row) row.style.opacity = toggle.checked ? '1' : '.45';
   if(slider) slider.disabled = !toggle.checked;
@@ -8134,6 +9696,47 @@ document.getElementById('sfxVolumeSlider').addEventListener('input', (e)=>{
 document.getElementById('sfxVolumeSlider').addEventListener('change', ()=>{
   saveData();
   sfxTap();
+});
+
+/* ================= خوانده‌شدن پیام‌ها با صدا (ElevenLabs TTS، از طریق /tts روی Worker) =================
+   دیفالت خاموش (storeData.voiceEnabled=false). وقتی روشنه، هر توستی که رو صفحه میاد با صدای
+   اختصاصی خونده می‌شه. کلید ElevenLabs هیچ‌وقت سمت کلاینت نیست — فقط از طریق Worker با توکن
+   Supabase کاربر لاگین‌شده صدا زده می‌شه (چون /tts نیازمند لاگینه). اگه کاربر لاگین نباشه یا
+   شبکه مشکل داشته باشه، فقط بی‌صدا رد می‌شیم (توست خودش که همیشه دیده می‌شه). */
+let ttsCurrentAudio = null;
+function voiceAllowed(){ return !!(typeof storeData!=='undefined' && storeData && storeData.voiceEnabled); }
+async function speakText(text){
+  if(!voiceAllowed() || !text) return;
+  try{
+    if(ttsCurrentAudio){ ttsCurrentAudio.pause(); ttsCurrentAudio = null; }
+    const headers = await authHeaders();
+    if(!headers.Authorization) return; // بدون لاگین سرور 401 می‌ده، پس اصلاً درخواست نده
+    const res = await fetch(WORKER_BASE + '/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ text: String(text).slice(0, 400) }),
+    });
+    if(!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    ttsCurrentAudio = audio;
+    audio.addEventListener('ended', ()=>{ URL.revokeObjectURL(url); if(ttsCurrentAudio===audio) ttsCurrentAudio=null; });
+    audio.addEventListener('error', ()=>{ URL.revokeObjectURL(url); if(ttsCurrentAudio===audio) ttsCurrentAudio=null; });
+    await audio.play();
+  }catch(err){ /* بی‌صدا رد می‌شیم؛ صدا یه فیچر کمکیه، نباید هیچ‌جا کرش کنه */ }
+}
+function renderVoiceSettings(){
+  const toggle = document.getElementById('voiceToggle');
+  if(!toggle) return;
+  toggle.checked = storeData.voiceEnabled === true;
+}
+document.getElementById('voiceToggle').addEventListener('change', (e)=>{
+  storeData.voiceEnabled = e.target.checked;
+  saveData();
+  renderVoiceSettings();
+  if(e.target.checked) speakText('صدا فعال شد');
+  else if(ttsCurrentAudio){ ttsCurrentAudio.pause(); ttsCurrentAudio = null; }
 });
 
 /* ================= Program length ================= */
@@ -9572,6 +11175,30 @@ async function handlePublicChatSession(session){
     let profile = null;
     try{ const res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url').eq('id', publicChatUser.id).single(); profile = res.data; }catch(err){}
     myProfileCache = profile;
+    // ==================== پیام تشویقی «کسی با کد تو ثبت‌نام کرد» ====================
+    // هر بار پروفایل واقعی از سرور میاد (باز شدن اپ، لاگین، رفرش سشن بعد از resume)،
+    // referral_count واقعی رو با آخرین عددی که قبلاً رو همین گوشی دیده بودیم مقایسه
+    // می‌کنیم. اگه بیشتر شده، یعنی از آخرین باری که این کاربر اپ رو باز کرده، حداقل
+    // یه نفر جدید با کدش ثبت‌نام کرده — یه پیام تبریک نشونش می‌دیم. جدا برای هر
+    // user id ذخیره می‌شه تا اگه چند نفر رو یه گوشی حساب عوض کنن قاطی نشه.
+    if(profile && typeof profile.referral_count === 'number'){
+      const seenKey = publicChatUser.id;
+      if(!storeData.referralSeenCounts) storeData.referralSeenCounts = {};
+      const lastSeen = storeData.referralSeenCounts[seenKey] || 0;
+      if(profile.referral_count > lastSeen){
+        const gained = profile.referral_count - lastSeen;
+        queueCelebration({
+          emoji: '🎉',
+          title: gained === 1 ? 'یه دعوت جدید!' : (toFa(gained) + ' دعوت جدید!'),
+          text: (gained === 1
+            ? 'تبریک! یه نفر با کد دعوتِ تو ثبت‌نام کرد'
+            : ('تبریک! ' + toFa(gained) + ' نفر جدید با کد دعوتِ تو ثبت‌نام کردن'))
+            + ' و حالا ' + toFa(profile.referral_count) + ' نفر با کد تو عضو شدن. ادامه بده! 🚀'
+        });
+      }
+      storeData.referralSeenCounts[seenKey] = profile.referral_count;
+      saveData();
+    }
     publicChatUsername = profile ? displayName(profile.username) : displayName(publicChatUser.email);
     isAppOwner = !!(publicChatUser.email && publicChatUser.email.toLowerCase() === OWNER_EMAIL);
     // Chat-admin: granted by the owner (see set_chat_admin_by_email RPC / chatAdminManageBtn).
@@ -10692,7 +12319,14 @@ async function renderProfileTab(){
   }
 
   const name = publicChatUsername || 'کاربر';
-  heroName.textContent = name + (isAppOwner ? ' 👑' : '');
+  heroName.textContent = name; // متن نام همیشه با textContent ست می‌شه (نام دست کاربره، innerHTML امن نیست)
+  if(isAppOwner){
+    const crownEl = document.createElement('span');
+    crownEl.className = 'hero-owner-crown';
+    crownEl.style.marginRight = '4px';
+    crownEl.innerHTML = BADGE_CROWN_ICON; // این رشته ثابت و از سمت خودمونه، نه از کاربر
+    heroName.appendChild(crownEl);
+  }
   heroAvatar.innerHTML = lbAvatarInnerHtml(myProfileCache, name);
   heroAvatar.style.background = (myProfileCache && myProfileCache.avatar_url) ? 'transparent' : lbColorFor(publicChatUser.id);
   const isPremiumNow = !!(myProfileCache && myProfileCache.premium_until && new Date(myProfileCache.premium_until) > new Date());
@@ -10881,6 +12515,46 @@ function applyRememberedAuthToLoginForms(){
   if(gateEmailEl && !gateEmailEl.value) gateEmailEl.value = creds.email;
   if(gatePassEl && !gatePassEl.value) gatePassEl.value = creds.password;
 }
+/* Generic fallback for technical (non-auth) error messages — e.g. Supabase Storage
+   errors when sending chat media/gifs. These come back in English from the server;
+   translate the common cases and give a Persian generic otherwise. The raw message
+   is still logged via console.error above this, so nothing is lost for debugging. */
+function translateTechError(msg){
+  if(!msg) return 'خطای نامشخص';
+  const m = String(msg).toLowerCase();
+  const map = [
+    [/mime type|not allowed|invalid file type|unsupported/, 'فرمت فایل مجاز نیست'],
+    [/exceed|too large|payload too large|max.*size/, 'حجم فایل زیاده'],
+    [/permission|not authorized|rls|row-level security|policy/, 'اجازه‌ی دسترسی نیست (تنظیمات سرور)'],
+    [/network|fetch failed|failed to fetch|timeout/, 'مشکل در اتصال به سرور'],
+    [/bucket not found|not found/, 'مشکل در تنظیمات ذخیره‌سازی سرور'],
+  ];
+  for(const [re, fa] of map){ if(re.test(m)) return fa; }
+  return 'خطای فنی نامشخص';
+}
+/* Supabase auth always returns its built-in error messages in English regardless
+   of app locale (e.g. "Invalid login credentials"). This maps the common ones to
+   Persian so no English text leaks into the toast popups; unknown/new messages
+   fall back to a generic Persian error instead of showing raw English. */
+function translateAuthError(msg){
+  if(!msg) return 'خطایی پیش اومد، دوباره امتحان کن';
+  const m = String(msg).toLowerCase();
+  const map = [
+    [/invalid login credentials/, 'ایمیل یا رمز عبور اشتباهه'],
+    [/email not confirmed/, 'ایمیلت هنوز تأیید نشده؛ اینباکس رو چک کن'],
+    [/user already registered|already registered|already exists/, 'این ایمیل قبلاً ثبت‌نام شده'],
+    [/password should be at least/, 'رمز باید حداقل ۶ کاراکتر باشه'],
+    [/unable to validate email address|invalid email/, 'ایمیل وارد شده معتبر نیست'],
+    [/email rate limit exceeded|rate limit/, 'درخواست‌های زیادی زدی، چند دقیقه دیگه دوباره امتحان کن'],
+    [/token has expired|otp expired|invalid.*otp|invalid.*token/, 'کد وارد شده منقضی یا نامعتبره'],
+    [/user not found/, 'حسابی با این مشخصات پیدا نشد'],
+    [/network|fetch failed|failed to fetch/, 'مشکل در اتصال به سرور'],
+    [/same password/, 'رمز جدید نباید با رمز قبلی یکی باشه'],
+    [/signup.*disabled|signups not allowed/, 'ثبت‌نام موقتاً غیرفعاله'],
+  ];
+  for(const [re, fa] of map){ if(re.test(m)) return fa; }
+  return 'خطایی پیش اومد، دوباره امتحان کن';
+}
 /* Shared login/signup logic — used by both the in-app "اکانت" tab and the mandatory
    account-creation gate shown before onboarding. Returns true on success so callers
    can decide what happens next (e.g. the gate advancing to onboarding). */
@@ -10889,7 +12563,7 @@ async function performLogin(email, password){
   if(!email || !password){ showToast('ایمیل و رمز رو وارد کن', 'error'); return false; }
   try{
     const { error } = await sb.auth.signInWithPassword({ email, password });
-    if(error){ showToast(error.message, 'error'); return false; }
+    if(error){ showToast(translateAuthError(error.message), 'error'); return false; }
     showToast('خوش اومدی 👋', 'success');
     return true;
   }catch(err){ showToast('مشکل در اتصال به سرور', 'error'); return false; }
@@ -10900,7 +12574,7 @@ async function performSignup(username, email, password, referralInput){
   if(password.length < 6){ showToast('رمز باید حداقل ۶ کاراکتر باشه', 'error'); return false; }
   try{
     const { data, error } = await sb.auth.signUp({ email, password });
-    if(error){ showToast(error.message, 'error'); return false; }
+    if(error){ showToast(translateAuthError(error.message), 'error'); return false; }
     if(data.user){
       const myReferralCode = genReferralCode();
       const myGender = (storeData.profile && storeData.profile.gender) || null;
@@ -10990,7 +12664,7 @@ document.getElementById('sendResetBtn').addEventListener('click', async ()=>{
   btn.disabled = true; btn.textContent = 'در حال ارسال...';
   try{
     const { error } = await sb.auth.resetPasswordForEmail(email);
-    if(error){ showToast(error.message, 'error'); }
+    if(error){ showToast(translateAuthError(error.message), 'error'); }
     else{
       pendingResetEmail = email;
       showToast('یه کد ۶ رقمی به ایمیلت ارسال شد 📩', 'success');
@@ -11014,10 +12688,10 @@ document.getElementById('confirmResetCodeBtn').addEventListener('click', async (
     if(!sessData.session){
       if(!code){ showToast('کدی که برات ایمیل شده رو وارد کن', 'error'); btn.disabled = false; btn.textContent = 'ثبت رمز جدید'; return; }
       const { error: verifyErr } = await sb.auth.verifyOtp({ email: pendingResetEmail, token: code, type: 'recovery' });
-      if(verifyErr){ showToast(verifyErr.message, 'error'); return; }
+      if(verifyErr){ showToast(translateAuthError(verifyErr.message), 'error'); return; }
     }
     const { error: updErr } = await sb.auth.updateUser({ password: newPassword });
-    if(updErr){ showToast(updErr.message, 'error'); return; }
+    if(updErr){ showToast(translateAuthError(updErr.message), 'error'); return; }
     document.getElementById('resetCodeInput').value = '';
     document.getElementById('newPasswordInput').value = '';
     showToast('رمزت با موفقیت عوض شد 🎉', 'success');
@@ -12283,9 +13957,9 @@ function renderChatPinnedBanner(){
   if(!chatPinnedMsgs.length){ box.classList.remove('show'); box.innerHTML = ''; return; }
   box.innerHTML = chatPinnedMsgs.map(m => `
     <div class="cpin-row" data-pin-id="${m.id}">
-      <div class="cpin-icon">📌</div>
+      <div class="cpin-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5c2.8 0 5 2.2 5 5 0 3.5-5 9-5 9s-5-5.5-5-9c0-2.8 2.2-5 5-5z"/><circle cx="12" cy="8.5" r="1.8"/></svg></div>
       <div class="cpin-body"><div class="cpin-name">${escapeHtml(m.username || 'کاربر')}</div><div class="cpin-text">${escapeHtml(m.content || '')}</div></div>
-      ${isChatAdmin ? `<button type="button" class="cpin-unpin" data-pin-id="${m.id}" aria-label="برداشتن پین">✕</button>` : ''}
+      ${isChatAdmin ? `<button type="button" class="cpin-unpin" data-pin-id="${m.id}" aria-label="برداشتن پین"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}
     </div>`).join('');
   box.classList.add('show');
 }
@@ -12423,7 +14097,7 @@ async function loadPublicChatMessages(){
       // with zero feedback. Surface it instead, so the chat doesn't look permanently stuck.
       console.error('Chat messages load error', error);
       const wrap = document.getElementById('chatMessages');
-      if(wrap) wrap.innerHTML = `<div class="chat-empty-msg">خطا در بارگذاری پیام‌ها: ${escapeHtml(error.message || 'مشکل در اتصال')}<br>اتصال اینترنت/VPN رو چک کن و دوباره وارد این تب شو.</div>`;
+      if(wrap) wrap.innerHTML = `<div class="chat-empty-msg">خطا در بارگذاری پیام‌ها<br>اتصال اینترنت/VPN رو چک کن و دوباره وارد این تب شو.</div>`;
     }
     loadGroupStreakBanner();
     loadChatPinned();
@@ -13091,7 +14765,7 @@ async function grantOrRevokeChatAdmin(email, makeAdmin, title){
   if(!sb || !isAppOwner) return;
   try{
     const { error } = await sb.rpc('set_chat_admin_by_email', { target_email: email, make_admin: makeAdmin, title: title || null });
-    if(error){ alert('خطا: ' + error.message); return; }
+    if(error){ alert('خطا: ' + translateAuthError(error.message)); return; }
     showToast(makeAdmin ? `${email} ادمین چت شد ✅ (از پیام بعدیش لقبش نشون داده می‌شه)` : `ادمین‌بودن ${email} حذف شد ✅`);
   }catch(err){ alert('مشکل در اتصال به سرور'); }
 }
@@ -13477,7 +15151,7 @@ async function sendPublicChatMedia(file){
     // what actually went wrong (missing migration, Storage rejecting the mime type/size,
     // RLS, network) — surfacing err.message makes the real cause visible without needing
     // to pull console logs off the device.
-    showToast(`ارسال مدیا ناموفق بود: ${(err && err.message) ? err.message : 'خطای نامشخص'}`, 'error');
+    showToast(`ارسال مدیا ناموفق بود: ${translateTechError(err && err.message)}`, 'error');
     if(pendingEl) pendingEl.remove();
     URL.revokeObjectURL(localUrl);
     if(!wrap.querySelector('.chat-msg')) wrap.innerHTML = '<div class="chat-empty-msg">هنوز پیامی نیست، اولین نفر باش!</div>';
@@ -13736,7 +15410,7 @@ async function sendPublicChatGif(gifUrl, gifThumbUrl, mediaType){
     if(!isPremiumNow) registerFreeChatMsgSent();
   }catch(err){
     console.error('Giphy gif send error', err);
-    showToast(`ارسال گیف ناموفق بود: ${(err && err.message) ? err.message : 'خطای نامشخص'}`, 'error');
+    showToast(`ارسال گیف ناموفق بود: ${translateTechError(err && err.message)}`, 'error');
     if(pendingEl) pendingEl.remove();
     if(!wrap.querySelector('.chat-msg')) wrap.innerHTML = '<div class="chat-empty-msg">هنوز پیامی نیست، اولین نفر باش!</div>';
   }
@@ -13927,7 +15601,7 @@ async function acceptBuddyRequest(reqId){
   if(!sb || !publicChatUser) return;
   try{
     const { error } = await sb.rpc('accept_buddy_request', { req_id: reqId });
-    if(error){ showToast(error.message || 'قبول کردن درخواست انجام نشد', 'error'); return; }
+    if(error){ showToast('قبول کردن درخواست انجام نشد', 'error'); return; }
     showToast('هم‌مسیر شدید! 🎉', 'success');
     await loadMyBuddyRelations();
     if(document.getElementById('tab-buddy').classList.contains('active')) renderBuddyTab();
@@ -13958,7 +15632,7 @@ async function requestRandomBuddy(){
   if(btn){ btn.disabled = true; btn.textContent = 'در حال جست‌وجو...'; }
   try{
     const { error } = await sb.rpc('request_random_buddy');
-    if(error){ showToast(error.message || 'الان کسی برای جفت‌شدن تصادفی در دسترس نیست', 'error'); return; }
+    if(error){ showToast('الان کسی برای جفت‌شدن تصادفی در دسترس نیست', 'error'); return; }
     showToast('یه درخواست تصادفی و ناشناس فرستاده شد 🎲', 'success');
     await loadMyBuddyRelations();
     renderBuddyTab();
@@ -14573,7 +16247,7 @@ function renderWoHistory(){
     const dateStr = d.toLocaleDateString('fa-IR');
     const timeStr = toFa(String(d.getHours()).padStart(2,'0'))+':'+toFa(String(d.getMinutes()).padStart(2,'0'));
     return `<div class="focus-stat-card" style="margin:0 14px 8px;">
-      <div class="fsc-top"><span class="fsc-icon">🏋️</span><span class="fsc-title">${h.dayLabel||'تمرین'}</span>${h.quality?`<span class="fsc-identity">${woStarsHtml(h.quality)}</span>`:''}</div>
+      <div class="fsc-top"><span class="fsc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.8 9.3v6.4M17.2 9.3v6.4"/><rect x="3.3" y="8" width="3.2" height="8.8" rx="1.4"/><rect x="17.5" y="8" width="3.2" height="8.8" rx="1.4"/><path d="M9.2 12.5h6.6"/></svg></span><span class="fsc-title">${h.dayLabel||'تمرین'}</span>${h.quality?`<span class="fsc-identity">${woStarsHtml(h.quality)}</span>`:''}</div>
       <div class="fsc-row"><span>تاریخ</span><span>${dateStr} · ${timeStr}</span></div>
       <div class="fsc-row"><span>مدت زمان</span><span>${woFormatDuration(h.minutes||0)}</span></div>
       <div class="fsc-row"><span>حرکت‌های انجام‌شده</span><span>${toFa(h.exercisesDone||0)} از ${toFa(h.exercisesTotal||0)}</span></div>
@@ -14746,7 +16420,7 @@ function setJourneyStep(step, opts){
 const OB_STEPS = 11;
 let obStep = 0;
 let obEditMode = false;
-let obSelected = { gender:'', goal:'', addictions:[], goodHabits:[], exerciseAccess:'', exerciseLevel:'', sleepPattern:'', supportStyle:'', duration:'', frequency:'', riskTimes:[], commitmentReward:'', commitmentPunishment:'', healthHasCondition:'no', healthTags:[] };
+let obSelected = { gender:'', goal:'', addictions:[], goodHabits:[], exerciseAccess:'', exerciseLevel:'', sleepPattern:'', supportStyle:'', duration:'', frequency:'', riskTimes:[], commitmentReward:'', commitmentPunishment:'', healthHasCondition:'no', healthTags:[], chronotype:'', mainObstacle:'', motivationType:'' };
 const FREQ_LENGTH_SUGGEST = {f1:30, f2:60, f3:90, f4:90};
 const DURATION_LABELS = {d1:'کمتر از ۱ ماه', d2:'۱ تا ۶ ماه', d3:'۶ ماه تا ۲ سال', d4:'بیشتر از ۲ سال'};
 const FREQUENCY_LABELS = {f1:'خیلی کم، گاه‌به‌گاه', f2:'متوسط، چند بار در هفته', f3:'زیاد، تقریباً هر روز', f4:'خیلی زیاد، چند بار در روز'};
@@ -14755,7 +16429,7 @@ const RISK_TIME_LABELS = {morning:'🌅 صبح', noon:'☀️ ظهر/عصر', ni
 const GOOD_HABIT_LABELS = {
   reading:"مطالعه‌ی روزانه", voice:"صداسازی / فن بیان", skill:"یادگیری یه مهارت جدید",
   social:"بهبود روابط عمومی", language:"یادگیری زبان دوم", instrument:"یادگیری یه ساز",
-  exercise:"نرمش و ورزش منظم", other:"یه هدف شخصی دیگه"
+  exercise:"نرمش و ورزش منظم", parents:"احترام و رسیدگی به پدر و مادر", other:"یه هدف شخصی دیگه"
 };
 const REWARD_LABELS = {book:'خرید یه کتاب', gadget:'خرید یه وسیله‌ی دلخواه', trip:'یه سفر یا خروجی کوچیک', treat:'یه خودشیرینی/تفریح دوست‌داشتنی', other:''};
 const PUNISH_LABELS = {none:'', donate_charity:'کمک مالی به یه خیریه', donate_dev:'حمایت مالی از سازنده‌ی اپ', detox:'یه روز کامل قطع اینستاگرام/شبکه‌ی اجتماعی', chore:'انجام یه کار خسته‌کننده که ازش فراری‌ام', other:''};
@@ -14906,7 +16580,8 @@ function openOnboarding(editMode){
       exerciseAccess:p.exerciseAccess||'', exerciseLevel:p.exerciseLevel||'', sleepPattern:p.sleepPattern||'',
       supportStyle:p.supportStyle||'gentle', duration:p.duration||'', frequency:p.frequency||'', riskTimes:[...(p.riskTimes||[])],
       commitmentReward:p.commitmentReward||'', commitmentPunishment:p.commitmentPunishment||'',
-      healthHasCondition: health.hasCondition ? 'yes' : 'no', healthTags:[...(health.tags||[])] };
+      healthHasCondition: health.hasCondition ? 'yes' : 'no', healthTags:[...(health.tags||[])],
+      chronotype:p.chronotype||'', mainObstacle:p.mainObstacle||'', motivationType:p.motivationType||'' };
     document.getElementById('obRewardOtherText').value = p.commitmentRewardOther||'';
     document.getElementById('obPunishOtherText').value = p.commitmentPunishOther||'';
     setChipActive('obRewardChips', [obSelected.commitmentReward]);
@@ -14932,8 +16607,11 @@ function openOnboarding(editMode){
     document.getElementById('obHealthDetailsWrap').style.display = obSelected.healthHasCondition==='yes' ? 'block' : 'none';
     setChipActive('obHealthTagChips', obSelected.healthTags);
     document.getElementById('obHealthTagOtherWrap').style.display = obSelected.healthTags.indexOf('other')>=0 ? 'block' : 'none';
+    setSegActive('obObstacleSeg', obSelected.mainObstacle);
+    setSegActive('obChronoSeg', obSelected.chronotype);
+    setSegActive('obMotivTypeSeg', obSelected.motivationType);
   } else {
-    obSelected = { gender:'', maritalStatus:'', goal:'', addictions:[], goodHabits:[], exerciseAccess:'', exerciseLevel:'', sleepPattern:'', supportStyle:'', duration:'', frequency:'', riskTimes:[], commitmentReward:'', commitmentPunishment:'', healthHasCondition:'no', healthTags:[] };
+    obSelected = { gender:'', maritalStatus:'', goal:'', addictions:[], goodHabits:[], exerciseAccess:'', exerciseLevel:'', sleepPattern:'', supportStyle:'', duration:'', frequency:'', riskTimes:[], commitmentReward:'', commitmentPunishment:'', healthHasCondition:'no', healthTags:[], chronotype:'', mainObstacle:'', motivationType:'' };
     document.getElementById('obContactName').value = '';
     document.getElementById('obContactPhone').value = '';
     document.getElementById('obRewardOtherText').value = '';
@@ -14991,7 +16669,9 @@ function finishOnboarding(){
     goodHabits: obSelected.goodHabits.slice(), otherGoodHabitText: otherGoodHabitText,
     exerciseAccess: obSelected.exerciseAccess || 'home', exerciseLevel: obSelected.exerciseLevel || 'beginner',
     sleepPattern: obSelected.sleepPattern || 'irregular', stressLevel: stress, motivationLevel: motivation,
-    supportStyle: obSelected.supportStyle || 'gentle', goalShort, goalLong, ifThenPlan: ifThen,
+    supportStyle: obSelected.supportStyle || 'gentle',
+    chronotype: obSelected.chronotype, mainObstacle: obSelected.mainObstacle, motivationType: obSelected.motivationType,
+    goalShort, goalLong, ifThenPlan: ifThen,
     duration: obSelected.duration, frequency: obSelected.frequency, riskTimes: obSelected.riskTimes.slice(),
     commitmentReward: obSelected.commitmentReward, commitmentRewardOther: rewardOther,
     commitmentPunishment: obSelected.commitmentPunishment, commitmentPunishOther: punishOther,
@@ -15028,7 +16708,7 @@ function finishOnboarding(){
   renderIfThenUI();
   renderProfileSummaryCard();
   renderLengthSeg();
-  currentPhase = getPhase(programDay());
+  currentPhase = getPhase(pacedProgramDay());
   entry.total = totalToday();
   render();
   updateLiveCounter();
@@ -15052,7 +16732,7 @@ function skipOnboarding(){
   storeData.profile = Object.assign(defaultProfile(), storeData.profile, { onboardingSkipped:true });
   saveData();
   document.getElementById('onboardOverlay').classList.remove('show');
-  currentPhase = getPhase(programDay());
+  currentPhase = getPhase(pacedProgramDay());
   entry.total = totalToday();
   render();
   updatePersonalizeHints();
@@ -15163,6 +16843,24 @@ document.getElementById('obSupportSeg').addEventListener('click', (e)=>{
   const btn = e.target.closest('button'); if(!btn) return;
   obSelected.supportStyle = btn.dataset.val; setSegActive('obSupportSeg', obSelected.supportStyle);
 });
+/* ---- three new, fully-optional personalization signals: main trigger/obstacle,
+   chronotype, and the underlying motivation type. None are required in
+   validateObStep (same "optional, only used if present" pattern as health/
+   marital status elsewhere), so skipping them never blocks onboarding — they
+   just mean the deeper checklist-variant engine (getCoreVariant/getHabitVariant
+   below) falls back to its profile-agnostic default lines. ---- */
+document.getElementById('obObstacleSeg').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  obSelected.mainObstacle = btn.dataset.val; setSegActive('obObstacleSeg', obSelected.mainObstacle);
+});
+document.getElementById('obChronoSeg').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  obSelected.chronotype = btn.dataset.val; setSegActive('obChronoSeg', obSelected.chronotype);
+});
+document.getElementById('obMotivTypeSeg').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  obSelected.motivationType = btn.dataset.val; setSegActive('obMotivTypeSeg', obSelected.motivationType);
+});
 document.getElementById('obStress').addEventListener('input', (e)=>{ document.getElementById('obStressNum').textContent = toFa(e.target.value); });
 document.getElementById('obMotivation').addEventListener('input', (e)=>{ document.getElementById('obMotivationNum').textContent = toFa(e.target.value); });
 
@@ -15248,7 +16946,17 @@ async function iabPurchase(sku){
     console.error('[IAB] purchase() نیتیو fail شد:', (e && e.message) || e, e);
     iabDebugStep('purchase() نیتیو', false, (e && e.message) || String(e));
     if(e && e.message === 'iab-timeout'){
-      showToast('پاسخی از درگاه پرداخت نرسید؛ اگه خرید انجام شده، از «بازیابی خرید قبلی» استفاده کن', 'error');
+      // بعضی مسیرهای مایکت (مثلاً شارژ کیف‌پول وسط خرید) نتیجه رو هیچ‌وقت به
+      // onActivityResult برنمی‌گردونن، درحالی‌که خودِ خرید رو مارکت واقعاً ثبت
+      // می‌شه. به‌جای اینکه فقط بگیم «از بازیابی خرید قبلی استفاده کن»، همینجا
+      // خودمون خودکار همون چک رو انجام می‌دیم؛ اگه پیدا و تایید بشه، کاربر اصلاً
+      // خطا نمی‌بینه، مستقیم جشن فعال‌سازی رو می‌بینه.
+      iabDebugStep('پاسخی از purchase() نرسید', null, 'در حال چک خودکار خرید واقعی از طریق getPurchases()...');
+      const recovered = await activateOwnedPremiumIfAny({ silent:true });
+      iabDebugStep('نتیجه‌ی چک خودکار', recovered, recovered ? 'خرید واقعی پیدا و فعال شد 🎉' : 'چیزی پیدا نشد یا هنوز آماده نیست');
+      if(!recovered){
+        showToast('پاسخی از درگاه پرداخت نرسید؛ اگه خرید انجام شده، از «بازیابی خرید قبلی» استفاده کن', 'error');
+      }
     } else {
       showToast('پرداخت انجام نشد یا لغو شد', 'error');
     }
@@ -15260,7 +16968,16 @@ async function iabPurchase(sku){
 // بود (یعنی promise نیتیو گم شده)، دستی آزادش می‌کنیم.
 function resetPremiumPayBtnIfStuck(){
   const btn = document.getElementById('premiumPayBtn');
+  const wasStuck = !!(btn && btn.disabled);
   if(btn && btn.disabled){ btn.disabled = false; btn.textContent = '💳 خرید نسخه‌ی پرمیوم'; }
+  if(wasStuck){
+    // دکمه قفل مونده بود یعنی وسط یه تلاش برای خرید بودیم و اپ به مایکت رفته و
+    // برگشته (مثلاً برای شارژ کیف‌پول) بدون اینکه نتیجه به onActivityResult برسه —
+    // درست همون لحظه‌ی برگشت، خودکار چک می‌کنیم خرید واقعاً انجام شده یا نه. اگه
+    // iabPurchase() هنوز داره منتظر می‌مونه (تایم‌اوتش هنوز نرسیده)، این چکِ زودتر
+    // همون‌جا نتیجه رو می‌گیره، بدون نیاز به صبر تا ۱۲۰ ثانیه.
+    activateOwnedPremiumIfAny({ silent:true });
+  }
 }
 try{
   if(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.App){
@@ -15579,6 +17296,80 @@ function openPremiumPage(){
 // Backward-compatible alias (kept in case anything else in the app still calls the old name)
 function openPremiumOverlay(){ openPremiumPage(); }
 
+/* ==================== فینالایز کردن فعال‌سازی پرمیوم — نقطه‌ی مشترک واحد ====================
+   قبلاً این منطق (claim slot، consume، رفرش UI، خروج از ساب‌پیج، جشن) دوبار جدا
+   تو هندلر «خرید» و هندلر «بازیابی» نوشته شده بود — با یه فرق ظریف: مسیر خرید
+   celebration کامل نشون می‌داد، مسیر بازیابی فقط یه toast ساده. حالا هر دو (و هر
+   مسیر خودکار جدیدی که بعداً اضافه بشه) از همینجا رد می‌شن، پس همیشه دقیقاً یکی‌ان.
+   exitSubPage فقط وقتی صدا زده می‌شه که واقعاً تو همون ساب‌پیج پرمیوم باشیم — وگرنه
+   (مثلاً وقتی فعال‌سازی خودکار پشت‌صحنه، حین بودن تو یه تب دیگه اتفاق افتاده) کاربر
+   رو از جایی که داشت باهاش کار می‌کرد بیرون نمی‌ندازه. ولی خودِ جشن/ویژوالایزر
+   (premSuccessOverlay) یه overlay سراسریه، مستقل از تب فعلی — همیشه نشون داده می‌شه.
+   purchaseForConsume اختیاریه (بازیابیِ بدون purchaseToken مشخص هم باید کار کنه). */
+async function finalizePremiumActivationUI(purchaseForConsume){
+  storeData.premium = true; saveData();
+  await claimLifetimeSlotIfNeeded();
+  try{
+    const plugin = getIabPlugin();
+    if(plugin && plugin.consumePurchase && purchaseForConsume && purchaseForConsume.purchaseToken){
+      await plugin.consumePurchase({ purchaseToken: purchaseForConsume.purchaseToken });
+    }
+  }catch(e){ /* عدم موفقیت consume نباید فعال‌سازی که سرور تاییدش کرده رو خراب کنه */ }
+  renderPremiumPurchaseUI();
+  if(typeof applyPremiumLocksUI === 'function') applyPremiumLocksUI();
+  const premiumTabEl = document.getElementById('tab-premium');
+  if(premiumTabEl && premiumTabEl.classList.contains('active')) exitSubPage();
+  showPremiumSuccessCelebration();
+}
+
+/* ==================== بازیابی/فعال‌سازی خودکار خرید مالکیت‌شده ====================
+   همون کاری که قبلاً فقط با کلیک دستی رو «بازیابی خرید قبلی» انجام می‌شد، حالا از
+   سه‌جا صدا زده می‌شه:
+     ۱) خودِ دکمه‌ی «بازیابی خرید قبلی» (کلیک دستی، silent:false — خطاها toast می‌شن).
+     ۲) وقتی purchase() نیتیو timeout بشه (مثلاً بعد از شارژ کیف‌پول مایکت وسط خرید،
+        که نتیجه‌ی خرید هیچ‌وقت به onActivityResult برنمی‌گرده — درحالی‌که خودِ خرید
+        رو مارکت واقعاً ثبت شده). silent:true — نبودنِ خرید یعنی «واقعاً هنوز نخریده»،
+        نه یه خطا که باید نشونش بدیم.
+     ۳) هر بار اپ از پس‌زمینه/مایکت برمی‌گرده، **اگه** درست همون لحظه دکمه‌ی خرید رو
+        حالت قفل بود (یعنی یه خرید نیمه‌کاره‌ی واقعی وجود داشته). silent:true.
+   پرچم _activatingOwnedPremium از اجرای هم‌زمان چندتایی (مثلاً چند رویداد resume
+   پشت‌سرهم) جلوگیری می‌کنه. */
+let _activatingOwnedPremium = false;
+async function activateOwnedPremiumIfAny(opts){
+  opts = opts || {};
+  const silent = !!opts.silent;
+  if(_activatingOwnedPremium) return false;
+  if(storeData.premium) return true;
+  if(!isLoggedIn()) return false;
+  const plugin = getIabPlugin();
+  if(!plugin) return false;
+  _activatingOwnedPremium = true;
+  try{
+    const owned = await plugin.getPurchases();
+    const premiumSkus = new Set(Object.values(PREMIUM_SKU_BY_DISCOUNT));
+    const ownedPremium = owned && owned.purchases && owned.purchases.find(p=>premiumSkus.has(p.sku));
+    if(!ownedPremium){
+      if(!silent) showToast('خریدی برای این حساب پیدا نشد', 'error');
+      return false;
+    }
+    // همون دلیل مسیر خرید مستقیم: فقط "owned" بودن رو مارکت کافی نیست، باید مطمئن
+    // شیم سرور (profiles.premium_until) هم همینو می‌دونه.
+    await iabVerifyOnServer(ownedPremium);
+    const reallyActivated = await confirmPremiumOnServer();
+    if(!reallyActivated){
+      if(!silent) showToast('خرید رو مارکت پیدا شد ولی سرور تاییدش نکرد؛ لطفاً با پشتیبانی تماس بگیر', 'error');
+      return false;
+    }
+    await finalizePremiumActivationUI(ownedPremium);
+    return true;
+  }catch(e){
+    if(!silent) showToast('مشکلی تو بررسی خرید پیش اومد', 'error');
+    return false;
+  }finally{
+    _activatingOwnedPremium = false;
+  }
+}
+
 document.getElementById('premiumPayBtn').addEventListener('click', async ()=>{
   // مهم: قبل از باز کردن درگاه پرداخت، حتماً باید کاربر لاگین باشه. اگه بدون حساب
   // خرید کنه، iabVerifyOnServer() هیچ Authorization header ای نداره (authHeaders()
@@ -15609,23 +17400,7 @@ document.getElementById('premiumPayBtn').addEventListener('click', async ()=>{
       console.log('[IAB] reallyActivated (تایید نهایی رو Supabase):', reallyActivated);
       iabDebugStep('نتیجه‌ی کلی', reallyActivated, reallyActivated ? 'پرمیوم فعال شد 🎉' : 'فعال نشد — اولین ❌ بالا رو نگاه کن');
       if(reallyActivated){
-        storeData.premium = true; saveData();
-        await claimLifetimeSlotIfNeeded();
-        // مهم: بعد از تایید قطعی سرور، خریدِ رو مارکت/مایکت رو consume می‌کنیم.
-        // بدون این خط، این SKU برای همیشه رو حساب کاربر «owned» می‌مونه و وقتی
-        // premium_until تموم بشه و کاربر بخواد دوباره بخره، پلاگین بیلینگ با خطای
-        // «قبلاً خریداری شده» (item already owned) جلوی خرید مجدد رو می‌گیره —
-        // که از دید کاربر همون «پرداخت انجام نشد» غیرقابل‌فهمه.
-        try{
-          const plugin = getIabPlugin();
-          if(plugin && plugin.consumePurchase && purchase.purchaseToken){
-            await plugin.consumePurchase({ purchaseToken: purchase.purchaseToken });
-          }
-        }catch(e){ /* عدم موفقیت consume نباید فعال‌سازی که سرور تاییدش کرده رو خراب کنه */ }
-        renderPremiumPurchaseUI();
-        if(typeof applyPremiumLocksUI === 'function') applyPremiumLocksUI();
-        exitSubPage();
-        showPremiumSuccessCelebration();
+        await finalizePremiumActivationUI(purchase);
       } else {
         // مهم: اینجا دیگه storeData.premium=true ست نمی‌کنیم، چون اگه سرور واقعاً
         // ثبتش نکرده باشه، این فلگ محلی با اولین رفرش سشن (handlePublicChatSession)
@@ -15654,38 +17429,7 @@ document.getElementById('premiumCheckBtn').addEventListener('click', async ()=>{
   const plugin = getIabPlugin();
   if(!plugin){ showToast('این نسخه هنوز به پرداخت درون‌برنامه‌ای مایکت وصل نشده', 'error'); btn.disabled = false; btn.textContent = 'بازیابی خرید قبلی'; return; }
   try{
-    const owned = await plugin.getPurchases();
-    const premiumSkus = new Set(Object.values(PREMIUM_SKU_BY_DISCOUNT));
-    const ownedPremium = owned && owned.purchases && owned.purchases.find(p=>premiumSkus.has(p.sku));
-    if(ownedPremium){
-      // فقط دیدن اینکه رو مارکت "owned" هست کافی نیست — باید مطمئن شیم سرور
-      // (profiles.premium_until) هم همینو می‌دونه، وگرنه دقیقاً همون باگ خرید اول
-      // (فلگ محلی که با اولین رفرش سشن ریست می‌شه) اینجا هم تکرار می‌شه.
-      await iabVerifyOnServer(ownedPremium);
-      const reallyActivated = await confirmPremiumOnServer();
-      if(reallyActivated){
-        storeData.premium = true; saveData();
-        await claimLifetimeSlotIfNeeded();
-        // همون دلیل consume تو فلوی خرید مستقیم: اگه اینجا هم consume نکنیم، خریدی که
-        // با «بازیابی» تایید شده همچنان رو مارکت owned می‌مونه و بعد از انقضای
-        // premium_until، خرید مجدد با «قبلاً خریداری شده» رد می‌شه.
-        try{
-          if(plugin.consumePurchase && ownedPremium.purchaseToken){
-            await plugin.consumePurchase({ purchaseToken: ownedPremium.purchaseToken });
-          }
-        }catch(e){}
-        renderPremiumPurchaseUI();
-        if(typeof applyPremiumLocksUI === 'function') applyPremiumLocksUI();
-        showToast('نسخه‌ی پرمیوم فعال شد 🎉', 'success');
-        exitSubPage();
-      } else {
-        showToast('خرید رو مارکت پیدا شد ولی سرور تاییدش نکرد؛ لطفاً با پشتیبانی تماس بگیر', 'error');
-      }
-    } else {
-      showToast('خریدی برای این حساب پیدا نشد', 'error');
-    }
-  }catch(e){
-    showToast('مشکلی تو بررسی خرید پیش اومد', 'error');
+    await activateOwnedPremiumIfAny({ silent:false });
   }finally{
     btn.disabled = false; btn.textContent = 'بازیابی خرید قبلی';
   }
@@ -15700,9 +17444,14 @@ document.getElementById('aiGateCloseBtn').addEventListener('click', ()=>{
   setTimeout(()=>maybeShowInviteNudge('aigate'), 450);
 });
 
-/* ==================== Hidden developer/admin panel (grant or gift premium manually) ==================== */
+/* ==================== Hidden developer/admin panel (grant or gift premium manually) ====================
+   قبلاً تریگرش ۵ تپ رو‌ی عنوان «Dreamlife» توی سایدمنو بود؛ چون سایدمنو هر بار باز/بسته
+   می‌شه و خودش target های دیگه‌ای هم داره، عملاً لمس‌کردنِ ۵ تپِ پشت‌سرهم رو‌ی همون المنت
+   قبل از تایم‌اوت (۳ ثانیه) رو سخت/غیرقابل‌اعتماد می‌کرد. حالا رو‌ی شماره‌ی نسخه‌ی برنامه
+   (تب تنظیمات → «بررسی آخرین نسخه») منتقل شده: یه المنت ثابته که همیشه تو DOM هست، فقط
+   textContent‌ش عوض می‌شه (نه خودِ نود)، و صفحه‌ای‌ه که کاربر عادی به‌ندرت بهش سر می‌زنه. */
 let menuTitleTapCount = 0, menuTitleTapTimer = null;
-const menuTitleEl = document.querySelector('.side-menu-title');
+const menuTitleEl = document.getElementById('updCurrentVersion');
 if(menuTitleEl){
   menuTitleEl.addEventListener('click', ()=>{
     menuTitleTapCount++;
