@@ -124,7 +124,7 @@ jobs:
           [ -f manifest.json ] && cp manifest.json www/manifest.json || true
           [ -f assets/icon-192.png ] && cp assets/icon-192.png www/icon-192.png || { [ -f icon-192.png ] && cp icon-192.png www/icon-192.png || true; }
           [ -f assets/icon-512.png ] && cp assets/icon-512.png www/icon-512.png || { [ -f icon-512.png ] && cp icon-512.png www/icon-512.png || true; }
-          # index.html registers navigator.serviceWorker at '/sw.js' — the repo file is named
+          # app.js registers navigator.serviceWorker at '/sw.js' — the repo file is named
           # sw-1.js, so it must land in www/ as sw.js or registration 404s and the SW never installs.
           [ -f sw-1.js ] && cp sw-1.js www/sw.js || true
           [ -f sw.js ] && cp sw.js www/sw.js || true
@@ -2215,12 +2215,6 @@ jobs:
           with open(path, encoding='utf-8') as f:
               src = f.read()
 
-          notif_permissions = (
-              '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n'
-              '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n'
-              '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n'
-              '    <uses-permission android:name="android.permission.VIBRATE" />\n'
-          )
           for perm in [
               'android.permission.POST_NOTIFICATIONS',
               'android.permission.SCHEDULE_EXACT_ALARM',
