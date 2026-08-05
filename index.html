@@ -528,7 +528,8 @@
     letter-spacing:.15px;white-space:nowrap;flex-shrink:0;-webkit-tap-highlight-color:transparent;
     transition:transform .15s ease, box-shadow .3s ease;}
   .plan-badge:active{transform:scale(.93);}
-  .plan-badge-icon{font-size:10.5px;line-height:1;display:inline-block;}
+  .plan-badge-icon{display:inline-flex;align-items:center;justify-content:center;line-height:1;}
+  .plan-badge-icon svg{display:block;}
   .plan-badge.is-free{background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.38);cursor:pointer;}
   .plan-badge.is-free:active{background:rgba(255,255,255,.3);}
   .plan-badge.is-premium{
@@ -980,6 +981,26 @@
   .gi-red{background:var(--avoid-soft);}
   .gi-purple{background:linear-gradient(135deg, var(--accent), var(--accent-2));box-shadow:0 3px 10px rgba(122,50,180,.3);}
   .gi-grey{background:var(--card-2);}
+  .gi-indigo{color:#4338ca;} .gi-blue{color:#2f9bd6;} .gi-green{color:var(--good);}
+  .gi-orange{color:var(--accent);} .gi-red{color:var(--avoid);} .gi-purple{color:#fff;}
+  .gi-grey{color:var(--muted);}
+  .sm-ic-blue{color:#4338ca;} .sm-ic-green{color:var(--good);} .sm-ic-pink{color:var(--avoid);}
+  .sm-ic-grey{color:var(--muted);} .sm-ic-telegram{color:#29a9eb;} .sm-ic-gold{color:#8a5a2c;}
+  .sm-ic-premium{color:#fff;}
+  /* Shared sizing for the SVG icon system: every fixed-icon slot below already sets its own
+     font-size (that's what used to size the emoji glyph); giving each icon svg width/height:1em
+     makes it inherit that same sizing automatically, so no per-class pixel rules are needed. */
+  .gi-ic svg,.sg-ic svg,.sm-ic svg,.spe-ic svg,.ftc-ic svg,.fq-icon svg,.fq-star svg,
+  .premium-lock-icon svg,.lock-icon svg,.theme-swatch-lock svg,.path-node-reward svg,
+  .plb-emoji svg,.prem-scarcity-icon svg,.invite-hero-emoji svg,.invite-path-runner svg,
+  .wt-idle-emoji svg,.wt-done-emoji svg,.wt-reset-btn svg,.void-toss svg,.sos-fab-fire svg,
+  .streak-reset-fab svg,.recovery-modal-icon svg,.menu-btn svg,.hlb-star svg,.risk-nudge-icon svg,
+  .i-star svg,.tagline-arrow svg,.exit-spark svg,.sm-hero-spark svg,.buddy-intro-emoji svg,
+  .profile-avatar-edit-btn svg,.upd-current-ic svg,.suspend-lock-icon svg,.lb-refresh-btn svg,
+  .crp-close svg,.lib-lesson-close svg,.settings-back-btn svg,.csd-arrow svg,.cm-ov-back svg,
+  .info-card-close svg,.side-menu-close svg,.emoji svg,.rm svg,.goal-item-del svg,
+  .counter-del-btn svg,.item-edit-btn svg,.cpin-icon svg,.cpin-unpin svg
+  {width:1em;height:1em;flex-shrink:0;vertical-align:-0.15em;}
   .gi-title{flex:1;}
   .gi-desc{padding:0 14px 14px;font-size:11.5px;color:var(--muted);line-height:1.9;}
   .gi-subtabs{margin:2px 14px 14px;padding-top:10px;border-top:1px dashed var(--line);display:flex;flex-direction:column;gap:9px;}
@@ -1151,6 +1172,7 @@
     justify-content:center;font-size:20px;color:#fff;
     background:linear-gradient(135deg, var(--mc1,var(--accent)), var(--mc2,var(--accent-2)));
     box-shadow:0 6px 14px -5px var(--mc1,var(--accent));}
+  .focus-mode-card .fmc-icon-wrap svg{width:22px;height:22px;flex-shrink:0;}
   .focus-mode-card .fmc-label{font-size:11.5px;font-weight:700;color:var(--text);}
 
   /* ---- Category chips + section headers for grouping the 60 حالت‌ها ---- */
@@ -1170,6 +1192,7 @@
     justify-content:center;font-size:21px;color:#fff;
     background:linear-gradient(135deg, var(--mc1,var(--accent)), var(--mc2,var(--accent-2)));
     box-shadow:0 6px 16px -6px var(--mc1,var(--accent));}
+  .fsh-icon-badge svg{width:23px;height:23px;flex-shrink:0;}
   .fsh-text{min-width:0;}
   .fsh-title{font-size:15.5px;font-weight:800;color:var(--text);white-space:nowrap;}
   .fsh-subtitle{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.5;}
@@ -1837,6 +1860,7 @@
   .focus-quality-modal.visible{display:flex;}
   .focus-quality-card{background:var(--card);border-radius:18px;padding:26px 20px;max-width:320px;width:100%;text-align:center;}
   .fq-icon{font-size:30px;margin-bottom:6px;}
+  #fqIcon svg{width:32px;height:32px;color:var(--accent);}
   .fq-title{font-size:16px;font-weight:800;color:var(--text);margin-bottom:4px;}
   .fq-sub{font-size:12px;color:var(--muted);line-height:1.8;margin-bottom:18px;}
   .fq-stars{display:flex;justify-content:center;gap:8px;margin-bottom:20px;direction:ltr;}
@@ -1857,6 +1881,7 @@
   .focus-stat-card{border-radius:12px;background:var(--card-2);border:1px solid var(--line);padding:10px 12px;}
   .fsc-top{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
   .fsc-icon{font-size:16px;}
+  .fsc-icon svg{width:16px;height:16px;vertical-align:-3px;color:var(--accent);}
   .fsc-title{font-size:12px;font-weight:800;color:var(--text);flex:1;}
   .fsc-identity{font-size:10px;font-weight:800;color:#c96b1a;background:var(--accent-soft);border-radius:20px;padding:2px 8px;}
   .fsc-row{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);padding:2px 0;}
@@ -2070,6 +2095,53 @@
   .wt-children{display:flex;flex-direction:column;gap:6px;margin:6px 0 2px;padding-inline-start:16px;
     border-inline-start:2px dashed var(--line);}
   @keyframes wtPulse{0%,100%{transform:scale(1);}50%{transform:scale(1.06);}}
+
+  /* ---- Brain tab (تقویت هوش): سرعت پردازش — محاسبه‌ی سریع + تست استروپ ---- */
+  .brain-round-stats{display:flex;gap:8px;margin:0 14px 12px;}
+  .brain-stat{flex:1;text-align:center;background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:8px 4px;}
+  .brain-stat span{display:block;font-size:17px;font-weight:900;color:var(--text);font-variant-numeric:tabular-nums;}
+  .brain-stat small{font-size:10px;color:var(--muted);}
+  .brain-question-card{margin:0 14px 14px;padding:24px 16px;background:var(--card-2);border:1px solid var(--line);
+    border-radius:16px;text-align:center;}
+  .brain-question-text{font-size:24px;font-weight:900;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:1px;}
+  .brain-choices{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 14px 14px;}
+  .brain-choice-btn{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:14px 6px;
+    font-family:inherit;font-size:17px;font-weight:800;color:var(--text);cursor:pointer;font-variant-numeric:tabular-nums;
+    transition:transform .12s,border-color .15s,background .15s;}
+  .brain-choice-btn:active{transform:scale(.96);}
+  .brain-choice-btn.brain-correct{background:rgba(63,184,127,.18);border-color:var(--good);color:var(--good);}
+  .brain-choice-btn.brain-wrong{background:rgba(226,102,90,.16);border-color:var(--avoid);color:var(--avoid);}
+  .brain-stroop-word{text-align:center;margin:4px 14px 20px;font-size:32px;font-weight:900;letter-spacing:1px;min-height:42px;}
+  .brain-stroop-choices{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:0 14px 14px;}
+  .brain-stroop-choice{border:none;border-radius:14px;padding:14px 4px;font-family:inherit;font-size:12.5px;
+    font-weight:800;cursor:pointer;color:#fff;transition:transform .12s,opacity .15s;box-shadow:0 3px 10px -3px rgba(0,0,0,.3);}
+  .brain-stroop-choice:active{transform:scale(.94);}
+  .brain-stroop-choice.brain-wrong{opacity:.32;}
+  .brain-stroop-mode-label{text-align:center;margin:0 14px 8px;font-size:12.5px;font-weight:800;color:var(--muted);
+    background:var(--card-2);border:1px solid var(--line);border-radius:10px;padding:6px 8px;}
+  .brain-stroop-mode-label.brain-stroop-mode-alt{color:var(--accent);border-color:var(--accent);}
+  .brain-result{margin:0 14px 14px;padding:14px;background:var(--accent-soft);border-radius:14px;text-align:center;
+    font-size:13.5px;font-weight:800;color:var(--text);line-height:1.9;}
+
+  /* ---- توالی رنگی (Simon) ---- */
+  .brain-seq-status{text-align:center;margin:0 14px 12px;font-size:13px;font-weight:800;color:var(--muted);min-height:18px;}
+  .brain-seq-status.brain-seq-reverse{color:var(--accent);}
+  .brain-seq-pads{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 14px 14px;}
+  .brain-seq-pad{aspect-ratio:1;border:none;border-radius:18px;opacity:.48;cursor:pointer;
+    transition:opacity .13s ease,transform .1s ease,box-shadow .13s ease;}
+  .brain-seq-pad.active{opacity:1;transform:scale(1.04);
+    box-shadow:0 0 0 4px rgba(255,255,255,.28) inset,0 4px 16px -2px rgba(0,0,0,.35);}
+  .brain-seq-pad:active{transform:scale(.93);}
+
+  /* ---- N-back ---- */
+  .brain-nback-item{text-align:center;margin:4px 14px 14px;font-size:46px;font-weight:900;min-height:64px;
+    display:flex;align-items:center;justify-content:center;background:var(--card-2);border:1px solid var(--line);
+    border-radius:16px;padding:10px;letter-spacing:1px;transition:box-shadow .15s ease;}
+  .brain-nback-item.brain-nback-timeout-ok{box-shadow:0 0 0 3px var(--good) inset;}
+  .brain-nback-item.brain-nback-timeout-miss{box-shadow:0 0 0 3px var(--avoid) inset;}
+  .brain-nback-hint{text-align:center;margin:-6px 14px 12px;font-size:11.5px;color:var(--muted);}
+  .brain-nback-pace-track{height:4px;border-radius:3px;background:var(--line);margin:0 14px 14px;overflow:hidden;}
+  .brain-nback-pace-fill{height:100%;width:100%;background:var(--accent);}
 
   .seg button{border:none;background:none;font-family:inherit;font-size:12px;color:var(--muted);padding:6px 10px;
     border-radius:9px;cursor:pointer;font-weight:700;}
@@ -2815,6 +2887,15 @@
     background:var(--pc-glass);border:1px solid var(--pc-border-soft);font-size:11.5px;font-weight:700;color:var(--text);}
   .prem-perk-pill .emoji{font-size:16px;flex-shrink:0;}
 
+  /* ---- friendly benefit sentences: replaces the free/premium comparison table + perk-pill
+     grid with a short, warm list of what premium actually gives you, one caring sentence
+     per item instead of a dry feature checklist. ---- */
+  .prem-benefit-list{display:flex;flex-direction:column;gap:10px;margin:16px 0 20px;}
+  .prem-benefit-item{display:flex;align-items:flex-start;gap:10px;padding:13px 14px;border-radius:16px;
+    background:var(--pc-glass-strong);border:1px solid var(--pc-border);font-size:12.5px;font-weight:600;
+    color:var(--text);line-height:1.9;box-shadow:0 10px 24px -18px var(--pc-shadow);}
+  .prem-benefit-item .emoji{font-size:17px;flex-shrink:0;margin-top:1px;}
+
   /* ---- price card: the whole point of the page ---- */
   .prem-price-card{position:relative;text-align:center;border-radius:22px;padding:22px 16px 18px;margin-bottom:14px;
     background:linear-gradient(160deg, color-mix(in srgb, var(--pc-gold) 22%, var(--pc-glass-strong)) 0%, var(--pc-glass-strong) 100%);
@@ -2893,6 +2974,7 @@
   #tab-chat .chat-premium-panel > .chat-user-row,
   #tab-chat .chat-premium-panel > .chat-pinned-banner,
   #tab-chat .chat-premium-panel > .chat-privacy-note,
+  #tab-chat .chat-premium-panel > #narrationChatSuggestSlot,
   #tab-chat .chat-premium-panel > .group-streak-banner,
   #tab-chat .chat-premium-panel > .chat-report-mode-banner,
   #tab-chat .chat-premium-panel > .chat-user-filter-banner,
@@ -3068,30 +3150,43 @@
   #tab-chat .chat-msg .cm-name{font-size:calc(10.5px * var(--chat-zoom,1));font-weight:800;color:var(--pc-primary);}
   #tab-chat .chat-msg .cm-time{font-size:calc(9px * var(--chat-zoom,1));}
   #tab-chat .cm-head{gap:7px;}
-  /* ---- Telegram-style grouped avatar ----
+  /* ---- Telegram-style grouped avatar: bottom-aligned by default, sticky while scrolling ----
      Consecutive messages from the same sender — received OR own — are wrapped in a
-     .cm-group: an avatar column + a message column, laid out side by side and
-     bottom-aligned (align-items:flex-end), so the avatar always sits flush with the
-     LAST bubble of the run, exactly like Telegram.
-     (Previously the avatar column was align-items:stretch + position:sticky, meant to
-     keep the avatar glued to the viewport bottom while scrolling through a long run.
-     But sticky only engages once a group's own bottom edge is scrolling past the
-     viewport's bottom — a group sitting fully visible mid-scroll never triggers that,
-     so it just rendered at its default position, the TOP of the column, next to the
-     name instead of the last bubble. Plain bottom-alignment has no such trigger
-     condition, so it's correct regardless of scroll position — the one tradeoff is
-     that a very long run of messages taller than the screen won't keep the avatar
-     in view while you scroll through its middle, it'll just wait at the bottom.)
+     .cm-group: an avatar column + a message column, laid out side by side via flexbox.
+     Because they're flex siblings (never absolutely positioned), the message column's
+     available width is always the group's width minus the avatar column's fixed width
+     and the gap between them — a bubble can never physically render on top of the
+     avatar's reserved space, no matter how long its text or how the group re-flows.
+
+     The avatar needs to do two things at once, exactly like Telegram:
+       1) By default — or for a group that fits entirely on screen — sit flush with the
+          BOTTOM of the group, next to the LAST bubble (never floating up near the name).
+       2) While scrolling through a run of messages taller than the screen, follow the
+          scroll and hover near the bottom of the visible viewport, only detaching once
+          the group's own bottom edge scrolls past.
+     position:sticky alone only gives you (2): for a short, fully-visible group nothing
+     has pushed the avatar down yet, so it just renders at its static (top) position —
+     sticky only *clamps* movement, it doesn't set the resting position. So instead:
+       - .cm-group uses align-items:stretch so .cm-group-avatar spans the FULL height of
+         the run (same height as .cm-group-messages), not just the avatar's own 30px.
+       - .cm-group-avatar is itself a flex column, and .cm-avatar gets margin-top:auto,
+         which rests it at the bottom of that column by default (fixes point 1 — and is
+         also what guarantees it never overlaps the bubble above it).
+       - .cm-avatar also gets position:sticky + bottom:0, so while the (now tall)
+         .cm-group-avatar column is scrolling past, the avatar clamps near the bottom of
+         the visible viewport instead of scrolling out of view (fixes point 2).
+     Together this reproduces Telegram's grouped-avatar behavior exactly.
      Received groups use row-reverse: the page is RTL, so a plain "row" would put the
      first DOM child (the avatar) toward the row's own reading-start — which, combined
      with align-self:flex-end pinning the whole group to the screen's left edge, put
      the avatar in the middle and the bubble on the true outer edge. row-reverse puts
      the avatar at the true left edge instead, bubble toward the center — matching
      Telegram. Own groups mirror this to the right edge via .cm-group.own below. ---- */
-  #tab-chat .cm-group{display:flex;flex-direction:row-reverse;align-items:flex-end;
+  #tab-chat .cm-group{display:flex;flex-direction:row-reverse;align-items:stretch;
     gap:calc(8px * var(--chat-zoom,1));align-self:flex-end;max-width:80%;}
   #tab-chat .cm-group.own{flex-direction:row;align-self:flex-start;}
-  #tab-chat .cm-group-avatar{flex-shrink:0;position:relative;width:calc(30px * var(--chat-zoom,1));}
+  #tab-chat .cm-group-avatar{flex-shrink:0;position:relative;width:calc(30px * var(--chat-zoom,1));
+    display:flex;flex-direction:column;}
   #tab-chat .cm-group-messages{display:flex;flex-direction:column;gap:6px;min-width:0;flex:0 1 auto;}
   #tab-chat .cm-group-messages .chat-msg{max-width:100% !important;}
   #tab-chat .cm-group.cm-filtered-out{display:none;}
@@ -3100,6 +3195,7 @@
     width:calc(30px * var(--chat-zoom,1));height:calc(30px * var(--chat-zoom,1));border-radius:50%;display:flex;
     align-items:center;justify-content:center;font-size:calc(12px * var(--chat-zoom,1));font-weight:800;color:#fff;
     box-shadow:0 2px 6px rgba(0,0,0,.22);overflow:hidden;
+    margin-top:auto;position:sticky;bottom:0;
   }
   #tab-chat .cm-avatar.cm-avatar-img{background:var(--pc-border-soft,#e2e2e2);}
   #tab-chat .cm-avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;}
@@ -3278,7 +3374,9 @@ box-shadow:0 6px 18px -8px var(--pc-shadow);width:34px;height:34px;
   /* ---- Suspension lock: hides the AI advisor's feature sections while a suspension is active,
      leaving only #aiSuspendedBox visible. The public-chat side is handled in JS by swapping
      #chatLoggedInBox for #chatSuspendedBox instead, since that tab already toggles boxes that way. ---- */
-  #tab-ai.ai-suspended > .section:not(#aiSuspendedBox){display:none!important;}
+  #tab-ai.ai-suspended > .section:not(#aiSuspendedBox),
+  #tab-ai.ai-suspended > .subseg,
+  #tab-ai.ai-suspended > .sub-panel{display:none!important;}
   .suspend-lock-icon{font-size:30px;text-align:center;padding:6px 0 2px;}
   .suspend-lock-stage{display:inline-block;margin-top:8px;font-size:11px;font-weight:700;color:var(--avoid);
     background:var(--avoid-soft);border:1px solid rgba(226,102,90,.3);padding:3px 11px;border-radius:20px;}
@@ -4289,6 +4387,10 @@ overflow:hidden;
 <audio class="narration-audio" id="narrationIntroAudio" src="assets/narration-app-intro.mp3" preload="none"></audio>
 <audio class="narration-audio" id="narrationTodayAudio" src="assets/narration-today-tab.mp3" preload="none"></audio>
 <audio class="narration-audio" id="narrationPremiumAudio" src="assets/narration-premium.mp3" preload="none"></audio>
+<audio class="narration-audio" id="narrationChatAudio" src="assets/narration-chat-tab.mp3" preload="none"></audio>
+<audio class="narration-audio" id="narrationSpeechAudio" src="assets/narration-speech-tab.mp3" preload="none"></audio>
+<audio class="narration-audio" id="narrationAiAudio" src="assets/narration-ai-tab.mp3" preload="none"></audio>
+<audio class="narration-audio" id="narrationWorkoutAudio" src="assets/narration-workout-tab.mp3" preload="none"></audio>
 
 <!-- ===================== SPLASH / LOGO-MOTION INTRO ===================== -->
 <div id="splashScreen" aria-hidden="true">
@@ -4308,8 +4410,8 @@ overflow:hidden;
     <svg class="splash-bird b2" viewBox="0 0 24 12" xmlns="http://www.w3.org/2000/svg"><path d="M2,8 Q6,2 12,8 Q18,2 22,8"/></svg>
   </div>
   <div id="splashContent">
-  <div class="splash-word">Dreaml<span class="i-dotless-wrap">ı<span class="i-star">✦</span></span>fe</div>
-  <div class="splash-tagline"><span class="tagline-arrow">→</span>your dream, your life!<span class="tagline-arrow">←</span></div>
+  <div class="splash-word">Dreaml<span class="i-dotless-wrap">ı<span class="i-star"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span></span>fe</div>
+  <div class="splash-tagline"><span class="tagline-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5l6.5 7-6.5 7M3.5 12h15.5"/></svg></span>your dream, your life!<span class="tagline-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5l-6.5 7 6.5 7M20.5 12H5"/></svg></span></div>
   </div>
   <div class="splash-icon-wrap">
     <div class="splash-icon">
@@ -4565,16 +4667,16 @@ overflow:hidden;
   // کل نمایش اسپلش (آسمون+کوه بیاد بالا + مسیر تا قله کشیده بشه + حروف D/L بالا بیان + آدمک‌ها
   // چهره/دست‌وپا بگیرن و دست تکون بدن + حباب‌های سلام پاپ کنن + پرچم/ستاره پاپ کنن + متن‌ها
   // + یه مکث کوتاه برای دیده‌شدن کامل صحنه + فید اوت نهایی)
-  // آخرین چیزی که تموم می‌شه حباب‌های سلامه (شروع 1.6s + مدت .4s = 2.0s)، پس فقط یه مکث
-  // کوتاه بعدش کافیه: 2400ms انیمیشن/مکث + 350ms فید اوت = 2750ms — قبلاً ۴۰۵۰ms بود؛ اون
-  // ~۲ ثانیه‌ی اضافه فقط یه مکث بی‌کاره‌ی بعد از تموم شدن صحنه بود، نه بخشی از خودِ انیمیشن.
-  setTimeout(runExit, 2400);
+  // آخرین چیزی که تموم می‌شه حباب‌های سلامه (شروع 1.6s + مدت .4s = 2.0s)، پس بعدش یه مکث
+  // ۱.۴ ثانیه‌ای برای دیده‌شدن کامل صحنه می‌ذاریم: 3400ms انیمیشن/مکث + 350ms فید اوت = 3750ms
+  // (قبلاً 2400ms بود و خیلی زود رد می‌شد؛ یه ثانیه بهش اضافه شد).
+  setTimeout(runExit, 3400);
 })();
 </script>
 
 <!-- ===================== APP LOCK (PIN) ===================== -->
 <div id="appLockScreen" class="app-lock-screen" aria-hidden="true">
-  <div class="lock-icon">🔒</div>
+  <div class="lock-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg></div>
   <div class="lock-title" id="lockTitle">اپ قفله</div>
   <div class="lock-sub" id="lockSub">پین رو وارد کن</div>
   <div class="lock-dots" id="lockDots">
@@ -4585,7 +4687,7 @@ overflow:hidden;
     <button data-k="1">۱</button><button data-k="2">۲</button><button data-k="3">۳</button>
     <button data-k="4">۴</button><button data-k="5">۵</button><button data-k="6">۶</button>
     <button data-k="7">۷</button><button data-k="8">۸</button><button data-k="9">۹</button>
-    <button class="lock-key-empty" tabindex="-1"></button><button data-k="0">۰</button><button data-k="del">⌫</button>
+    <button class="lock-key-empty" tabindex="-1"></button><button data-k="0">۰</button><button data-k="del"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.5H19a1.2 1.2 0 0 1 1.2 1.2v12.6A1.2 1.2 0 0 1 19 19.5H9L3 12z"/><path d="M10.5 9l5 6M15.5 9l-5 6"/></svg></button>
   </div>
   <div class="lock-pattern-wrap" id="lockPatternGrid" style="display:none;">
     <svg viewBox="0 0 240 240" id="patternSvg">
@@ -4626,7 +4728,7 @@ overflow:hidden;
 <!-- ===================== RECOVERY CODE DISPLAY (shown once) ===================== -->
 <div id="recoveryCodeModal" class="recovery-modal">
   <div class="recovery-modal-card">
-    <div class="recovery-modal-icon">🗝️</div>
+    <div class="recovery-modal-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="3.2"/><path d="M10.2 10.2L19 19M15.5 15.5l2-2M18 18l2-2"/></svg></div>
     <div class="recovery-modal-title">کد بازیابی قفلت</div>
     <div class="recovery-modal-sub">اگه پین/الگو/رنگت یادت رفت، با این کد می‌تونی دوباره وارد بشی. این کد رو فقط همین یه بار نشونت می‌دیم — یه‌جای امن (یادداشت، گالری، ایمیل به خودت) ذخیره‌اش کن.</div>
     <div class="recovery-code-box" id="recoveryCodeText">XXXXX-XXXXX</div>
@@ -4638,7 +4740,7 @@ overflow:hidden;
 <!-- ===================== RESTART JOURNEY (relapse reset) ===================== -->
 <div id="journeyResetModal" class="recovery-modal">
   <div class="recovery-modal-card">
-    <div class="recovery-modal-icon">🔄</div>
+    <div class="recovery-modal-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 0 1 12.6-5.5M19.5 12a7.5 7.5 0 0 1-12.6 5.5"/><path d="M17.6 3.6v3.4h-3.4M6.4 20.4v-3.4h3.4"/></svg></div>
     <div class="recovery-modal-title">شروع دوباره</div>
     <div class="recovery-modal-sub">با انتخاب یکی از گزینه‌ها، روزشمار و چک‌لیست‌ها و نشان‌های فعلیت صفر می‌شه و مسیرت از همین الان از نو شروع می‌شه. این کار برگشت‌ناپذیره.</div>
     <div class="reset-reason-title">مهم‌ترین دلیل لغزشت چی بود؟</div>
@@ -4779,6 +4881,7 @@ overflow:hidden;
           <button type="button" class="onboard-chip" data-val="shopping">خرید وسواسی</button>
           <button type="button" class="onboard-chip" data-val="nailbiting">ناخن‌جویدن</button>
           <button type="button" class="onboard-chip" data-val="anxiety">اضطراب</button>
+          <button type="button" class="onboard-chip" data-val="aggression">پرخاشگری و تندخویی</button>
           <button type="button" class="onboard-chip" data-val="other">یه چیز دیگه</button>
         </div>
         <div class="onboard-field" id="obOtherWrap" style="display:none;margin-top:12px;">
@@ -4796,6 +4899,7 @@ overflow:hidden;
             <button type="button" class="onboard-chip" data-val="language">🌍 یادگیری زبان دوم</button>
             <button type="button" class="onboard-chip" data-val="instrument">🎸 یادگیری یه ساز</button>
             <button type="button" class="onboard-chip" data-val="exercise">🏃 نرمش و ورزش منظم</button>
+            <button type="button" class="onboard-chip" data-val="parents">🙏 احترام و رسیدگی به پدر و مادر</button>
             <button type="button" class="onboard-chip" data-val="other">یه چیز دیگه</button>
           </div>
           <div class="onboard-field" id="obGoodHabitOtherWrap" style="display:none;margin-top:12px;">
@@ -4834,6 +4938,15 @@ overflow:hidden;
             <button type="button" class="onboard-chip" data-val="latenight">🌌 سحر/دیروقت</button>
           </div>
         </div>
+        <div class="onboard-field"><label>معمولاً چی محرک اصلیشه؟ (اختیاری)</label>
+          <div class="onboard-seg" id="obObstacleSeg">
+            <button type="button" data-val="stress">استرس</button>
+            <button type="button" data-val="boredom">بی‌حوصلگی</button>
+            <button type="button" data-val="social">موقعیت اجتماعی</button>
+            <button type="button" data-val="automatic">عادت خودکار، بی‌فکر</button>
+            <button type="button" data-val="perfectionism">کمال‌گرایی/ترس از شکست</button>
+          </div>
+        </div>
         <div class="onboard-err" id="obErr4">مدت درگیری، شدت تکرار و حداقل یه زمان پرخطر رو مشخص کن.</div>
       </div>
 
@@ -4859,6 +4972,13 @@ overflow:hidden;
             <button type="button" data-val="regular">منظمه</button>
             <button type="button" data-val="irregular">نامنظمه</button>
             <button type="button" data-val="poor">کم‌خوابی مزمن دارم</button>
+          </div>
+        </div>
+        <div class="onboard-field"><label>بیشتر آدم صبحی یا شبی‌ای؟ (اختیاری)</label>
+          <div class="onboard-seg" id="obChronoSeg">
+            <button type="button" data-val="morning">صبحی — انرژیم اول روزه</button>
+            <button type="button" data-val="night">شبی — اواخر روز جون می‌گیرم</button>
+            <button type="button" data-val="flexible">فرقی نداره</button>
           </div>
         </div>
         <div class="onboard-err" id="obErr5">دسترسی ورزشی، سطح ورزشی و وضعیت خواب رو انتخاب کن.</div>
@@ -4937,6 +5057,15 @@ overflow:hidden;
         <div class="onboard-field"><label>چرا داری این مسیر رو شروع می‌کنی؟</label>
           <textarea class="onboard-textarea" id="obWhy" placeholder="دلیل واقعیت رو بنویس... دقیقاً همینو موقع وسوسه بهت یادآوری می‌کنم"></textarea>
         </div>
+        <div class="onboard-field"><label>این انگیزه بیشتر ریشه‌ش تو کدومه؟ (اختیاری)</label>
+          <div class="onboard-seg" id="obMotivTypeSeg">
+            <button type="button" data-val="health">سلامتی</button>
+            <button type="button" data-val="appearance">ظاهر و اندام</button>
+            <button type="button" data-val="relationships">روابط و خانواده</button>
+            <button type="button" data-val="career">کار و تحصیل</button>
+            <button type="button" data-val="selfrespect">احترام به خودم</button>
+          </div>
+        </div>
         <div class="onboard-field"><label>یه هدف کوتاه‌مدت</label><input class="onboard-input" id="obGoalShort" placeholder="مثلاً پیدا کردن یه روتین ثابت صبح"></div>
         <div class="onboard-err" id="obErr7" style="margin-top:-8px;">لطفاً دلیل شروع و هدف کوتاه‌مدتت رو بنویس.</div>
         <div class="onboard-field"><label>یه هدف بلندمدت‌تر (اختیاری)</label><input class="onboard-input" id="obGoalLong" placeholder="مثلاً برگشتن اعتماد‌به‌نفس و ارتباطات سالم"></div>
@@ -5008,10 +5137,10 @@ overflow:hidden;
 
 <canvas id="confettiCanvas"></canvas>
 
-<button class="streak-reset-fab" id="streakResetBtn" title="شروع دوباره">↻</button>
+<button class="streak-reset-fab" id="streakResetBtn" title="شروع دوباره"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 0 1 12.6-5.5M19.5 12a7.5 7.5 0 0 1-12.6 5.5"/><path d="M17.6 3.6v3.4h-3.4M6.4 20.4v-3.4h3.4"/></svg></button>
 <button class="sos-fab" id="sosFab">
   <span class="sos-fab-fill" id="sosFabFill"></span>
-  <span class="sos-fab-fire" id="sosFabFire">🔥</span>
+  <span class="sos-fab-fire" id="sosFabFire"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5c.5 3-2.3 4-2.3 7a2.3 2.3 0 0 0 2.3 2.3 2 2 0 0 0 2-2.3c1.6 1.1 2.5 2.8 2.5 4.7a4.5 4.5 0 0 1-9 0c0-4 3.5-5.5 4.5-11.7z"/></svg></span>
   <span class="sos-fab-label"><span class="emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.4"/><path d="M6.2 6.2l3.3 3.3M17.8 6.2l-3.3 3.3M6.2 17.8l3.3-3.3M17.8 17.8l-3.3-3.3"/></svg></span>وسوسه شدم</span>
 </button>
 
@@ -5050,15 +5179,15 @@ overflow:hidden;
 
 <div class="focus-quality-modal" id="woQualityModal">
   <div class="focus-quality-card">
-    <div class="fq-icon">💪</div>
+    <div class="fq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18.5c1.3-2.6 1-5.3-.3-7.5"/><path d="M5.3 10.5c-.4-1.7.8-3 2.3-2.7.9.2 1.5 1 1.6 1.9.5-1.6 2.2-2.5 3.8-2 1.7.6 2.4 2.5 1.7 4.4 2.1.4 3.6 2.3 3.6 4.7 0 3-2.4 5.2-5.5 5.2-3.8 0-6.9-1.6-8.8-4.6"/></svg></div>
     <div class="fq-title">این تمرین چطور بود؟</div>
     <div class="fq-sub">کیفیت این جلسه رو مشخص کن تا تو تاریخچه‌ی تمرینت ثبت بشه</div>
     <div class="fq-stars" id="woFqStars">
-      <button type="button" class="fq-star" data-q="1">⭐</button>
-      <button type="button" class="fq-star" data-q="2">⭐</button>
-      <button type="button" class="fq-star" data-q="3">⭐</button>
-      <button type="button" class="fq-star" data-q="4">⭐</button>
-      <button type="button" class="fq-star" data-q="5">⭐</button>
+      <button type="button" class="fq-star" data-q="1"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+      <button type="button" class="fq-star" data-q="2"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+      <button type="button" class="fq-star" data-q="3"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+      <button type="button" class="fq-star" data-q="4"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+      <button type="button" class="fq-star" data-q="5"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
     </div>
     <button type="button" class="fq-skip-btn" id="woFqSkipBtn">رد کردن</button>
   </div>
@@ -5101,8 +5230,8 @@ overflow:hidden;
   <div class="exit-card">
     <div class="exit-coach-halo">
       <div class="exit-coach" id="exitCoachAvatar"></div>
-      <span class="exit-spark e1">✦</span>
-      <span class="exit-spark e2">✦</span>
+      <span class="exit-spark e1"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span>
+      <span class="exit-spark e2"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span>
     </div>
     <div class="exit-bubble" id="exitMsgText"></div>
     <div class="exit-actions">
@@ -5164,7 +5293,7 @@ overflow:hidden;
   <div class="info-card">
     <div class="info-card-head">
       <h3>سیاست حریم خصوصی</h3>
-      <button class="info-card-close" id="privacyCloseBtn">✕</button>
+      <button class="info-card-close" id="privacyCloseBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="info-card-body">
       <p><strong>چه اطلاعاتی جمع می‌کنیم:</strong> در صورت ساخت حساب کاربری، ایمیل و نام نمایشی‌ات ذخیره می‌شه. اطلاعاتی که خودت وارد می‌کنی (چک‌لیست روزانه، یادداشت‌ها، قد/وزن، پیام‌های چت عمومی و گفتگو با مشاور شخصی) روی سرور ذخیره می‌شه تا بین دستگاه‌هات سینک بمونه.</p>
@@ -5182,7 +5311,7 @@ overflow:hidden;
   <div class="info-card">
     <div class="info-card-head">
       <h3>قوانین چت عمومی</h3>
-      <button class="info-card-close" id="chatRulesCloseBtn">✕</button>
+      <button class="info-card-close" id="chatRulesCloseBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="info-card-body">
       <p>برای اینکه فضای چت برای همه سالم، امن و امیدبخش بمونه، رعایت این قوانین الزامیه:</p>
@@ -5206,7 +5335,7 @@ overflow:hidden;
   <div class="info-card">
     <div class="info-card-head">
       <h3>📌 روز خاص</h3>
-      <button class="info-card-close" id="specialDayCloseBtn">✕</button>
+      <button class="info-card-close" id="specialDayCloseBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="info-card-body">
       <p>بعضی روزا کار مهمی داری و نمی‌تونی کل برنامه‌رو انجام بدی — مثلاً امتحان داری. بگو چرا، تا برنامه‌ت رو موقتاً سبک‌تر کنیم؛ فقط مهم‌ترین کارها می‌مونن و بقیه‌شون تا اون موقع کنار می‌رن.</p>
@@ -5227,7 +5356,7 @@ overflow:hidden;
   <div class="info-card">
     <div class="info-card-head">
       <h3>➕ روزشمار جدید</h3>
-      <button class="info-card-close" id="addCounterCloseBtn">✕</button>
+      <button class="info-card-close" id="addCounterCloseBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="info-card-body">
       <p>یه روزشمار جدا برای هر چیزی که می‌خوای پیگیرش باشی بساز — مثلاً ترک یه عادت خاص. این روزشمار فقط برای خودت نمایش داده می‌شه و از همین الان شروع می‌شه.</p>
@@ -5244,7 +5373,7 @@ overflow:hidden;
   <div class="info-card">
     <div class="info-card-head">
       <h3>🎯 هدف جدید</h3>
-      <button class="info-card-close" id="addGoalCloseBtn">✕</button>
+      <button class="info-card-close" id="addGoalCloseBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="info-card-body">
       <p>یه هدف شخصی برای یه روز مشخص از برنامه‌ات اضافه کن.</p>
@@ -5264,15 +5393,15 @@ overflow:hidden;
 <div class="side-menu-overlay" id="sideMenuOverlay">
   <div class="side-menu" id="sideMenu">
     <div class="side-menu-brand">
-      <button class="side-menu-close" id="sideMenuClose">✕</button>
+      <button class="side-menu-close" id="sideMenuClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
 
       <div class="sm-hero-cloud sm-hero-cloud-1" aria-hidden="true"></div>
       <div class="sm-hero-cloud sm-hero-cloud-2" aria-hidden="true"></div>
 
-      <span class="sm-hero-spark sm-hero-spark-1" aria-hidden="true">✦</span>
-      <span class="sm-hero-spark sm-hero-spark-2" aria-hidden="true">✦</span>
-      <span class="sm-hero-spark sm-hero-spark-3" aria-hidden="true">✦</span>
-      <span class="sm-hero-spark sm-hero-spark-4" aria-hidden="true">✦</span>
+      <span class="sm-hero-spark sm-hero-spark-1" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span>
+      <span class="sm-hero-spark sm-hero-spark-2" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span>
+      <span class="sm-hero-spark sm-hero-spark-3" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span>
+      <span class="sm-hero-spark sm-hero-spark-4" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span>
 
       <!-- mountain + flag: fills use var(--hdr-c1)/var(--hdr-c2), the same two variables the
            header gradient itself uses, so switching theme in تنظیمات re-colors this instantly. -->
@@ -5294,34 +5423,34 @@ overflow:hidden;
 
     <div class="side-menu-list">
       <div class="side-menu-item" id="personalizeMenuItem">
-        <span class="sm-ic sm-ic-green">🎯</span><span class="sm-label">شخصی‌سازی برنامه</span><span class="sm-badge" id="personalizeMenuBadge" style="display:none;">تکمیل نشده</span><span class="sm-chev">‹</span>
+        <span class="sm-ic sm-ic-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg></span><span class="sm-label">شخصی‌سازی برنامه</span><span class="sm-badge" id="personalizeMenuBadge" style="display:none;">تکمیل نشده</span><span class="sm-chev">‹</span>
       </div>
       <div class="side-menu-item" data-tab="progress">
-        <span class="sm-ic sm-ic-blue">📈</span><span class="sm-label">پیشرفت</span><span class="sm-chev">‹</span>
+        <span class="sm-ic sm-ic-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5.5-6 4 3.5L20 6"/><path d="M14.5 6H20v5.5"/></svg></span><span class="sm-label">پیشرفت</span><span class="sm-chev">‹</span>
       </div>
       <div class="side-menu-item side-menu-item-premium" id="premiumMenuItem">
-        <span class="sm-ic sm-ic-premium">🌟</span><span class="sm-label">نسخه‌ی پرمیوم</span><span class="sm-badge">ویژه</span>
+        <span class="sm-ic sm-ic-premium"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></span><span class="sm-label">نسخه‌ی پرمیوم</span><span class="sm-badge">ویژه</span>
       </div>
       <div class="side-menu-item" data-tab="invite">
-        <span class="sm-ic sm-ic-pink">🎁</span><span class="sm-label">دعوت از دوستان</span><span class="sm-chev">‹</span>
+        <span class="sm-ic sm-ic-pink"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9.5" width="16" height="10.5" rx="1.5"/><path d="M4 13h16"/><path d="M12 9.5v10.5"/><path d="M12 9.5c-1-3-3-4-4.3-3.2C6.4 7.1 7.2 9.5 12 9.5zM12 9.5c1-3 3-4 4.3-3.2 1.3.8.5 3.2-4.3 3.2z"/></svg></span><span class="sm-label">دعوت از دوستان</span><span class="sm-chev">‹</span>
       </div>
       <div class="side-menu-item" data-tab="update">
-        <span class="sm-ic sm-ic-blue">🔄</span><span class="sm-label">بررسی آخرین نسخه</span><span class="sm-chev">‹</span>
+        <span class="sm-ic sm-ic-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 0 1 12.6-5.5M19.5 12a7.5 7.5 0 0 1-12.6 5.5"/><path d="M17.6 3.6v3.4h-3.4M6.4 20.4v-3.4h3.4"/></svg></span><span class="sm-label">بررسی آخرین نسخه</span><span class="sm-chev">‹</span>
       </div>
       <div class="side-menu-item" data-tab="guide">
-        <span class="sm-ic sm-ic-blue">🧭</span><span class="sm-label">راهنما و آموزش</span><span class="sm-chev">‹</span>
+        <span class="sm-ic sm-ic-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.3"/><path d="M15.2 8.8l-2 4.4-4.4 2 2-4.4z"/></svg></span><span class="sm-label">راهنما و آموزش</span><span class="sm-chev">‹</span>
       </div>
       <div class="side-menu-item" data-tab="settings">
-        <span class="sm-ic sm-ic-grey">⚙️</span><span class="sm-label">تنظیمات</span><span class="sm-chev">‹</span>
+        <span class="sm-ic sm-ic-grey"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.4M12 18.6V21M21 12h-2.4M5.4 12H3M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2 5.5 5.5"/></svg></span><span class="sm-label">تنظیمات</span><span class="sm-chev">‹</span>
       </div>
 
       <div class="side-menu-divider"></div>
 
       <div class="side-menu-item" data-tab="goals">
-        <span class="sm-ic sm-ic-green">🎯</span><span class="sm-label">اهداف من</span><span class="sm-chev">‹</span>
+        <span class="sm-ic sm-ic-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg></span><span class="sm-label">اهداف من</span><span class="sm-chev">‹</span>
       </div>
       <div class="side-menu-item" id="telegramMenuItem">
-        <span class="sm-ic sm-ic-telegram">📣</span><span class="sm-label">عضویت در انجمن Dreamlife</span><span class="sm-chev">‹</span>
+        <span class="sm-ic sm-ic-telegram"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5l1.3-4.2a1.6 1.6 0 0 1 2-1.1l11 3.3-4 1.3z"/><rect x="3.5" y="9.5" width="17" height="10.5" rx="2"/><path d="M9 9.5L11 5M14 9.5L16 5"/></svg></span><span class="sm-label">عضویت در انجمن Dreamlife</span><span class="sm-chev">‹</span>
       </div>
     </div>
   </div>
@@ -5332,7 +5461,7 @@ overflow:hidden;
     <div class="app-header-bg" aria-hidden="true">
       <div class="header-flame" id="headerFlame" aria-hidden="true"></div>
     </div>
-    <div class="menu-btn" id="menuBtn" title="منو">☰</div>
+    <div class="menu-btn" id="menuBtn" title="منو"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16M4 12h16M4 17.5h16"/></svg></div>
     <div class="app-header-brand">
       <div class="app-header-text">
         <div class="app-header-name">Dreamlife</div>
@@ -5343,14 +5472,14 @@ overflow:hidden;
       <div class="header-level-badge" id="headerLevelBadge" title="سطح فعلی" onclick="if(typeof enterSubPage==='function') enterSubPage('progress');">
         <div class="hlb-shape">
           <span class="hlb-num" id="headerLevelNum">۱</span>
-          <span class="hlb-star">★</span>
+          <span class="hlb-star"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></span>
         </div>
         <div class="hlb-xp-track"><div class="hlb-xp-fill" id="headerXpFill"></div></div>
       </div>
     </div>
     <div class="app-header-right">
       <div class="plan-badge is-free" id="planBadge" title="نوع اشتراک">
-        <span class="plan-badge-icon" id="planBadgeIcon">🆓</span><span id="planBadgeText">پلن رایگان</span>
+        <span class="plan-badge-icon" id="planBadgeIcon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg></span><span id="planBadgeText">پلن رایگان</span>
       </div>
       <div class="header-bell-btn" id="notifBellBtn" title="اعلان‌ها">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15.2V11a6 6 0 1 0-12 0v4.2c0 .5-.2 1-.5 1.4L4 18h16l-1.5-1.4c-.3-.4-.5-.9-.5-1.4z"/><path d="M10 21a2.2 2.2 0 0 0 4 0"/></svg>
@@ -5360,10 +5489,11 @@ overflow:hidden;
   </div>
 
   <div class="tabbar" id="tabbar">
-    <button class="tab-btn active" data-tab="today"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3.5"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/><path d="M8.5 14.2l2 2 4.5-5"/></svg></span>امروز<span class="tab-count-badge" id="tabBadgeToday" style="display:none;"></span></button>
+    <button class="tab-btn active" data-tab="today"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3.5"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/><path d="M8.5 14.2l2 2 4.5-5"/></svg></span>برنامه<span class="tab-count-badge" id="tabBadgeToday" style="display:none;"></span></button>
     <button class="tab-btn" data-tab="workout"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.8 9.3v6.4M17.2 9.3v6.4"/><rect x="3.3" y="8" width="3.2" height="8.8" rx="1.4"/><rect x="17.5" y="8" width="3.2" height="8.8" rx="1.4"/><path d="M9.2 12.5h6.6"/></svg></span>تمرین</button>
     <button class="tab-btn" data-tab="meditation"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15c0 3 2.8 5 6 5s6-2 6-5c-1.8 1-3.8 1.5-6 1.5S7.8 16 6 15z"/><path d="M12 16.5V9"/><path d="M12 16.5c-1.6-2-2-4.5-1.3-7.3"/><path d="M12 16.5c1.6-2 2-4.5 1.3-7.3"/><path d="M7.8 12.8C6 12.1 4.8 10.6 4.3 8.6"/><path d="M16.2 12.8c1.8-.7 3-2.2 3.5-4.2"/></svg></span>مدیتیشن</button>
     <button class="tab-btn" data-tab="speech"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="11" rx="3"/><path d="M9 18.5l2.2-3M8 8.5v4M12 7.5v6M16 8.5v4"/></svg></span>فن بیان</button>
+    <button class="tab-btn" data-tab="brain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.6c-1.8 0-3.1 1.3-3.1 2.9-1.4.4-2.4 1.7-2.4 3.2 0 .9.4 1.7 1 2.3-.5.6-.8 1.4-.8 2.2 0 1.7 1.3 3 2.8 3.2.2 1.5 1.5 2.7 3.1 2.7 1.1 0 2.1-.6 2.6-1.5"/><path d="M15 4.6c1.8 0 3.1 1.3 3.1 2.9 1.4.4 2.4 1.7 2.4 3.2 0 .9-.4 1.7-1 2.3.5.6.8 1.4.8 2.2 0 1.7-1.3 3-2.8 3.2-.2 1.5-1.5 2.7-3.1 2.7-1.1 0-2.1-.6-2.6-1.5"/><path d="M12 6.2v12.6"/><path d="M9.3 9.6c.9.5 1.8.5 2.7 0M9.3 13.8c.9.5 1.8.5 2.7 0M14.7 9.6c-.9.5-1.8.5-2.7 0M14.7 13.8c-.9.5-1.8.5-2.7 0"/></svg></span>تقویت هوش</button>
     <button class="tab-btn tab-btn-highlight" data-tab="ai"><span class="ic"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span>مشاور شخصی</button>
     <div class="tabbar-divider" aria-hidden="true"></div>
     <button class="tab-btn" data-tab="library"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.8c-1.9-1.5-4.2-2.1-6.8-2.1-.4 0-.9.03-1.3.1v11.8c.4-.06.9-.1 1.3-.1 2.6 0 4.9.6 6.8 2.1 1.9-1.5 4.2-2.1 6.8-2.1.4 0 .9.04 1.3.1V4.8c-.4-.07-.9-.1-1.3-.1-2.6 0-4.9.6-6.8 2.1z"/><path d="M12 6.8v11.8"/></svg></span>کتابخانه</button>
@@ -5381,7 +5511,7 @@ overflow:hidden;
   <!-- ===================== TAB: TODAY ===================== -->
   <div class="tab-panel active" id="tab-today">
     <div class="risk-nudge-banner" id="riskNudgeBanner" style="display:none;">
-      <span class="risk-nudge-icon">🌱</span>
+      <span class="risk-nudge-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8"/><path d="M12 13c0-4-3-6-7-6 0 4 3 6 7 6z"/><path d="M12 11c0-3.4 2.5-5.2 5.8-5.2 0 3.4-2.5 5.2-5.8 5.2z"/></svg></span>
       <div class="risk-nudge-text" id="riskNudgeText"></div>
       <button type="button" class="risk-nudge-btn" id="riskNudgeBtn">شروع کوچیک</button>
       <button type="button" class="risk-nudge-close" id="riskNudgeCloseBtn" aria-label="بستن">×</button>
@@ -5404,7 +5534,7 @@ overflow:hidden;
 
     <div class="sub-panel" data-sub="overview">
       <div id="personalizeHintBanner2" style="display:none;background:linear-gradient(90deg,rgba(255,184,107,.16),rgba(255,184,107,.06));border:1px solid rgba(255,184,107,.35);border-radius:14px;padding:12px 14px;margin-bottom:14px;align-items:center;gap:10px;">
-        <span style="font-size:20px;flex-shrink:0;">🎯</span>
+        <span style="font-size:20px;flex-shrink:0;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg></span>
         <div style="flex:1;font-size:11.5px;color:var(--text);line-height:1.8;">برای گرفتن برنامه، اول باید آنبوردینگ رو کامل کنی. از منو، بخش «شخصی‌سازی برنامه» در دسترسته.</div>
         <button type="button" id="personalizeHintBtn2" style="flex-shrink:0;background:var(--accent);color:var(--accent-text);border:none;border-radius:10px;padding:8px 12px;font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;">تکمیل کن</button>
       </div>
@@ -5465,16 +5595,15 @@ overflow:hidden;
         <div id="specialDayCard"></div>
       </div>
 
-      <div class="section" id="lessonSection">
-        <div class="section-head">📔 درس امروز</div>
-        <div style="padding:0 14px 8px;font-size:11.5px;color:var(--muted);line-height:1.8;">امروز چه نکته‌ای دستگیرت شد؟ چیزی که تازه فهمیدی رو اینجا بنویس — هر هفته «مشاور شخصی» جمع‌بندیش می‌کنه و بهت می‌گه با فهمیدن این چیزها چه تغییری کردی.</div>
-        <div class="note-wrap"><textarea id="lessonArea" placeholder="مثلاً: فهمیدم وقتی خسته‌م وسوسه بیشتر سراغم میاد..." style="min-height:56px"></textarea></div>
+      <div class="section" id="noteSection">
+        <div class="section-head">📝 یادداشت امروز</div>
+        <div class="note-wrap"><textarea id="noteArea" placeholder="چه احساسی داشتم؟ چی کمک کرد؟"></textarea></div>
       </div>
     </div>
 
     <div class="sub-panel active" data-sub="program">
       <div id="personalizeHintBanner" style="display:none;background:linear-gradient(90deg,rgba(255,184,107,.16),rgba(255,184,107,.06));border:1px solid rgba(255,184,107,.35);border-radius:14px;padding:12px 14px;margin-bottom:14px;align-items:center;gap:10px;">
-        <span style="font-size:20px;flex-shrink:0;">🎯</span>
+        <span style="font-size:20px;flex-shrink:0;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg></span>
         <div style="flex:1;font-size:11.5px;color:var(--text);line-height:1.8;">برای گرفتن برنامه، اول باید آنبوردینگ رو کامل کنی. از منو، بخش «شخصی‌سازی برنامه» در دسترسته.</div>
         <button type="button" id="personalizeHintBtn" style="flex-shrink:0;background:var(--accent);color:var(--accent-text);border:none;border-radius:10px;padding:8px 12px;font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;">تکمیل کن</button>
       </div>
@@ -5503,9 +5632,10 @@ overflow:hidden;
         <div class="phone-status" id="phoneStatus"></div>
       </div>
 
-      <div class="section">
-        <div class="section-head">📝 یادداشت امروز</div>
-        <div class="note-wrap"><textarea id="noteArea" placeholder="چه احساسی داشتم؟ چی کمک کرد؟"></textarea></div>
+      <div class="section" id="lessonSection">
+        <div class="section-head">📔 درس امروز</div>
+        <div style="padding:0 14px 8px;font-size:11.5px;color:var(--muted);line-height:1.8;">امروز چه نکته‌ای دستگیرت شد؟ چیزی که تازه فهمیدی رو اینجا بنویس — هر هفته «مشاور شخصی» جمع‌بندیش می‌کنه و بهت می‌گه با فهمیدن این چیزها چه تغییری کردی.</div>
+        <div class="note-wrap"><textarea id="lessonArea" placeholder="مثلاً: فهمیدم وقتی خسته‌م وسوسه بیشتر سراغم میاد..." style="min-height:56px"></textarea></div>
       </div>
     </div>
 
@@ -5549,7 +5679,7 @@ overflow:hidden;
         <div class="section-head">🗒️ کارهای در انتظار</div>
         <div id="customTaskList"></div>
         <div class="sub-panel-empty" id="customTaskEmpty" style="display:none;padding:26px 14px;">
-          <span class="spe-ic">🗒️</span>هنوز کاری اضافه نکردی
+          <span class="spe-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5" width="13" height="16" rx="2.3"/><rect x="9" y="3" width="6" height="3.4" rx="1.2"/><path d="M8.5 11.5h7M8.5 15h7M8.5 18h4.5"/></svg></span>هنوز کاری اضافه نکردی
         </div>
       </div>
 
@@ -5584,7 +5714,7 @@ overflow:hidden;
         </div>
         <div class="custom-list" id="tmrwDoList"></div>
         <div class="sub-panel-empty" id="tmrwDoEmpty" style="display:none;padding:18px 14px;">
-          <span class="spe-ic">📝</span>چیزی برای فردا اضافه نکردی
+          <span class="spe-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 4.5l4 4-11 11H4.5v-4z"/><path d="M13.5 6.5l4 4"/></svg></span>چیزی برای فردا اضافه نکردی
         </div>
       </div>
 
@@ -5597,7 +5727,7 @@ overflow:hidden;
         </div>
         <div class="custom-list" id="tmrwAvoidList"></div>
         <div class="sub-panel-empty" id="tmrwAvoidEmpty" style="display:none;padding:18px 14px;">
-          <span class="spe-ic">🚫</span>چیزی برای پرهیز فردا اضافه نکردی
+          <span class="spe-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5h8L20.5 8v8L16 20.5H8L3.5 16V8z"/><path d="M8 8l8 8"/></svg></span>چیزی برای پرهیز فردا اضافه نکردی
         </div>
       </div>
     </div>
@@ -5612,6 +5742,8 @@ overflow:hidden;
         <div class="coach-msg" id="coachMsgWorkout">بدنتم بخشی از همین مسیره.</div>
       </div>
     </div>
+
+    <div id="narrationWorkoutSuggestSlot"></div>
 
     <div class="section onboard-card" id="woOnboard">
       <div class="onboard-title">بیا برنامه‌ی تمرینیت رو با هم بسازیم 💪</div>
@@ -5781,7 +5913,7 @@ overflow:hidden;
       </div>
 
       <div class="focus-tip-card">
-        <span class="ftc-ic">💡</span>
+        <span class="ftc-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5h6"/><path d="M9.5 20h5"/><path d="M12 3.5a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3.5z"/></svg></span>
         <div class="ftc-text" id="focusTipCard"></div>
       </div>
 
@@ -5791,15 +5923,15 @@ overflow:hidden;
 
     <div class="focus-quality-modal" id="focusQualityModal">
       <div class="focus-quality-card">
-        <div class="fq-icon" id="fqIcon">🎯</div>
+        <div class="fq-icon" id="fqIcon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg></div>
         <div class="fq-title">این جلسه چطور بود؟</div>
         <div class="fq-sub">کیفیت این جلسه رو مشخص کن تا تو پیشرفت و پروفایلت ثبت بشه</div>
         <div class="fq-stars" id="fqStars">
-          <button type="button" class="fq-star" data-q="1">⭐</button>
-          <button type="button" class="fq-star" data-q="2">⭐</button>
-          <button type="button" class="fq-star" data-q="3">⭐</button>
-          <button type="button" class="fq-star" data-q="4">⭐</button>
-          <button type="button" class="fq-star" data-q="5">⭐</button>
+          <button type="button" class="fq-star" data-q="1"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+          <button type="button" class="fq-star" data-q="2"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+          <button type="button" class="fq-star" data-q="3"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+          <button type="button" class="fq-star" data-q="4"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+          <button type="button" class="fq-star" data-q="5"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
         </div>
         <button type="button" class="fq-skip-btn" id="fqSkipBtn">رد کردن</button>
       </div>
@@ -6025,7 +6157,7 @@ overflow:hidden;
 
     <div class="lib-lesson-overlay" id="libLessonOverlay">
       <div class="lib-lesson-card">
-        <button class="lib-lesson-close" id="libLessonCloseBtn">✕</button>
+        <button class="lib-lesson-close" id="libLessonCloseBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         <div class="lib-lesson-course-title" id="libLessonCourseTitle"></div>
         <div class="lib-lesson-dots" id="libLessonDots"></div>
         <div class="lib-lesson-emoji" id="libLessonEmoji"></div>
@@ -6040,7 +6172,7 @@ overflow:hidden;
 
     <div class="sub-panel" data-sub="audio">
       <div class="sub-panel-empty">
-        <span class="spe-ic">🎧</span>
+        <span class="spe-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 13.8v-2.3a7.5 7.5 0 0 1 15 0v2.3"/><rect x="3.3" y="13.3" width="4" height="6.2" rx="1.6"/><rect x="16.7" y="13.3" width="4" height="6.2" rx="1.6"/></svg></span>
         به‌زودی، کتاب‌های صوتی اینجا اضافه می‌شن.
       </div>
     </div>
@@ -6058,7 +6190,7 @@ overflow:hidden;
       </div>
       <div id="researchResultsWrap">
         <div class="sub-panel-empty">
-          <span class="spe-ic">🔬</span>
+          <span class="spe-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v5.5L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 8.5V3"/><path d="M7.5 14.5h9"/></svg></span>
           یه موضوع رو جستجو کن تا مقاله‌های علمی مرتبطش رو با خلاصه‌ی فارسی ببینی.
         </div>
       </div>
@@ -6171,7 +6303,7 @@ overflow:hidden;
       </div>
 
       <div class="section med-stage">
-        <div class="med-circle" id="gratCircle"><span id="gratCircleText">🙏</span></div>
+        <div class="med-circle" id="gratCircle"><span id="gratCircleText"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.6-9.3-9A5 5 0 0 1 12 6a5 5 0 0 1 9.3 5c-2.3 4.4-9.3 9-9.3 9z"/></svg></span></div>
         <div class="med-timer" id="gratTimer">۱۰:۰۰</div>
         <div class="med-guide-text" id="gratPromptText"></div>
         <div class="med-btn-row">
@@ -6201,7 +6333,7 @@ overflow:hidden;
         <div class="med-timer" id="voidTimer">۰۵:۰۰</div>
         <div class="void-reminder-wrap">
           <div class="void-reminder" id="voidReminder"></div>
-          <div class="void-toss" id="voidToss">🗑️</div>
+          <div class="void-toss" id="voidToss"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7.5h14"/><path d="M9.5 7.5V5.3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1V7.5"/><path d="M7 7.5l.8 11.2a1.5 1.5 0 0 0 1.5 1.3h5.4a1.5 1.5 0 0 0 1.5-1.3l.8-11.2"/><path d="M10.3 11v6M13.7 11v6"/></svg></div>
         </div>
         <div class="med-btn-row">
           <button class="analyze-btn" id="voidStartBtn" style="width:auto;padding:12px 30px;margin:0;">▶️ شروع</button>
@@ -6222,6 +6354,8 @@ overflow:hidden;
       </div>
     </div>
 
+    <div id="narrationSpeechSuggestSlot"></div>
+
     <div class="section">
       <div class="section-head">🃏 شافل کارت احساسات</div>
       <div class="med-intro">کارت رو شافل کن؛ جمله‌ای که نشون داده می‌شه رو دقیقاً با همون لحن و حس بگو.</div>
@@ -6229,7 +6363,7 @@ overflow:hidden;
         <div class="shuffle-card" id="emotionCard">
           <div class="shuffle-card-inner" id="emotionCardInner">
             <div class="shuffle-card-face shuffle-card-front">
-              <div>🃏</div>
+              <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.3"/><path d="M12 8l1.8 3.6 4 .5-3 2.8.7 3.9L12 17l-3.5 1.8.7-3.9-3-2.8 4-.5z"/></svg></div>
               <div class="shuffle-card-hint">بزن روی شافل کن</div>
             </div>
             <div class="shuffle-card-face shuffle-card-back">
@@ -6274,7 +6408,7 @@ overflow:hidden;
         <button class="analyze-btn" id="storyStartBtn" style="margin:0;flex:1;display:none;background:var(--good);">▶️ شروع داستان</button>
       </div>
       <div class="premium-lock-overlay" data-premium-section-lock="1">
-        <div class="premium-lock-icon">🔒</div>
+        <div class="premium-lock-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg></div>
         <div class="premium-lock-text">این تمرین مخصوص کاربرای پرمیومه</div>
         <button type="button" class="premium-lock-btn">🔓 باز کردن با پرمیوم</button>
       </div>
@@ -6292,7 +6426,7 @@ overflow:hidden;
         <button class="analyze-btn" id="warmupNextBtn" style="margin:0;flex:1;">بعدی ▶</button>
       </div>
       <div class="premium-lock-overlay" data-premium-section-lock="1">
-        <div class="premium-lock-icon">🔒</div>
+        <div class="premium-lock-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg></div>
         <div class="premium-lock-text">این تمرین مخصوص کاربرای پرمیومه</div>
         <button type="button" class="premium-lock-btn">🔓 باز کردن با پرمیوم</button>
       </div>
@@ -6304,14 +6438,14 @@ overflow:hidden;
 
       <div id="wtWrap">
         <div class="wt-idle" id="wtIdle">
-          <div class="wt-idle-emoji">🌱</div>
+          <div class="wt-idle-emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8"/><path d="M12 13c0-4-3-6-7-6 0 4 3 6 7 6z"/><path d="M12 11c0-3.4 2.5-5.2 5.8-5.2 0 3.4-2.5 5.2-5.8 5.2z"/></svg></div>
           <div class="wt-idle-text">با یه کلمه شروع کن و بذار درخت کلمه‌هات جوونه بزنه</div>
         </div>
 
         <div class="wt-active" id="wtActive" style="display:none;">
           <div class="wt-progress-row">
             <div class="wt-progress-label" id="wtProgressLabel">دور ۱ از ۳</div>
-            <button type="button" class="wt-reset-btn" id="wtResetBtn" title="از اول شروع کن">🔄</button>
+            <button type="button" class="wt-reset-btn" id="wtResetBtn" title="از اول شروع کن"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 0 1 12.6-5.5M19.5 12a7.5 7.5 0 0 1-12.6 5.5"/><path d="M17.6 3.6v3.4h-3.4M6.4 20.4v-3.4h3.4"/></svg></button>
           </div>
           <div class="wt-progress-track"><div class="wt-progress-fill" id="wtProgressFill"></div></div>
 
@@ -6328,7 +6462,7 @@ overflow:hidden;
         </div>
 
         <div class="wt-done" id="wtDone" style="display:none;">
-          <div class="wt-done-emoji">🏆</div>
+          <div class="wt-done-emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5h10v4.3a5 5 0 0 1-10 0V4.5z"/><path d="M7 6H4.5v1.8A3 3 0 0 0 7 10.7M17 6h2.5v1.8A3 3 0 0 1 17 10.7"/><path d="M12 13.8V17M9 20.5h6M9.5 17h5l.6 3.5h-6.2z"/></svg></div>
           <div class="wt-done-title">آفرین! درخت ۴۰ کلمه‌ای‌تو کامل کردی 🌳</div>
           <div class="wt-tree-view" id="wtTreeView"></div>
         </div>
@@ -6336,16 +6470,143 @@ overflow:hidden;
 
       <button class="analyze-btn" id="wtStartBtn" style="margin:4px 14px 14px;">🎲 شروع بازی</button>
       <div class="premium-lock-overlay" data-premium-section-lock="1">
-        <div class="premium-lock-icon">🔒</div>
+        <div class="premium-lock-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg></div>
         <div class="premium-lock-text">این تمرین مخصوص کاربرای پرمیومه</div>
         <button type="button" class="premium-lock-btn">🔓 باز کردن با پرمیوم</button>
       </div>
     </div>
   </div>
 
+  <!-- ===================== TAB: BRAIN / تقویت هوش ===================== -->
+  <div class="tab-panel" id="tab-brain">
+    <div class="coach-card" id="coachCardBrain">
+      <div class="coach-avatar" id="coachAvatarBrain"></div>
+      <div class="coach-bubble">
+        <div class="coach-name">Dream Coach</div>
+        <div class="coach-msg" id="coachMsgBrain">مغزت هم مثل عضله‌ست؛ هرچی بیشتر تمرین بدیش، سریع‌تر کار می‌کنه.</div>
+      </div>
+    </div>
+
+    <div class="section" id="brainExMath">
+      <div class="section-head">🧮 محاسبه‌ی سریع</div>
+      <div class="med-intro">تو ۴۵ ثانیه هرچقدر می‌تونی سریع و درست جواب بده. نوع سوال هر بار عوض می‌شه: جمع، تفریق، ضرب و مقایسه‌ی اعداد؛ زود تکراری نمی‌شه.</div>
+      <div class="seg" id="brainMathLevelSeg" style="margin:0 14px 14px;">
+        <button type="button" data-level="easy" class="active">ساده</button>
+        <button type="button" data-level="medium">متوسط</button>
+        <button type="button" data-level="hard">سخت</button>
+      </div>
+
+      <div class="brain-round-stats" id="brainMathStatsRow" style="display:none;">
+        <div class="brain-stat"><span id="brainMathScore">۰</span><small>درست</small></div>
+        <div class="brain-stat"><span id="brainMathStreak">۰</span><small>پشت‌سرهم</small></div>
+        <div class="brain-stat"><span id="brainMathBest">۰</span><small>رکورد</small></div>
+      </div>
+
+      <div class="impromptu-timerwrap" id="brainMathTimerWrap" style="display:none">
+        <div class="impromptu-bar-track"><div class="impromptu-bar-fill" id="brainMathBarFill"></div></div>
+        <div class="impromptu-timer" id="brainMathTimer">۰۰:۴۵</div>
+      </div>
+
+      <div class="brain-question-card" id="brainMathQCard" style="display:none;">
+        <div class="brain-question-text" id="brainMathQText">—</div>
+      </div>
+      <div class="brain-choices" id="brainMathChoices"></div>
+
+      <div class="brain-result" id="brainMathResult" style="display:none;"></div>
+
+      <button type="button" class="analyze-btn" id="brainMathStartBtn">▶️ شروع راند ۴۵ ثانیه‌ای</button>
+    </div>
+
+    <div class="section" id="brainExStroop">
+      <div class="section-head">🎨 تست استروپ</div>
+      <div class="med-intro">اسمِ یه رنگ نوشته می‌شه، ولی با یه رنگِ دیگه رنگ‌آمیزی شده. گاهی باید رنگِ واقعی رو بزنی، گاهی باید خودِ کلمه رو بزنی — هر بار راهنما بالای صفحه می‌گه کدومه، پس هوشیار باش! جای دکمه‌ها هم هر بار به‌هم می‌ریزه که حفظ نشه.</div>
+      <div class="seg" id="brainStroopLevelSeg" style="margin:0 14px 14px;">
+        <button type="button" data-level="easy" class="active">ساده (۴ رنگ)</button>
+        <button type="button" data-level="medium">متوسط (۵ رنگ)</button>
+        <button type="button" data-level="hard">سخت (۶ رنگ)</button>
+      </div>
+
+      <div class="brain-round-stats" id="brainStroopStatsRow" style="display:none;">
+        <div class="brain-stat"><span id="brainStroopScore">۰</span><small>درست</small></div>
+        <div class="brain-stat"><span id="brainStroopStreak">۰</span><small>پشت‌سرهم</small></div>
+        <div class="brain-stat"><span id="brainStroopBest">۰</span><small>رکورد</small></div>
+      </div>
+
+      <div class="impromptu-timerwrap" id="brainStroopTimerWrap" style="display:none">
+        <div class="impromptu-bar-track"><div class="impromptu-bar-fill" id="brainStroopBarFill"></div></div>
+        <div class="impromptu-timer" id="brainStroopTimer">۰۰:۴۵</div>
+      </div>
+
+      <div class="brain-stroop-mode-label" id="brainStroopModeLabel" style="display:none;">—</div>
+      <div class="brain-stroop-word" id="brainStroopWord" style="display:none;">—</div>
+      <div class="brain-stroop-choices" id="brainStroopChoices"></div>
+
+      <div class="brain-result" id="brainStroopResult" style="display:none;"></div>
+
+      <button type="button" class="analyze-btn" id="brainStroopStartBtn">▶️ شروع راند</button>
+    </div>
+
+    <div class="section" id="brainExSeq">
+      <div class="section-head">🔴 توالی رنگی (حافظه‌ی کاری)</div>
+      <div class="med-intro">یه توالی از رنگ‌ها روشن می‌شه (با صدای مخصوص هر رنگ)؛ باید همون ترتیب رو با لمس دکمه‌ها تکرار کنی. هر بار درست بزنی، یه رنگ اضافه می‌شه و سخت‌تر می‌شه. گاهی هم باید توالی رو برعکس (از آخر به اول) تکرار کنی — حواست باشه!</div>
+      <div class="seg" id="brainSeqLevelSeg" style="margin:0 14px 14px;">
+        <button type="button" data-level="easy" class="active">ساده (۴ رنگ)</button>
+        <button type="button" data-level="medium">متوسط (۵ رنگ)</button>
+        <button type="button" data-level="hard">سخت (۶ رنگ)</button>
+      </div>
+
+      <div class="brain-round-stats" id="brainSeqStatsRow" style="display:none;">
+        <div class="brain-stat"><span id="brainSeqLevel">۰</span><small>مرحله</small></div>
+        <div class="brain-stat"><span id="brainSeqBest">۰</span><small>رکورد</small></div>
+      </div>
+
+      <div class="brain-seq-status" id="brainSeqStatus" style="display:none;">—</div>
+      <div class="brain-seq-pads" id="brainSeqPads"></div>
+
+      <div class="brain-result" id="brainSeqResult" style="display:none;"></div>
+
+      <button type="button" class="analyze-btn" id="brainSeqStartBtn">▶️ شروع بازی</button>
+    </div>
+
+    <div class="section" id="brainExNback">
+      <div class="section-head">🧩 N-back (حافظه‌ی کاری)</div>
+      <div class="med-intro">یه حرف نشون داده می‌شه. باید بگی همون حرفیه که N تا قبل از این اومده بود یا نه. مراقب حرف‌های شبیه‌سازِ گول‌زننده باش (نزدیک N ولی نه دقیقاً)! هر حرف یه مهلت کوتاه داره، پس تند تصمیم بگیر.</div>
+      <div class="seg" id="brainNbackLevelSeg" style="margin:0 14px 14px;">
+        <button type="button" data-level="1" class="active">۱-بک</button>
+        <button type="button" data-level="2">۲-بک</button>
+        <button type="button" data-level="3">۳-بک</button>
+      </div>
+
+      <div class="brain-round-stats" id="brainNbackStatsRow" style="display:none;">
+        <div class="brain-stat"><span id="brainNbackScore">۰</span><small>درست</small></div>
+        <div class="brain-stat"><span id="brainNbackStreak">۰</span><small>پشت‌سرهم</small></div>
+        <div class="brain-stat"><span id="brainNbackBest">۰</span><small>رکورد</small></div>
+      </div>
+
+      <div class="impromptu-timerwrap" id="brainNbackTimerWrap" style="display:none">
+        <div class="impromptu-bar-track"><div class="impromptu-bar-fill" id="brainNbackBarFill"></div></div>
+        <div class="impromptu-timer" id="brainNbackTimer">۰۰:۵۰</div>
+      </div>
+
+      <div class="brain-nback-hint" id="brainNbackHint">حرفِ الان با ۱ تا قبل یکیه؟</div>
+      <div class="brain-nback-item" id="brainNbackItem" style="display:none;">—</div>
+      <div class="brain-nback-pace-track" id="brainNbackPaceTrack" style="display:none;">
+        <div class="brain-nback-pace-fill" id="brainNbackPaceFill"></div>
+      </div>
+      <div class="brain-choices brain-choices-2" id="brainNbackChoices">
+        <button type="button" class="brain-choice-btn" id="brainNbackMatchBtn">🔁 تکراریه</button>
+        <button type="button" class="brain-choice-btn" id="brainNbackNoBtn">🆕 جدیده</button>
+      </div>
+
+      <div class="brain-result" id="brainNbackResult" style="display:none;"></div>
+
+      <button type="button" class="analyze-btn" id="brainNbackStartBtn">▶️ شروع راند</button>
+    </div>
+  </div>
+
   <!-- ===================== TAB: CHAT / ACCOUNT (ported) ===================== -->
   <div class="tab-panel" id="tab-chat">
-    <button class="settings-back-btn chat-back-fab" id="chatBackBtn" title="بازگشت" aria-label="بازگشت">→</button>
+    <button class="settings-back-btn chat-back-fab" id="chatBackBtn" title="بازگشت" aria-label="بازگشت"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5l6.5 7-6.5 7M3.5 12h15.5"/></svg></button>
 
     <div id="chatLoggedOutBox" class="chat-auth-perspective">
       <div class="section chat-auth-card">
@@ -6422,6 +6683,7 @@ overflow:hidden;
         </div>
         <div class="chat-pinned-banner" id="chatPinnedBanner"></div>
         <div class="chat-privacy-note">این چت عمومیه؛ هرچی بنویسی رو بقیه‌ی کاربرها هم می‌بینن. مراقب حریم خصوصی خودت باش.</div>
+        <div id="narrationChatSuggestSlot"></div>
         <div class="group-streak-banner" id="groupStreakBanner"></div>
         <div class="chat-report-mode-banner" id="chatReportModeBanner"></div>
         <div class="chat-mute-banner" id="chatMuteBanner"></div>
@@ -6433,7 +6695,7 @@ overflow:hidden;
           <div class="chat-messages" id="chatMessages"><div class="chat-empty-msg">در حال بارگذاری پیام‌ها...</div></div>
           <button type="button" class="chat-scroll-down-btn" id="chatScrollDownBtn" aria-label="رفتن به آخرین پیام" title="رفتن به آخرین پیام">
             <span class="csd-badge" id="chatScrollDownBadge"></span>
-            <span class="csd-arrow">↓</span>
+            <span class="csd-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg></span>
           </button>
         </div>
         <div id="publicChatCrisisSlot"></div>
@@ -6443,7 +6705,7 @@ overflow:hidden;
             <div class="crp-name" id="chatReplyPreviewName"></div>
             <div class="crp-text" id="chatReplyPreviewText"></div>
           </div>
-          <button type="button" class="crp-close" id="chatReplyPreviewClose" aria-label="لغو ریپلای">✕</button>
+          <button type="button" class="crp-close" id="chatReplyPreviewClose" aria-label="لغو ریپلای"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>
         <div class="chat-send-row" id="chatSendRowNormal">
           <button id="sendReportBtn" class="chat-report-btn" title="ارسال گزارش تسک‌های امروز"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5" width="13" height="16" rx="2.3"/><rect x="9" y="3" width="6" height="3.4" rx="1.2"/><path d="M8.5 11.5h7M8.5 15h7M8.5 18h4.5"/></svg></span></button>
@@ -6469,7 +6731,7 @@ overflow:hidden;
   <!-- ===================== چت عمومی: صفحه‌ی اعضا (شبیه تلگرام) ===================== -->
   <div class="chat-members-overlay" id="chatMembersOverlay">
     <div class="cm-ov-head">
-      <button class="cm-ov-back" id="chatMembersBackBtn" aria-label="بازگشت">→</button>
+      <button class="cm-ov-back" id="chatMembersBackBtn" aria-label="بازگشت"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5l6.5 7-6.5 7M3.5 12h15.5"/></svg></button>
       <div>
         <div class="cm-ov-title">اعضای چت عمومی</div>
         <div class="cm-ov-sub" id="cmOvSub"></div>
@@ -6481,7 +6743,7 @@ overflow:hidden;
   <!-- ===================== پنل اعلان‌ها: درخواست‌های هم‌مسیر + SOS فوری ===================== -->
   <div class="chat-members-overlay" id="notifPanelOverlay">
     <div class="cm-ov-head">
-      <button class="cm-ov-back" id="notifPanelBackBtn" aria-label="بازگشت">→</button>
+      <button class="cm-ov-back" id="notifPanelBackBtn" aria-label="بازگشت"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5l6.5 7-6.5 7M3.5 12h15.5"/></svg></button>
       <div>
         <div class="cm-ov-title">اعلان‌ها</div>
         <div class="cm-ov-sub" id="notifPanelSub"></div>
@@ -6493,7 +6755,7 @@ overflow:hidden;
   <!-- ===================== چت عمومی: انتخابگر گیف (Giphy) ===================== -->
   <div class="chat-members-overlay" id="gifPickerOverlay">
     <div class="cm-ov-head">
-      <button class="cm-ov-back" id="gifPickerBackBtn" aria-label="بازگشت">→</button>
+      <button class="cm-ov-back" id="gifPickerBackBtn" aria-label="بازگشت"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5l6.5 7-6.5 7M3.5 12h15.5"/></svg></button>
       <div>
         <div class="cm-ov-title">ارسال گیف</div>
         <div class="cm-ov-sub">جستجو در Giphy</div>
@@ -6519,7 +6781,7 @@ overflow:hidden;
     </div>
 
     <div class="invite-hero">
-      <div class="invite-hero-emoji">🎉</div>
+      <div class="invite-hero-emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18L16 8"/><path d="M6 18l3-9.5L18 12z"/><circle cx="18" cy="6" r="0.8" fill="currentColor" stroke="none"/><circle cx="20.5" cy="9" r="0.6" fill="currentColor" stroke="none"/><circle cx="15.5" cy="4" r="0.6" fill="currentColor" stroke="none"/></svg></div>
       <div class="invite-hero-title">دوستاتو بیار، تخفیف ببر!</div>
       <div class="invite-hero-sub">هرچی بیشتر دعوت کنی، تخفیف بزرگ‌تری رو نسخه‌ی پرمیوم می‌گیری — تا ۵۰٪ 🔥</div>
     </div>
@@ -6534,26 +6796,26 @@ overflow:hidden;
 
     <div class="invite-path" id="invitePath">
       <div class="invite-path-fill" id="invitePathFill"></div>
-      <div class="invite-path-runner" id="invitePathRunner">🚀</div>
+      <div class="invite-path-runner" id="invitePathRunner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c3 2 5 5.5 5 9.5 0 2-1 3.7-2.3 5L12 21l-2.7-3.5C8 16.2 7 14.5 7 12.5 7 8.5 9 5 12 3z"/><circle cx="12" cy="10.5" r="1.6"/><path d="M8 15.5l-2.5 1L6 13.5M16 15.5l2.5 1L18 13.5"/></svg></div>
 
       <div class="path-node" id="inviteStep1">
         <div class="path-node-badge" id="inviteCheck1">۱</div>
         <div class="path-node-card">
-          <div class="path-node-title">۱ نفر دعوت کن <span class="path-node-reward">🎯</span></div>
+          <div class="path-node-title">۱ نفر دعوت کن <span class="path-node-reward"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg></span></div>
           <div class="path-node-desc">۲۰٪ تخفیف فوری بگیر</div>
         </div>
       </div>
       <div class="path-node" id="inviteStep3">
         <div class="path-node-badge" id="inviteCheck3">۳</div>
         <div class="path-node-card">
-          <div class="path-node-title">۳ نفر دعوت کن <span class="path-node-reward">🔥</span></div>
+          <div class="path-node-title">۳ نفر دعوت کن <span class="path-node-reward"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5c.5 3-2.3 4-2.3 7a2.3 2.3 0 0 0 2.3 2.3 2 2 0 0 0 2-2.3c1.6 1.1 2.5 2.8 2.5 4.7a4.5 4.5 0 0 1-9 0c0-4 3.5-5.5 4.5-11.7z"/></svg></span></div>
           <div class="path-node-desc">تخفیف بره رو ۳۰٪</div>
         </div>
       </div>
       <div class="path-node" id="inviteStep5">
         <div class="path-node-badge" id="inviteCheck5">۵</div>
         <div class="path-node-card">
-          <div class="path-node-title">۵ نفر دعوت کن <span class="path-node-reward">🎰</span></div>
+          <div class="path-node-title">۵ نفر دعوت کن <span class="path-node-reward"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.3"/><path d="M9 9.3c0-1.3 1.3-2.1 3-2.1s3 .8 3 1.9c0 2.8-6 1.7-6 4.5 0 1.2 1.3 2 3 2s3-.8 3-2.1"/><path d="M12 5.5v13"/></svg></span></div>
           <div class="path-node-desc">جایزه‌ت رو بگیر: ۴۰٪ تا ۵۰٪</div>
         </div>
       </div>
@@ -6594,7 +6856,7 @@ overflow:hidden;
     </div>
 
     <div class="premium-loss-banner">
-      <span class="plb-emoji">⏳</span>
+      <span class="plb-emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h10M7 20.5h10"/><path d="M8 3.5v3c0 2 1.5 3.3 4 5.5 2.5-2.2 4-3.5 4-5.5v-3M8 20.5v-3c0-2 1.5-3.3 4-5.5 2.5 2.2 4 3.5 4 5.5v3"/></svg></span>
       <span>بدون خرید پرمیوم، این امکانات به‌هیچ‌وجه در دسترس نیستن:</span>
     </div>
 
@@ -6609,39 +6871,19 @@ overflow:hidden;
         </thead>
         <tbody>
           <tr>
-            <td class="pct-name">📚 کتابخونه‌ی عمیق و تب کتابخانه</td>
-            <td class="pct-no">❌</td>
-            <td class="pct-yes">✅</td>
-          </tr>
-          <tr>
             <td class="pct-name">🤝 هم‌مسیر</td>
             <td class="pct-no">❌</td>
             <td class="pct-yes">✅</td>
           </tr>
           <tr>
-            <td class="pct-name">⏰ یادآورها و برنامه‌ریزی فردا</td>
-            <td class="pct-no">❌</td>
-            <td class="pct-yes">✅</td>
-          </tr>
-          <tr>
-            <td class="pct-name">🎯 سیستم اهداف و روز خاص</td>
-            <td class="pct-no">❌</td>
-            <td class="pct-yes">✅</td>
-          </tr>
-          <tr>
-            <td class="pct-name">🎨 همه‌ی تم‌ها</td>
-            <td class="pct-no">فقط ۲ تم</td>
-            <td class="pct-yes">✅ همه</td>
+            <td class="pct-name">🌙 تحلیل شب، گفتگو با کوچ و گزارش‌ها</td>
+            <td class="pct-no">فقط یک‌بار</td>
+            <td class="pct-yes">✅ نامحدود</td>
           </tr>
           <tr>
             <td class="pct-name">📅 طول و شدت برنامه</td>
             <td class="pct-no">فقط ۶۰ روزه / سبک</td>
             <td class="pct-yes">✅ همه گزینه‌ها</td>
-          </tr>
-          <tr>
-            <td class="pct-name">🌙 تحلیل شب، گفتگو با کوچ و گزارش‌ها</td>
-            <td class="pct-no">فقط یک‌بار</td>
-            <td class="pct-yes">✅ نامحدود</td>
           </tr>
           <tr>
             <td class="pct-name">💬 پیام در چت عمومی</td>
@@ -6652,25 +6894,19 @@ overflow:hidden;
       </table>
     </div>
 
-    <div class="prem-perks-title">و بیشتر از این...</div>
-    <div class="prem-perks-grid">
-      <div class="prem-perk-pill"><span class="emoji">📣</span>گروه انجمن</div>
-      <div class="prem-perk-pill"><span class="emoji">🧘</span>مدیتیشن نعمت‌ها و اسکن بدن</div>
-      <div class="prem-perk-pill"><span class="emoji">📋</span>کپی متن پیام در چت</div>
-      <div class="prem-perk-pill"><span class="emoji">😀</span>ری‌اکشن روی پیام‌های چت</div>
-      <div class="prem-perk-pill"><span class="emoji">☁️</span>فضای ذخیره‌سازی ابری</div>
-      <div class="prem-perk-pill"><span class="emoji">🎨</span>شخصی‌سازی کامل</div>
-      <div class="prem-perk-pill"><span class="emoji">📑</span>گزارش‌های اختصاصی</div>
-      <div class="prem-perk-pill"><span class="emoji">📚</span>محتوای آموزشی ویژه</div>
-      <div class="prem-perk-pill"><span class="emoji">🤖</span>قابلیت‌های هوش مصنوعی</div>
-      <div class="prem-perk-pill"><span class="emoji">✨</span>امکانات انحصاری دیگه</div>
+    <div class="prem-benefit-list">
+      <div class="prem-benefit-item"><span class="emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 10.5l4-2.8 4.3 3.2"/><path d="M21.5 10.5l-4-2.8-4.3 3.2"/><path d="M10.8 10.9l-3.6 3.2a1.5 1.5 0 0 0 2 2.2l.6-.5"/><path d="M13.2 10.9l3.6 3.2a1.5 1.5 0 0 1-2 2.2l-.6-.5"/><path d="M9.6 15.4l1 .9a1.6 1.6 0 0 0 2.2 0"/></svg></span>با هم‌مسیر می‌تونی هرشب گزارش کارتو با بچه‌ها به اشتراک بذاری، ازشون بازخورد بگیری و تنها پیش نری.</div>
+      <div class="prem-benefit-item"><span class="emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4.5a7.5 7.5 0 1 0 5 13.1A8.5 8.5 0 0 1 15 4.5z"/><path d="M18.3 3.7l.4 1.3 1.3.4-1.3.4-.4 1.3-.4-1.3-1.3-.4 1.3-.4z"/></svg></span>هر شب می‌تونی با کوچ هوش مصنوعی حرف بزنی، بدون هیچ محدودیتی راهنمایی بگیری.</div>
+      <div class="prem-benefit-item"><span class="emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14.5" rx="2.3"/><path d="M4 10h16"/><path d="M8.3 3.5v3.4M15.7 3.5v3.4"/></svg></span>برنامه‌تو کاملاً مطابق زندگی و سطح خودت می‌چینی؛ نه محدود به ۶۰ روز، نه محدود به یه شدت خاص.</div>
+      <div class="prem-benefit-item"><span class="emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.8c-1.9-1.5-4.2-2.1-6.8-2.1-.4 0-.9.03-1.3.1v11.8c.4-.06.9-.1 1.3-.1 2.6 0 4.9.6 6.8 2.1 1.9-1.5 4.2-2.1 6.8-2.1.4 0 .9.04 1.3.1V4.8c-.4-.07-.9-.1-1.3-.1-2.6 0-4.9.6-6.8 2.1z"/><path d="M12 6.8v11.8"/></svg></span>به کل کتابخونه و محتوای آموزشی دسترسی داری تا هر وقت خواستی بیشتر یاد بگیری.</div>
+      <div class="prem-benefit-item"><span class="emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8h2a3.5 3.5 0 0 0 3.5-3.5c0-4.1-3.8-7.5-8.1-7.5z"/><circle cx="8" cy="10.5" r="1" fill="currentColor" stroke="none"/><circle cx="8.5" cy="14.5" r="1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="7.5" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1" fill="currentColor" stroke="none"/></svg></span>همه‌ی تم‌ها و شخصی‌سازی کامل مال خودته، همون‌جوری که دوست داری بچینیش.</div>
     </div>
 
     <!-- Real remaining-slots widget: numbers come from Supabase (premium_capacity table),
          never faked client-side. See loadLifetimeRemaining() / claimLifetimeSlotIfNeeded(). -->
     <div class="prem-scarcity-box" id="premScarcityBox" style="display:none;">
       <div class="prem-scarcity-top">
-        <span class="prem-scarcity-icon">🔥</span>
+        <span class="prem-scarcity-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5c.5 3-2.3 4-2.3 7a2.3 2.3 0 0 0 2.3 2.3 2 2 0 0 0 2-2.3c1.6 1.1 2.5 2.8 2.5 4.7a4.5 4.5 0 0 1-9 0c0-4 3.5-5.5 4.5-11.7z"/></svg></span>
         <span>فقط <span class="prem-scarcity-count" id="premScarcityCount">—</span> جا از ۵۰۰ نفر اول با همین قیمت باقی مونده</span>
       </div>
       <div class="prem-scarcity-bar"><div class="prem-scarcity-fill" id="premScarcityFill" style="width:0%"></div></div>
@@ -6705,89 +6941,103 @@ overflow:hidden;
   <div class="tab-panel" id="tab-ai">
     <div class="section-head" style="padding:2px 2px 10px;">💡 مشاور شخصی</div>
 
+    <div id="narrationAiSuggestSlot"></div>
+
     <div class="section" id="aiSuspendedBox" style="display:none;">
-      <div class="suspend-lock-icon">⛔</div>
+      <div class="suspend-lock-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.3"/><path d="M6.3 6.3l11.4 11.4"/></svg></div>
       <div class="section-head" style="text-align:center;justify-content:center;">دسترسی موقتاً بسته‌ست</div>
       <div style="padding:0 14px 16px;font-size:12.5px;color:var(--muted);line-height:1.95;text-align:center;" id="aiSuspendedText"></div>
     </div>
 
-    <div class="section" id="nightSection">
-      <div class="section-head">🌙 مرور شب</div>
-      <div class="meal-grid">
-        <div><label>صبحانه</label><textarea id="mealBreakfast" placeholder="چی خوردی؟"></textarea></div>
-        <div><label>ناهار</label><textarea id="mealLunch" placeholder="چی خوردی؟"></textarea></div>
-        <div><label>شام</label><textarea id="mealDinner" placeholder="چی خوردی؟"></textarea></div>
-        <div><label>متفرقه</label><textarea id="mealSnacks" placeholder="مثلاً چیپس، شکلات..."></textarea></div>
-      </div>
-      <div class="energy-row">
-        <span class="e-label">⚖️ وزن امروزت (kg) — اختیاری</span>
-        <input class="onboard-input" type="number" id="nightWeightInput" placeholder="مثلاً ۷۰" style="max-width:140px;">
-        <div class="hint" id="nightWeightNote" style="font-size:11px;color:var(--muted);margin-top:7px;line-height:1.7;"></div>
-      </div>
-      <div class="energy-row">
-        <span class="e-label">سطح انرژی امروزت (۱ تا ۵)</span>
-        <div class="onboard-slider-row"><input type="range" id="energyInput" min="1" max="5" value="3"><span class="onboard-slider-num" id="energyNum">۳</span></div>
-      </div>
-      <div class="energy-row">
-        <span class="e-label">علائم جسمی امروز، اگه بوده (اختیاری)</span>
-        <div class="symptom-grid" id="symptomGrid">
-          <button type="button" class="symptom-chip" data-val="dizzy">سرگیجه</button>
-          <button type="button" class="symptom-chip" data-val="noappetite">بی‌اشتهایی</button>
-          <button type="button" class="symptom-chip" data-val="headache">سردرد شدید</button>
-          <button type="button" class="symptom-chip" data-val="heartrace">تپش قلب</button>
-          <button type="button" class="symptom-chip" data-val="lowsleep">بی‌خوابی شدید</button>
+    <div class="subseg">
+      <button data-sub="daily" class="active"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4.5a7.5 7.5 0 1 0 5 13.1A8.5 8.5 0 0 1 15 4.5z"/><path d="M18.3 3.7l.4 1.3 1.3.4-1.3.4-.4 1.3-.4-1.3-1.3-.4 1.3-.4z"/></svg></span>هرشب</button>
+      <button data-sub="reports"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M11 20V6M17 20v-8"/><path d="M3.5 20h17"/></svg></span>گزارش‌ها</button>
+      <button data-sub="more"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-11z"/><path d="M4.5 7l7.5 6 7.5-6"/></svg></span>بیشتر</button>
+    </div>
+
+    <div class="sub-panel active" data-sub="daily">
+      <div class="section" id="nightSection">
+        <div class="section-head">🌙 مرور شب</div>
+        <div class="meal-grid">
+          <div><label>صبحانه</label><textarea id="mealBreakfast" placeholder="چی خوردی؟"></textarea></div>
+          <div><label>ناهار</label><textarea id="mealLunch" placeholder="چی خوردی؟"></textarea></div>
+          <div><label>شام</label><textarea id="mealDinner" placeholder="چی خوردی؟"></textarea></div>
+          <div><label>متفرقه</label><textarea id="mealSnacks" placeholder="مثلاً چیپس، شکلات..."></textarea></div>
         </div>
+        <div class="energy-row">
+          <span class="e-label">⚖️ وزن امروزت (kg) — اختیاری</span>
+          <input class="onboard-input" type="number" id="nightWeightInput" placeholder="مثلاً ۷۰" style="max-width:140px;">
+          <div class="hint" id="nightWeightNote" style="font-size:11px;color:var(--muted);margin-top:7px;line-height:1.7;"></div>
+        </div>
+        <div class="energy-row">
+          <span class="e-label">سطح انرژی امروزت (۱ تا ۵)</span>
+          <div class="onboard-slider-row"><input type="range" id="energyInput" min="1" max="5" value="3"><span class="onboard-slider-num" id="energyNum">۳</span></div>
+        </div>
+        <div class="energy-row">
+          <span class="e-label">علائم جسمی امروز، اگه بوده (اختیاری)</span>
+          <div class="symptom-grid" id="symptomGrid">
+            <button type="button" class="symptom-chip" data-val="dizzy">سرگیجه</button>
+            <button type="button" class="symptom-chip" data-val="noappetite">بی‌اشتهایی</button>
+            <button type="button" class="symptom-chip" data-val="headache">سردرد شدید</button>
+            <button type="button" class="symptom-chip" data-val="heartrace">تپش قلب</button>
+            <button type="button" class="symptom-chip" data-val="lowsleep">بی‌خوابی شدید</button>
+          </div>
+        </div>
+        <div class="wellness-banner" id="wellnessBanner" style="display:none"></div>
+        <button class="analyze-btn" id="nightReviewBtn">✅ تایید و تحلیل امشب</button>
+        <div class="result-card" id="nightResult" style="display:none"></div>
       </div>
-      <div class="wellness-banner" id="wellnessBanner" style="display:none"></div>
-      <button class="analyze-btn" id="nightReviewBtn">✅ تایید و تحلیل امشب</button>
-      <div class="result-card" id="nightResult" style="display:none"></div>
-    </div>
 
-    <div class="section" id="lifeJournalSection">
-      <div class="section-head">📓 دفترچه هوشمند زندگی</div>
-      <div class="lj-desc">هر شب فقط به این ۶ سؤال کوتاه جواب بده. AI جواب‌هاتو ذخیره می‌کنه و کم‌کم الگوهای واقعی زندگیتو کشف می‌کنه — بعد از ۹۰ شب می‌تونی بپرسی بزرگ‌ترین عامل موفقیتت چیه، چرا لغزش می‌کنی، کدوم آدم‌ها روت تأثیر مثبت دارن و خیلی چیزای دیگه.</div>
-      <div class="lj-progress-wrap">
-        <div class="lj-progress-label"><span id="ljProgressLabel">۰ از ۹۰ شب ثبت شده</span></div>
-        <div class="lj-progress-bar"><div class="lj-progress-fill" id="ljProgressFill"></div></div>
+      <div class="section" id="lifeJournalSection">
+        <div class="section-head">📓 دفترچه هوشمند زندگی</div>
+        <div class="lj-desc">هر شب فقط به این ۶ سؤال کوتاه جواب بده. AI جواب‌هاتو ذخیره می‌کنه و کم‌کم الگوهای واقعی زندگیتو کشف می‌کنه — بعد از ۹۰ شب می‌تونی بپرسی بزرگ‌ترین عامل موفقیتت چیه، چرا لغزش می‌کنی، کدوم آدم‌ها روت تأثیر مثبت دارن و خیلی چیزای دیگه.</div>
+        <div class="lj-progress-wrap">
+          <div class="lj-progress-label"><span id="ljProgressLabel">۰ از ۹۰ شب ثبت شده</span></div>
+          <div class="lj-progress-bar"><div class="lj-progress-fill" id="ljProgressFill"></div></div>
+        </div>
+        <div class="lj-grid">
+          <div><label>۱. بزرگ‌ترین موفقیت یا نکته‌ی خوب امروزت چی بود؟</label><textarea id="ljQ1" placeholder="مثلاً..."></textarea></div>
+          <div><label>۲. اگه امروز جایی لغزیدی یا کم آوردی، فکر می‌کنی دلیلش چی بود؟</label><textarea id="ljQ2" placeholder="اگه بوده..."></textarea></div>
+          <div><label>۳. امروز تو چه ساعت‌هایی بیشترین تمرکز و بازده رو داشتی؟</label><textarea id="ljQ3" placeholder="مثلاً صبح زود..."></textarea></div>
+          <div><label>۴. کدوم آدم‌ها امروز بیشترین تأثیر مثبت رو روی حال یا انگیزه‌ات گذاشتن؟</label><textarea id="ljQ4" placeholder="اگه بوده..."></textarea></div>
+          <div><label>۵. چیزی خوردی که حس کردی بعدش انرژیت افت کرد؟</label><textarea id="ljQ5" placeholder="اگه بوده..."></textarea></div>
+          <div><label>۶. امروز خلق‌وخوت چطور بود و چه عادت یا اتفاقی بیشتر روش اثر گذاشت؟</label><textarea id="ljQ6" placeholder="مثلاً..."></textarea></div>
+        </div>
+        <button class="analyze-btn" id="ljSaveBtn">📓 ثبت پاسخ‌های امشب</button>
+        <div class="lj-lock-note" id="ljLockNote" style="display:none;"></div>
+        <button class="analyze-btn" id="ljInsightsBtn">🔒 کشف الگوهای زندگیت</button>
+        <div class="result-card" id="ljResult" style="display:none"></div>
       </div>
-      <div class="lj-grid">
-        <div><label>۱. بزرگ‌ترین موفقیت یا نکته‌ی خوب امروزت چی بود؟</label><textarea id="ljQ1" placeholder="مثلاً..."></textarea></div>
-        <div><label>۲. اگه امروز جایی لغزیدی یا کم آوردی، فکر می‌کنی دلیلش چی بود؟</label><textarea id="ljQ2" placeholder="اگه بوده..."></textarea></div>
-        <div><label>۳. امروز تو چه ساعت‌هایی بیشترین تمرکز و بازده رو داشتی؟</label><textarea id="ljQ3" placeholder="مثلاً صبح زود..."></textarea></div>
-        <div><label>۴. کدوم آدم‌ها امروز بیشترین تأثیر مثبت رو روی حال یا انگیزه‌ات گذاشتن؟</label><textarea id="ljQ4" placeholder="اگه بوده..."></textarea></div>
-        <div><label>۵. چیزی خوردی که حس کردی بعدش انرژیت افت کرد؟</label><textarea id="ljQ5" placeholder="اگه بوده..."></textarea></div>
-        <div><label>۶. امروز خلق‌وخوت چطور بود و چه عادت یا اتفاقی بیشتر روش اثر گذاشت؟</label><textarea id="ljQ6" placeholder="مثلاً..."></textarea></div>
+    </div>
+
+    <div class="sub-panel" data-sub="reports">
+      <div class="section" id="weeklySection">
+        <div class="section-head">🗓️ گزارش هفتگی</div>
+        <button class="analyze-btn" id="weeklyReviewBtn">تحلیل هفته اخیر</button>
+        <div class="result-card" id="weeklyResult" style="display:none"></div>
       </div>
-      <button class="analyze-btn" id="ljSaveBtn">📓 ثبت پاسخ‌های امشب</button>
-      <div class="lj-lock-note" id="ljLockNote" style="display:none;"></div>
-      <button class="analyze-btn" id="ljInsightsBtn">🔒 کشف الگوهای زندگیت</button>
-      <div class="result-card" id="ljResult" style="display:none"></div>
+
+      <div class="section" id="lessonsReviewSection">
+        <div class="section-head">📔 جمع‌بندی درس‌های هفته</div>
+        <div style="padding:0 14px 8px;font-size:11.5px;color:var(--muted);line-height:1.8;">نکاتی که هر روز تو «درس امروز» (تب نمای کلی) نوشتی رو جمع می‌کنه و بهت می‌گه با فهمیدن این چیزها چه تغییری تو نگاه یا رفتارت ایجاد شده.</div>
+        <button class="analyze-btn" id="lessonsReviewBtn">جمع‌بندی درس‌های این هفته</button>
+        <div class="result-card" id="lessonsReviewResult" style="display:none"></div>
+      </div>
+
+      <div class="section" id="monthlySection">
+        <div class="section-head">📆 گزارش ماهانه</div>
+        <div style="padding:0 14px 8px;font-size:11.5px;color:var(--muted);">نمای کلی‌تر از روند ۳۰ روز اخیرت — ماهی یک‌بار در دسترسه.</div>
+        <button class="analyze-btn" id="monthlyReviewBtn">تحلیل ماه اخیر</button>
+        <div class="result-card" id="monthlyResult" style="display:none"></div>
+      </div>
     </div>
 
-    <div class="section" id="weeklySection">
-      <div class="section-head">🗓️ گزارش هفتگی</div>
-      <button class="analyze-btn" id="weeklyReviewBtn">تحلیل هفته اخیر</button>
-      <div class="result-card" id="weeklyResult" style="display:none"></div>
-    </div>
-
-    <div class="section" id="lessonsReviewSection">
-      <div class="section-head">📔 جمع‌بندی درس‌های هفته</div>
-      <div style="padding:0 14px 8px;font-size:11.5px;color:var(--muted);line-height:1.8;">نکاتی که هر روز تو «درس امروز» (تب نمای کلی) نوشتی رو جمع می‌کنه و بهت می‌گه با فهمیدن این چیزها چه تغییری تو نگاه یا رفتارت ایجاد شده.</div>
-      <button class="analyze-btn" id="lessonsReviewBtn">جمع‌بندی درس‌های این هفته</button>
-      <div class="result-card" id="lessonsReviewResult" style="display:none"></div>
-    </div>
-
-    <div class="section" id="monthlySection">
-      <div class="section-head">📆 گزارش ماهانه</div>
-      <div style="padding:0 14px 8px;font-size:11.5px;color:var(--muted);">نمای کلی‌تر از روند ۳۰ روز اخیرت — ماهی یک‌بار در دسترسه.</div>
-      <button class="analyze-btn" id="monthlyReviewBtn">تحلیل ماه اخیر</button>
-      <div class="result-card" id="monthlyResult" style="display:none"></div>
-    </div>
-
-    <div class="section" id="letterSection">
-      <div class="section-head">✉️ نامه‌ی خودِ آینده</div>
-      <button class="analyze-btn" id="letterBtn">بنویس نامه‌ی من</button>
-      <div class="letter-card" id="letterCard" style="display:none"></div>
+    <div class="sub-panel" data-sub="more">
+      <div class="section" id="letterSection">
+        <div class="section-head">✉️ نامه‌ی خودِ آینده</div>
+        <button class="analyze-btn" id="letterBtn">بنویس نامه‌ی من</button>
+        <div class="letter-card" id="letterCard" style="display:none"></div>
+      </div>
     </div>
   </div>
 
@@ -6806,7 +7056,7 @@ overflow:hidden;
         <div class="lb-stats-num" id="lbTotalUsers">۰</div>
         <div class="lb-stats-label">کاربر فعال ثبت‌نام‌کرده</div>
       </div>
-      <button class="lb-refresh-btn" id="lbRefreshBtn" title="بروزرسانی">↻</button>
+      <button class="lb-refresh-btn" id="lbRefreshBtn" title="بروزرسانی"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 0 1 12.6-5.5M19.5 12a7.5 7.5 0 0 1-12.6 5.5"/><path d="M17.6 3.6v3.4h-3.4M6.4 20.4v-3.4h3.4"/></svg></button>
     </div>
 
     <div id="lbLoading" class="lb-loading">
@@ -6876,7 +7126,7 @@ overflow:hidden;
     <!-- ---- Unpaired state: intro + random match + request lists ---- -->
     <div id="buddyUnpairedBox" style="display:none">
       <div class="buddy-intro-card">
-        <div class="buddy-intro-emoji">🤝</div>
+        <div class="buddy-intro-emoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 10.5l4-2.8 4.3 3.2"/><path d="M21.5 10.5l-4-2.8-4.3 3.2"/><path d="M10.8 10.9l-3.6 3.2a1.5 1.5 0 0 0 2 2.2l.6-.5"/><path d="M13.2 10.9l3.6 3.2a1.5 1.5 0 0 1-2 2.2l-.6-.5"/><path d="M9.6 15.4l1 .9a1.6 1.6 0 0 0 2.2 0"/></svg></div>
         <div class="buddy-intro-title">یه رفیق هم‌مسیر پیدا کن</div>
         <div class="buddy-intro-desc">یه هم‌مسیر یعنی یه نفر که فقط وضعیت انجام‌دادن روزانه‌ی هم رو می‌بینید و بهم انگیزه می‌دید — بدون این‌که چک‌لیست کامل کسی رو ببینید. از تب «لیدربورد» می‌تونی مستقیم رو کارت یه نفر درخواست بدی، یا اینجا یه هم‌مسیر تصادفی و ناشناس پیدا کن.</div>
         <button class="analyze-btn" id="buddyRandomBtn">🎲 پیدا کردن هم‌مسیر تصادفی (ناشناس)</button>
@@ -6902,7 +7152,7 @@ overflow:hidden;
 
     <div id="sosListBox">
       <div class="sos-chat-banner">
-        <div class="sos-chat-banner-ic">🆘</div>
+        <div class="sos-chat-banner-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.4"/><path d="M6.2 6.2l3.3 3.3M17.8 6.2l-3.3 3.3M6.2 17.8l3.3-3.3M17.8 17.8l-3.3-3.3"/></svg></div>
         <div>
           <div class="sos-chat-banner-title">لحظه‌های سخت رو تنها رد نکن</div>
           <div class="sos-chat-banner-sub">وقتی خیلی نزدیک به باختنی، دکمه‌ی «وسوسه شدم» رو ۴ ثانیه نگه‌دار تا قرمز بشه و درخواست کمک فوری بره. هم‌مسیرهای هم‌جنس و هم‌سطح‌ت (یا جلوترت) همین‌جا می‌بینن و میان کمکت — و اگه خودت الان همچین درخواستی رو از یکی دیگه می‌بینی، فقط یه پیام دلگرم‌کننده کافیه.</div>
@@ -6925,7 +7175,7 @@ overflow:hidden;
 
     <div id="sosThreadBox" style="display:none;">
       <div class="cm-ov-head sos-thread-head">
-        <button class="cm-ov-back" id="sosThreadBackBtn" aria-label="بازگشت">→</button>
+        <button class="cm-ov-back" id="sosThreadBackBtn" aria-label="بازگشت"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5l6.5 7-6.5 7M3.5 12h15.5"/></svg></button>
         <div style="flex:1;min-width:0;">
           <div class="sos-thread-name" id="sosThreadName"></div>
           <div class="sos-thread-sub" id="sosThreadSub"></div>
@@ -6950,7 +7200,7 @@ overflow:hidden;
     <div class="profile-hero" id="profileHero">
       <div class="profile-hero-avatar-wrap">
         <div class="profile-hero-avatar" id="profileHeroAvatar">—</div>
-        <button type="button" class="profile-avatar-edit-btn" id="profileAvatarEditBtn" title="تغییر عکس پروفایل">📷</button>
+        <button type="button" class="profile-avatar-edit-btn" id="profileAvatarEditBtn" title="تغییر عکس پروفایل"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.3"/><circle cx="8.3" cy="9.3" r="1.6"/><path d="M4 16.5l5-4.7 3.5 3 3-3.3 4.5 4.9"/></svg></button>
       </div>
       <input type="file" id="profileAvatarInput" accept="image/*" style="display:none;">
       <div class="profile-hero-name" id="profileHeroName">—</div>
@@ -7001,7 +7251,7 @@ overflow:hidden;
 
     <div class="settings-group" data-group="account">
       <div class="settings-group-head" data-target="sgBody-account">
-        <span class="sg-ic">👤</span><span class="sg-text">حساب و پروفایل</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.3" r="3.6"/><path d="M4.7 19.5c1.3-3.4 4-5.1 7.3-5.1s6 1.7 7.3 5.1"/></svg></span><span class="sg-text">حساب و پروفایل</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="sgBody-account">
         <div class="section">
@@ -7034,7 +7284,7 @@ overflow:hidden;
 
     <div class="settings-group" data-group="appearance">
       <div class="settings-group-head" data-target="sgBody-appearance">
-        <span class="sg-ic">🎨</span><span class="sg-text">ظاهر و شخصی‌سازی</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8h2a3.5 3.5 0 0 0 3.5-3.5c0-4.1-3.8-7.5-8.1-7.5z"/><circle cx="8" cy="10.5" r="1" fill="currentColor" stroke="none"/><circle cx="8.5" cy="14.5" r="1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="7.5" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1" fill="currentColor" stroke="none"/></svg></span><span class="sg-text">ظاهر و شخصی‌سازی</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="sgBody-appearance">
         <div class="section">
@@ -7065,6 +7315,10 @@ overflow:hidden;
             </div>
           </div>
           <div class="settings-row">
+            <div><div class="s-label">خوانده‌شدن پیام‌ها</div><div class="s-sub">پاپ‌آپ‌ها و پیام‌های کوتاه با صدای گوینده خونده بشن</div></div>
+            <label class="toggle-switch"><input type="checkbox" id="voiceToggle"><span class="toggle-slider"></span></label>
+          </div>
+          <div class="settings-row">
             <div><div class="s-label">طول برنامه</div><div class="s-sub">مراحل بر همین اساس تنظیم می‌شن</div></div>
             <div class="seg" id="lengthSeg" style="flex-wrap:wrap;">
               <button data-len="40">۴۰</button>
@@ -7081,7 +7335,7 @@ overflow:hidden;
 
     <div class="settings-group" data-group="security">
       <div class="settings-group-head" data-target="sgBody-security">
-        <span class="sg-ic">🔐</span><span class="sg-text">امنیت و حریم خصوصی</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg></span><span class="sg-text">امنیت و حریم خصوصی</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="sgBody-security">
         <div class="section">
@@ -7155,7 +7409,7 @@ overflow:hidden;
 
     <div class="settings-group" data-group="checklist">
       <div class="settings-group-head" data-target="sgBody-checklist">
-        <span class="sg-ic">⏰</span><span class="sg-text">چک‌لیست و یادآورها</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span><span class="sg-text">چک‌لیست و یادآورها</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="sgBody-checklist">
         <div class="section">
@@ -7194,7 +7448,7 @@ overflow:hidden;
 
     <div class="settings-group" data-group="backup">
       <div class="settings-group-head" data-target="sgBody-backup">
-        <span class="sg-ic">💾</span><span class="sg-text">داده و پشتیبان‌گیری</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h11l3.5 3.5V19a.5.5 0 0 1-.5.5H5a.5.5 0 0 1-.5-.5V5a.5.5 0 0 1 .5-.5z"/><path d="M8 4.5v5h7v-5"/><rect x="8.5" y="13.5" width="7" height="5.5"/></svg></span><span class="sg-text">داده و پشتیبان‌گیری</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="sgBody-backup">
         <div class="section">
@@ -7225,7 +7479,7 @@ overflow:hidden;
     </div>
 
     <div class="section upd-current-card">
-      <div class="upd-current-ic">📱</div>
+      <div class="upd-current-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3.5" width="10" height="17" rx="2.3"/><path d="M11 17.5h2"/></svg></div>
       <div>
         <div class="upd-current-label">نسخه‌ی نصب‌شده روی گوشیت</div>
         <div class="upd-current-num" id="updCurrentVersion">—</div>
@@ -7265,22 +7519,26 @@ overflow:hidden;
       <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
         <button type="button" class="narration-play-btn" id="narrationIntroGuideBtn">🔊 معرفی برنامه</button>
         <button type="button" class="narration-play-btn" id="narrationTodayGuideBtn">🔊 توضیح تب برنامه‌ی امروز</button>
+        <button type="button" class="narration-play-btn" id="narrationWorkoutGuideBtn">🔊 توضیح تب تمرین</button>
+        <button type="button" class="narration-play-btn" id="narrationSpeechGuideBtn">🔊 توضیح تب فن بیان</button>
+        <button type="button" class="narration-play-btn" id="narrationAiGuideBtn">🔊 توضیح تب مشاور شخصی</button>
+        <button type="button" class="narration-play-btn" id="narrationChatGuideBtn">🔊 توضیح چت عمومی</button>
       </div>
     </div>
 
     <!-- Core -->
     <div class="settings-group" data-group="guide-core">
       <div class="settings-group-head" data-target="gGroup-core">
-        <span class="sg-ic">🎯</span><span class="sg-text">مرکز کنترل</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg></span><span class="sg-text">مرکز کنترل</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="gGroup-core">
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-dashboard"><span class="gi-ic gi-indigo">📊</span><span class="gi-title">داشبورد</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-dashboard"><span class="gi-ic gi-indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M11 20V6M17 20v-8"/><path d="M3.5 20h17"/></svg></span><span class="gi-title">داشبورد</span><span class="chevron">▾</span></div>
           <div id="giBody-dashboard" class="collapsible-body"><div class="gi-desc">داشبورد مرکز مدیریت برنامه است. در این صفحه می‌تونی استریک، XP، سطح، چالش‌های امروز، اهداف، وضعیت پیشرفت و خلاصه فعالیت روزانه‌ت رو یکجا ببینی.</div>
             <div class="gi-subtabs">
-              <div class="gi-subtab"><b>نمای کلی:</b> روزشمار زنده‌ی استریک، درصد پیشرفت امروز، دلیل تغییرت («چرا این کارو می‌کنم»)، سبک برنامه (سبک/متوسط/سنگین)، روز خاص و درس امروز.</div>
-              <div class="gi-subtab"><b>برنامه‌ی روزانه:</b> چک‌لیست انجام‌دادنی‌ها و انجام‌ندادنی‌های امروز، حس‌وحال، ساعت استفاده از گوشی و یادداشت روزانه.</div>
+              <div class="gi-subtab"><b>نمای کلی:</b> روزشمار زنده‌ی استریک، درصد پیشرفت امروز، دلیل تغییرت («چرا این کارو می‌کنم»)، سبک برنامه (سبک/متوسط/سنگین)، روز خاص و یادداشت امروز.</div>
+              <div class="gi-subtab"><b>برنامه‌ی روزانه:</b> چک‌لیست انجام‌دادنی‌ها و انجام‌ندادنی‌های امروز، حس‌وحال، ساعت استفاده از گوشی و درس امروز.</div>
               <div class="gi-subtab"><b>برنامه‌های من:</b> کارهای دستی که خودت با تاریخ یا تعداد روز مشخص اضافه می‌کنی و سر وقتش بهت یادآوری می‌شه.</div>
               <div class="gi-subtab"><b>برنامه فردا:</b> از همین امروز برای فردا انجام‌دادنی و پرهیز اضافه تعریف کن؛ فردا خودش می‌شینه تو لیست همون روز.</div>
             </div>
@@ -7288,17 +7546,17 @@ overflow:hidden;
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-streak"><span class="gi-ic gi-indigo">🔥</span><span class="gi-title">استریک (Streak)</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-streak"><span class="gi-ic gi-indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5c.5 3-2.3 4-2.3 7a2.3 2.3 0 0 0 2.3 2.3 2 2 0 0 0 2-2.3c1.6 1.1 2.5 2.8 2.5 4.7a4.5 4.5 0 0 1-9 0c0-4 3.5-5.5 4.5-11.7z"/></svg></span><span class="gi-title">استریک (Streak)</span><span class="chevron">▾</span></div>
           <div id="giBody-streak" class="collapsible-body"><div class="gi-desc">استریک تعداد روزهای متوالی موفقتو نشون می‌ده. هر روز که اهداف روزانه‌تو کامل کنی، استریک افزایش پیدا می‌کنه. اگه یه روز رو از دست بدی، استریک می‌شکنه مگه اینکه از محافظ استریک استفاده کنی.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-xp"><span class="gi-ic gi-indigo">🏆</span><span class="gi-title">XP و Level</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-xp"><span class="gi-ic gi-indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5h10v4.3a5 5 0 0 1-10 0V4.5z"/><path d="M7 6H4.5v1.8A3 3 0 0 0 7 10.7M17 6h2.5v1.8A3 3 0 0 1 17 10.7"/><path d="M12 13.8V17M9 20.5h6M9.5 17h5l.6 3.5h-6.2z"/></svg></span><span class="gi-title">XP و Level</span><span class="chevron">▾</span></div>
           <div id="giBody-xp" class="collapsible-body"><div class="gi-desc">با انجام تمرین‌ها، تکمیل اهداف، مدیتیشن، ثبت فعالیت‌ها و حضور مستمر، XP می‌گیری. با افزایش XP سطحت بالاتر می‌ره و قابلیت‌ها، نشان‌ها و دستاوردهای جدید باز می‌شن.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-profile"><span class="gi-ic gi-indigo">👤</span><span class="gi-title">پروفایل</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-profile"><span class="gi-ic gi-indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.3" r="3.6"/><path d="M4.7 19.5c1.3-3.4 4-5.1 7.3-5.1s6 1.7 7.3 5.1"/></svg></span><span class="gi-title">پروفایل</span><span class="chevron">▾</span></div>
           <div id="giBody-profile" class="collapsible-body"><div class="gi-desc">تو پروفایل، هویت و اکانتتو مدیریت می‌کنی. می‌تونی نام نمایشیتو (هر ۱۴ روز یک‌بار) عوض کنی، اطلاعات اکانت و آمار کلی فعالیتتو ببینی و وضعیت دعوت‌ها و امتیازاتتو پیگیری کنی.</div></div>
         </div>
 
@@ -7308,27 +7566,27 @@ overflow:hidden;
     <!-- Growth & planning -->
     <div class="settings-group" data-group="guide-growth">
       <div class="settings-group-head" data-target="gGroup-growth">
-        <span class="sg-ic">🌱</span><span class="sg-text">رشد و برنامه‌ریزی</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8"/><path d="M12 13c0-4-3-6-7-6 0 4 3 6 7 6z"/><path d="M12 11c0-3.4 2.5-5.2 5.8-5.2 0 3.4-2.5 5.2-5.8 5.2z"/></svg></span><span class="sg-text">رشد و برنامه‌ریزی</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="gGroup-growth">
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-plan"><span class="gi-ic gi-green">🗓️</span><span class="gi-title">برنامه من</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-plan"><span class="gi-ic gi-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14.5" rx="2.3"/><path d="M4 10h16"/><path d="M8.3 3.5v3.4M15.7 3.5v3.4"/></svg></span><span class="gi-title">برنامه من</span><span class="chevron">▾</span></div>
           <div id="giBody-plan" class="collapsible-body"><div class="gi-desc">تو این بخش برنامه‌ی شخصیتو مدیریت می‌کنی. می‌تونی کارهای روزانه، هفتگی و بلندمدت رو برنامه‌ریزی کنی، زمان‌بندی کنی و روند انجامشون رو دنبال کنی.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-goals"><span class="gi-ic gi-green">✅</span><span class="gi-title">اهداف روزانه</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-goals"><span class="gi-ic gi-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.2h10M9.5 12h10M9.5 17.8h10"/><path d="M3.6 6.2l1 1L6.8 5"/><path d="M3.6 12l1 1 2.2-2.4"/><path d="M3.6 17.8l1 1 2.2-2.4"/></svg></span><span class="gi-title">اهداف روزانه</span><span class="chevron">▾</span></div>
           <div id="giBody-goals" class="collapsible-body"><div class="gi-desc">هر روز اهداف مشخصی برای خودت تعیین کن. با تکمیل هر هدف امتیاز می‌گیری و پیشرفتت تو داشبورد و آمار ثبت می‌شه.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-diary"><span class="gi-ic gi-green">📓</span><span class="gi-title">دفترچه روزانه</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-diary"><span class="gi-ic gi-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5" width="13" height="16" rx="2.3"/><rect x="9" y="3" width="6" height="3.4" rx="1.2"/><path d="M8.5 11.5h7M8.5 15h7M8.5 18h4.5"/></svg></span><span class="gi-title">دفترچه روزانه</span><span class="chevron">▾</span></div>
           <div id="giBody-diary" class="collapsible-body"><div class="gi-desc">احساسات، اتفاقات، موفقیت‌ها و چالش‌های روزانه‌تو ثبت کن. مرور یادداشت‌ها کمکت می‌کنه تغییرات و رشد شخصیتو بهتر درک کنی.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-meditation"><span class="gi-ic gi-green">🧘</span><span class="gi-title">مدیتیشن</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-meditation"><span class="gi-ic gi-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15c0 3 2.8 5 6 5s6-2 6-5c-1.8 1-3.8 1.5-6 1.5S7.8 16 6 15z"/><path d="M12 16.5V9"/><path d="M12 16.5c-1.6-2-2-4.5-1.3-7.3"/><path d="M12 16.5c1.6-2 2-4.5 1.3-7.3"/><path d="M7.8 12.8C6 12.1 4.8 10.6 4.3 8.6"/><path d="M16.2 12.8c1.8-.7 3-2.2 3.5-4.2"/></svg></span><span class="gi-title">مدیتیشن</span><span class="chevron">▾</span></div>
           <div id="giBody-meditation" class="collapsible-body"><div class="gi-desc">تمرین‌های تنفس، آرام‌سازی ذهن و مدیتیشن‌های هدایت‌شده کمکت می‌کنن استرس رو کم کنی، تمرکز بیشتری داشته باشی و کیفیت خوابت بهتر بشه.</div>
             <div class="gi-subtabs">
               <div class="gi-subtab"><b>ساده:</b> مدیتیشن تنفسی با انتخاب مدت زمان، ریتم دم و بازدم و موزیک ملایم پس‌زمینه.</div>
@@ -7340,7 +7598,7 @@ overflow:hidden;
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-workouts"><span class="gi-ic gi-green">🏋️</span><span class="gi-title">تمرین‌ها</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-workouts"><span class="gi-ic gi-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.8 9.3v6.4M17.2 9.3v6.4"/><rect x="3.3" y="8" width="3.2" height="8.8" rx="1.4"/><rect x="17.5" y="8" width="3.2" height="8.8" rx="1.4"/><path d="M9.2 12.5h6.6"/></svg></span><span class="gi-title">تمرین‌ها</span><span class="chevron">▾</span></div>
           <div id="giBody-workouts" class="collapsible-body"><div class="gi-desc">مجموعه‌ای از تمرین‌های ذهنی و جسمی برای ایجاد عادت‌های مثبت، افزایش تمرکز، مدیریت احساسات و رشد فردی در اختیارت قرار می‌گیره.</div>
             <div class="gi-subtabs">
               <div class="gi-subtab"><b>برنامه‌ی امروز:</b> گرم‌کردن، تمرین اصلی و سرد کردن روز جاری برنامه‌ی تمرینیت.</div>
@@ -7351,12 +7609,12 @@ overflow:hidden;
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-speech"><span class="gi-ic gi-green">🗣️</span><span class="gi-title">فن بیان</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-speech"><span class="gi-ic gi-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="11" rx="3"/><path d="M9 18.5l2.2-3M8 8.5v4M12 7.5v6M16 8.5v4"/></svg></span><span class="gi-title">فن بیان</span><span class="chevron">▾</span></div>
           <div id="giBody-speech" class="collapsible-body"><div class="gi-desc">با تمرین‌های کوتاه و متنوع مهارت حرف‌زدنتو تقویت کن: شافل کارت احساسات برای تمرین لحن، بداهه‌گویی ۶۰ ثانیه‌ای بدون مکث، داستان‌سازی با چند کلمه‌ی نامرتبط و تمرین‌های گرم کردن صدا. تمرین منظم اینجا روون‌تر و مطمئن‌تر حرف زدنتو ملموس می‌کنه.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-focusmode"><span class="gi-ic gi-green">🎯</span><span class="gi-title">حالت تمرکز</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-focusmode"><span class="gi-ic gi-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg></span><span class="gi-title">حالت تمرکز</span><span class="chevron">▾</span></div>
           <div id="giBody-focusmode" class="collapsible-body"><div class="gi-desc">با دکمه‌ی «حالت» وسط نوار پایین، یکی از ده‌ها موقعیت واقعی زندگیتو انتخاب کن — از باشگاه و خواب گرفته تا کافی‌شاپ، امتحان، آشپزی، سفر یا حتی محیط کار (برنامه‌نویسی، حسابداری، فروشندگی و بقیه). با انتخابش، اپ یه صفحه‌ی اختصاصی مخصوص همون کار می‌سازه: تایمر تمرکز، یه نکته‌ی کاربردی و یه چک‌لیست مخصوص همون موقعیت. آخر جلسه کیفیتشو با ستاره مشخص کن؛ تعداد و کیفیت جلسه‌هات تو تب پیشرفت ثبت می‌شه و با استفاده‌ی منظم از یه حالت، یه عنوان مخصوص همون کار برات باز می‌شه. چند حالت پایه رایگانن، بقیه مخصوص پرمیومن.</div></div>
         </div>
 
@@ -7366,12 +7624,12 @@ overflow:hidden;
     <!-- AI advisor -->
     <div class="settings-group" data-group="guide-ai">
       <div class="settings-group-head" data-target="gGroup-ai">
-        <span class="sg-ic">🤖</span><span class="sg-text">مشاور هوش مصنوعی</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span><span class="sg-text">مشاور هوش مصنوعی</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="gGroup-ai">
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-ai"><span class="gi-ic gi-blue">💡</span><span class="gi-title">مشاور شخصی</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-ai"><span class="gi-ic gi-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5h6"/><path d="M9.5 20h5"/><path d="M12 3.5a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3.5z"/></svg></span><span class="gi-title">مشاور شخصی</span><span class="chevron">▾</span></div>
           <div id="giBody-ai" class="collapsible-body"><div class="gi-desc">هر شب وعده‌های غذایی، سطح انرژی و علائم جسمیتو تو «مرور شب» ثبت کن تا وضعیتت بررسی بشه. تو «دفترچه هوشمند زندگی» هر شب به ۶ سؤال کوتاه جواب می‌دی و بعد از ۹۰ شب می‌تونی الگوهای واقعی زندگیتو کشف کنی. علاوه بر این، گزارش هفتگی و ماهانه از روند پیشرفتت می‌گیری، جمع‌بندی درس‌های هفته رو مرور می‌کنی و می‌تونی یه نامه از طرف خودِ آینده برای خودت بنویسی.</div></div>
         </div>
 
@@ -7381,22 +7639,22 @@ overflow:hidden;
     <!-- Progress & competition -->
     <div class="settings-group" data-group="guide-progress">
       <div class="settings-group-head" data-target="gGroup-progress">
-        <span class="sg-ic">📈</span><span class="sg-text">پیشرفت و رقابت</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5.5-6 4 3.5L20 6"/><path d="M14.5 6H20v5.5"/></svg></span><span class="sg-text">پیشرفت و رقابت</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="gGroup-progress">
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-analytics"><span class="gi-ic gi-orange">📊</span><span class="gi-title">تحلیل پیشرفت</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-analytics"><span class="gi-ic gi-orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11M11 20V6M17 20v-8"/><path d="M3.5 20h17"/></svg></span><span class="gi-title">تحلیل پیشرفت</span><span class="chevron">▾</span></div>
           <div id="giBody-analytics" class="collapsible-body"><div class="gi-desc">نمودارها، گزارش‌ها و آمارهای دقیق نشونت می‌دن تو چه روزهایی عملکرد بهتری داشتی، کدوم عادت‌ها پایدارترن و چه بخش‌هایی نیاز به بهبود دارن.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-leaderboard"><span class="gi-ic gi-orange">🏅</span><span class="gi-title">لیدربورد</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-leaderboard"><span class="gi-ic gi-orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4.3h11a1 1 0 0 1 1 1V20l-6.5-3.8L5.5 20V5.3a1 1 0 0 1 1-1z"/></svg></span><span class="gi-title">لیدربورد</span><span class="chevron">▾</span></div>
           <div id="giBody-leaderboard" class="collapsible-body"><div class="gi-desc">با سایر کاربرا رقابت کن و جایگاهتو تو جدول رتبه‌بندی ببین. فعالیت بیشتر و استمرار، رتبه‌تو ارتقا می‌ده.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-achievements"><span class="gi-ic gi-orange">🎖️</span><span class="gi-title">دستاوردها</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-achievements"><span class="gi-ic gi-orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4.3h11a1 1 0 0 1 1 1V20l-6.5-3.8L5.5 20V5.3a1 1 0 0 1 1-1z"/></svg></span><span class="gi-title">دستاوردها</span><span class="chevron">▾</span></div>
           <div id="giBody-achievements" class="collapsible-body"><div class="gi-desc">با رسیدن به اهداف مختلف، نشان‌ها و دستاوردهای ویژه می‌گیری. هر دستاورد نشون‌دهنده‌ی پیشرفتت تو مسیر رشد فردیه.</div></div>
         </div>
 
@@ -7406,22 +7664,22 @@ overflow:hidden;
     <!-- Community & learning -->
     <div class="settings-group" data-group="guide-community">
       <div class="settings-group-head" data-target="gGroup-community">
-        <span class="sg-ic">👥</span><span class="sg-text">جامعه و یادگیری</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19c0-3.6 2.6-5.8 5.5-5.8s5.5 2.2 5.5 5.8"/><path d="M15.4 8.8a2.6 2.6 0 1 0 0-5.2"/><path d="M15 13.4c2.4.3 4.5 2.3 4.5 5.6"/></svg></span><span class="sg-text">جامعه و یادگیری</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="gGroup-community">
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-chat"><span class="gi-ic gi-blue">💬</span><span class="gi-title">چت عمومی</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-chat"><span class="gi-ic gi-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="11.5" rx="4"/><path d="M8.3 16.5l-1.6 3.3 4.4-3.3"/></svg></span><span class="gi-title">چت عمومی</span><span class="chevron">▾</span></div>
           <div id="giBody-chat" class="collapsible-body"><div class="gi-desc">تو فضای گفتگو با سایر کاربرا تجربه‌هاتو به اشتراک بذار، سؤال بپرس، انگیزه بگیر و از مسیر رشد بقیه الهام بگیر.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-buddy"><span class="gi-ic gi-blue">🤝</span><span class="gi-title">هم‌مسیر</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-buddy"><span class="gi-ic gi-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 10.5l4-2.8 4.3 3.2"/><path d="M21.5 10.5l-4-2.8-4.3 3.2"/><path d="M10.8 10.9l-3.6 3.2a1.5 1.5 0 0 0 2 2.2l.6-.5"/><path d="M13.2 10.9l3.6 3.2a1.5 1.5 0 0 1-2 2.2l-.6-.5"/><path d="M9.6 15.4l1 .9a1.6 1.6 0 0 0 2.2 0"/></svg></span><span class="gi-title">هم‌مسیر</span><span class="chevron">▾</span></div>
           <div id="giBody-buddy" class="collapsible-body"><div class="gi-desc">با یه هم‌مسیر جفت شو تا فقط وضعیت انجام‌دادن روزانه‌ی همدیگه رو ببینید و بهم انگیزه بدید، بدون اینکه چک‌لیست کامل کسی رو ببینید. می‌تونی از تب لیدربورد مستقیم رو کارت یه نفر درخواست بدی یا یه هم‌مسیر تصادفی و ناشناس پیدا کنی، و بعد از جفت‌شدن یه گفتگوی خصوصی هم باهاش داری.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-library"><span class="gi-ic gi-blue">📚</span><span class="gi-title">کتابخانه آموزشی</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-library"><span class="gi-ic gi-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.8c-1.9-1.5-4.2-2.1-6.8-2.1-.4 0-.9.03-1.3.1v11.8c.4-.06.9-.1 1.3-.1 2.6 0 4.9.6 6.8 2.1 1.9-1.5 4.2-2.1 6.8-2.1.4 0 .9.04 1.3.1V4.8c-.4-.07-.9-.1-1.3-.1-2.6 0-4.9.6-6.8 2.1z"/><path d="M12 6.8v11.8"/></svg></span><span class="gi-title">کتابخانه آموزشی</span><span class="chevron">▾</span></div>
           <div id="giBody-library" class="collapsible-body"><div class="gi-desc">به مجموعه‌ای از مقالات، آموزش‌ها، کتاب‌های خلاصه‌شده، فایل‌های آموزشی و محتوای انگیزشی دسترسی داری تا دانشتو افزایش بدی.</div>
             <div class="gi-subtabs">
               <div class="gi-subtab"><b>کتابخانه متنی:</b> مطالبی که متناسب با مرحله‌ی فعلی مسیرت تغییر می‌کنن، به‌علاوه امکان گرفتن یه تحلیل عمیق و اختصاصی برای خودت.</div>
@@ -7437,12 +7695,12 @@ overflow:hidden;
     <!-- Support & security -->
     <div class="settings-group" data-group="guide-support">
       <div class="settings-group-head" data-target="gGroup-support">
-        <span class="sg-ic">🛡️</span><span class="sg-text">پشتیبانی و امنیت</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l7 2.6v5.4c0 4.6-3 7.8-7 9-4-1.2-7-4.4-7-9V6.1l7-2.6z"/><path d="M9 12l2 2 4-4.2"/></svg></span><span class="sg-text">پشتیبانی و امنیت</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="gGroup-support">
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-sos"><span class="gi-ic gi-red">🆘</span><span class="gi-title">SOS</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-sos"><span class="gi-ic gi-red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.4"/><path d="M6.2 6.2l3.3 3.3M17.8 6.2l-3.3 3.3M6.2 17.8l3.3-3.3M17.8 17.8l-3.3-3.3"/></svg></span><span class="gi-title">SOS</span><span class="chevron">▾</span></div>
           <div id="giBody-sos" class="collapsible-body"><div class="gi-desc">هر جای برنامه که باشی، دکمه‌ی شناور «وسوسه شدم» در دسترسته.</div>
             <div class="gi-subtabs">
               <div class="gi-subtab"><b>تپ سریع:</b> نوع وسوسه رو انتخاب کن؛ یادآوری «چرا شروع کردی»، راه تماس با فرد حمایتگرت، یه تایمر تنفس ۵ دقیقه‌ای و یه فعالیت جایگزین (یا برنامه‌ی if-then خودت) نشونت داده می‌شه. آخرش مشخص کن مقاومت کردی یا نه و اختیاری بگو الان گرسنه/عصبی/تنها/خسته بودی؛ این آمار تو تب پیشرفت («الگوی وسوسه») ثبت می‌شه.</div>
@@ -7452,17 +7710,17 @@ overflow:hidden;
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-premium"><span class="gi-ic gi-purple">🌟</span><span class="gi-title">Premium</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-premium"><span class="gi-ic gi-purple"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></span><span class="gi-title">Premium</span><span class="chevron">▾</span></div>
           <div id="giBody-premium" class="collapsible-body"><div class="gi-desc">نسخه‌ی پریمیوم امکانات بیشتری مثل تحلیل‌های پیشرفته، فضای ذخیره‌سازی ابری، شخصی‌سازی کامل، گزارش‌های اختصاصی، محتوای آموزشی ویژه، قابلیت‌های هوش مصنوعی و امکانات انحصاری دیگه در اختیارت می‌ذاره.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-invite"><span class="gi-ic gi-purple">🎁</span><span class="gi-title">دعوت از دوستان</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-invite"><span class="gi-ic gi-purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9.5" width="16" height="10.5" rx="1.5"/><path d="M4 13h16"/><path d="M12 9.5v10.5"/><path d="M12 9.5c-1-3-3-4-4.3-3.2C6.4 7.1 7.2 9.5 12 9.5zM12 9.5c1-3 3-4 4.3-3.2 1.3.8.5 3.2-4.3 3.2z"/></svg></span><span class="gi-title">دعوت از دوستان</span><span class="chevron">▾</span></div>
           <div id="giBody-invite" class="collapsible-body"><div class="gi-desc">کد دعوت شخصیتو با دوستات به اشتراک بذار؛ به ازای هر نفری که با کدت ثبت‌نام کنه، تخفیف بیشتری رو نسخه‌ی پرمیوم می‌گیری، تا سقف ۵۰٪ با ۵ دعوت. پیشرفتتو رو مسیر دعوت می‌تونی دنبال کنی و جایزه‌ی هر مرحله رو همون‌جا فعال کنی.</div></div>
         </div>
 
         <div class="section">
-          <div class="section-head collapsible" data-target="giBody-security"><span class="gi-ic gi-grey">🔒</span><span class="gi-title">امنیت اطلاعات</span><span class="chevron">▾</span></div>
+          <div class="section-head collapsible" data-target="giBody-security"><span class="gi-ic gi-grey"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg></span><span class="gi-title">امنیت اطلاعات</span><span class="chevron">▾</span></div>
           <div id="giBody-security" class="collapsible-body"><div class="gi-desc">تمام اطلاعات شخصیت به صورت امن نگهداری می‌شه. رمز عبور، الگوی ورود، کد بازیابی و نسخه‌ی پشتیبان فقط برای محافظت از اطلاعات و حفظ حریم خصوصیت استفاده می‌شن.</div></div>
         </div>
 
@@ -7472,7 +7730,7 @@ overflow:hidden;
     <!-- FAQ -->
     <div class="settings-group" data-group="guide-faq">
       <div class="settings-group-head" data-target="gGroup-faq">
-        <span class="sg-ic">❓</span><span class="sg-text">سوالات متداول</span><span class="sg-chevron">▾</span>
+        <span class="sg-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 0 1 4.7 1.2c0 1.8-2.3 1.9-2.3 3.5"/><circle cx="12" cy="17.3" r="0.5" fill="currentColor" stroke="none"/></svg></span><span class="sg-text">سوالات متداول</span><span class="sg-chevron">▾</span>
       </div>
       <div class="settings-group-body" id="gGroup-faq">
 
@@ -7513,7 +7771,7 @@ overflow:hidden;
 <div class="celebrate-overlay" id="celebrateOverlay">
   <div class="celebrate-card">
     <div class="celebrate-coach" id="celebrateCoach"></div>
-    <div class="big-emoji" id="celebrateEmoji">🎉</div>
+    <div class="big-emoji" id="celebrateEmoji"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18L16 8"/><path d="M6 18l3-9.5L18 12z"/><circle cx="18" cy="6" r="0.8" fill="currentColor" stroke="none"/><circle cx="20.5" cy="9" r="0.6" fill="currentColor" stroke="none"/><circle cx="15.5" cy="4" r="0.6" fill="currentColor" stroke="none"/></svg></div>
     <h2 id="celebrateTitle">آفرین!</h2>
     <p id="celebrateText">یه قدم دیگه جلو رفتی.</p>
     <button id="celebrateClose">ادامه بده</button>
