@@ -3774,6 +3774,21 @@ const COACH_CHECKIN_REPLIES = {
     'بی‌حوصلگی هم می‌گذره. یه کار کوچیک شروع کن، حوصله خودش میاد.',
     'لازم نیست با انگیزه‌ی زیاد شروع کنی؛ فقط شروع کن.',
     'یه کار ریز رو تیک بزن، باقیش راحت‌تره.'
+  ]},
+  angry: { mood:'concerned', msgs:[
+    'باشه، عصبانی بودن طبیعیه. یه نفس عمیق بکش، بعد برگرد سراغ برنامه.',
+    'حس عصبانیت رو سرکوب نکن، فقط نذار امروز رو خراب کنه.',
+    'گاهی عصبانیت فقط انرژیه که جای درست نرفته. بذارش رو یکی از کارای امروز.'
+  ]},
+  sad: { mood:'gentle', msgs:[
+    'باشه، غمگین بودن هم بخشی از مسیره. مجبور نیستی امروز قوی به‌نظر برسی.',
+    'حالت غمگین طبیعیه. حتی یه کار کوچیک هم امروز رو نگه می‌داره.',
+    'از دور بغلت می‌کنم. یه قدم کوچیک بردار، همین کافیه.'
+  ]},
+  energetic: { mood:'cheer', msgs:[
+    'عالیه! از این انرژی نهایت استفاده رو ببر، امروز رو بترکون.',
+    'این انرژی رو نگه دار و بریز رو سخت‌ترین کار امروزت.',
+    'همینه! وقتشه یکی از کارای بزرگ‌تر برنامه رو امروز تیک بزنی.'
   ]}
 };
 /* Crossfades hideEl out, then (once hidden) runs onMid to mutate showEl's
@@ -17862,26 +17877,39 @@ function recoveryDrawCallout(px, py, label, canvasWidth){
 
   const grp = document.createElementNS(ns,'g');
   grp.setAttribute('class','recovery-callout-label-group');
-  const textW = Math.max(46*scale, label.length * fontSize * 0.62);
-  const textH = fontSize * 1.9;
-  const bgX = goLeft ? (ex - textW) : ex;
-  const bgY = ey - textH/2;
-  const bg = document.createElementNS(ns,'rect');
-  bg.setAttribute('x', bgX); bg.setAttribute('y', bgY);
-  bg.setAttribute('width', textW); bg.setAttribute('height', textH);
-  bg.setAttribute('rx', textH*0.28);
-  bg.setAttribute('class','recovery-callout-label-bg');
-  grp.appendChild(bg);
+
+  // متن رو اول می‌سازیم و به svg اضافه می‌کنیم تا با getBBox() عرضِ واقعیِ
+  // رندرشده‌اش رو بخونیم — قبلاً عرضِ کادر فقط از روی تعداد کاراکتر تخمین
+  // زده می‌شد (label.length * fontSize * 0.62) که برای بعضی لیبل‌های
+  // فارسی (مثل «سینه (پکتورالیس ماژور)») کمتر از عرض واقعی بود و متن از
+  // کادر بیرون می‌زد. حالا کادر همیشه دقیقاً اندازه‌ی متن واقعی می‌شه.
   const text = document.createElementNS(ns,'text');
-  text.setAttribute('x', goLeft ? (bgX + textW - fontSize*0.5) : (bgX + fontSize*0.5));
-  text.setAttribute('y', ey + fontSize*0.32);
-  text.setAttribute('text-anchor', goLeft ? 'end' : 'start');
   text.setAttribute('direction', 'rtl');
   text.setAttribute('class','recovery-callout-label-text');
   text.setAttribute('font-size', fontSize);
   text.textContent = label;
   grp.appendChild(text);
-  svg.appendChild(grp);
+  svg.appendChild(grp); // باید به سند وصل بشه تا getBBox زیر مقدار درست بده
+
+  const padX = fontSize * 0.55;
+  let measuredW = 0;
+  try{ measuredW = text.getBBox().width; }catch(e){}
+  const textW = Math.max(46*scale, (measuredW || label.length * fontSize * 0.62) + padX*2);
+  const textH = fontSize * 1.9;
+  const bgX = goLeft ? (ex - textW) : ex;
+  const bgY = ey - textH/2;
+
+  const bg = document.createElementNS(ns,'rect');
+  bg.setAttribute('x', bgX); bg.setAttribute('y', bgY);
+  bg.setAttribute('width', textW); bg.setAttribute('height', textH);
+  bg.setAttribute('rx', textH*0.28);
+  bg.setAttribute('class','recovery-callout-label-bg');
+  grp.insertBefore(bg, text); // پس‌زمینه باید پشتِ متن نقاشی بشه
+
+  text.setAttribute('x', goLeft ? (bgX + textW - padX) : (bgX + padX));
+  text.setAttribute('y', ey + fontSize*0.32);
+  text.setAttribute('text-anchor', goLeft ? 'end' : 'start');
+
   requestAnimationFrame(()=> requestAnimationFrame(()=> grp.classList.add('show')));
 }
 document.getElementById('recoveryImgStage')?.addEventListener('click', recoveryHandleTap);
