@@ -114,17 +114,14 @@ jobs:
         run: |
           mkdir -p www
           cp index.html www/index.html
-          # این خط تو نسخه‌ی قبلی این فایل کاملاً جا افتاده بود: بدون کپی app.js به www/،
-          # و چون capacitor_config.json می‌گه webDir="www"، خودِ `npx cap sync android`
-          # هم همین www خالی-از-جاوااسکریپت رو می‌ریزه تو assets/public داخل APK. نتیجه:
-          # index.html با <script defer src="app.js"> یه 404 می‌گیره و هیچ منطق تعاملی‌ای
-          # (از جمله دکمه‌ی خرید پریمیوم) اصلاً هیچ‌وقت سوار نمی‌شه — این همون علتِ
-          # «کلیک خرید عملکردی نداره» تو گزارش تیم بررسی مایکت بود.
-          [ -f app.js ] && cp app.js www/app.js || { echo "::error::app.js not found in repo root — without it, no JS ever loads in the packaged app and every interactive feature (including the premium purchase button) silently does nothing"; exit 1; }
+          # index.html با <script defer src="app.js"> اسکریپت اصلی رو جدا لود می‌کنه —
+          # بدون این خط، www/app.js اصلاً وجود نداره و اپ اندروید یه صفحه‌ی کاملاً سفید
+          # و بدون جاوااسکریپت می‌شه (نه فقط باگ سوییچ تب، هیچی کار نمی‌کنه).
+          [ -f app.js ] && cp app.js www/app.js || { echo "::error::app.js not found in repo root"; exit 1; }
           [ -f manifest.json ] && cp manifest.json www/manifest.json || true
           [ -f assets/icon-192.png ] && cp assets/icon-192.png www/icon-192.png || { [ -f icon-192.png ] && cp icon-192.png www/icon-192.png || true; }
           [ -f assets/icon-512.png ] && cp assets/icon-512.png www/icon-512.png || { [ -f icon-512.png ] && cp icon-512.png www/icon-512.png || true; }
-          # app.js registers navigator.serviceWorker at '/sw.js' — the repo file is named
+          # index.html registers navigator.serviceWorker at '/sw.js' — the repo file is named
           # sw-1.js, so it must land in www/ as sw.js or registration 404s and the SW never installs.
           [ -f sw-1.js ] && cp sw-1.js www/sw.js || true
           [ -f sw.js ] && cp sw.js www/sw.js || true
@@ -133,6 +130,180 @@ jobs:
 
       - name: Add Android platform
         run: npx cap add android
+
+      - name: Disable Capacitor's native splash/intro screen (app has its own JS intro)
+        # کاپاسیتور به‌طور پیش‌فرض یه اسپلش‌اسکرین بومی می‌سازه (همون که تو اسکرین‌شات دیدی:
+        # پس‌زمینه‌ی بنفش برند + آیکون اپ وسط صفحه) که قبل از لود شدن WebView نشون داده
+        # می‌شه — این کاملاً جدا از اینتروی خودِ اپ (که با جاوااسکریپت توی app.js ساخته
+        # شده) است، پس دوتا اینترو پشت‌سرهم می‌بینی. نکته‌ی مهم: تو API جدید اسپلش‌اسکرین
+        # اندروید، اگه آیکون رو صریحاً ست نکنی، خودش از android:icon (همون آیکون اپ) به‌عنوان
+        # پیش‌فرض استفاده می‌کنه -- پس صرفاً پاک‌کردن آیتم‌های داخل تم کافی نیست، اون آیکون
+        # بازم برمی‌گرده. راه مطمئن: اصلاً نذاریم MainActivity از اون تمِ لانچ استفاده کنه.
+        #   ۱) اگه تمِ لانچ یه postSplashScreenTheme مشخص کرده (یعنی "بعد از اسپلش برو سراغ
+        #      این تم")، مستقیم خودِ MainActivity رو به همون تمِ واقعی/بی‌اسپلش وصل می‌کنیم --
+        #      چون اون تم قطعاً معتبره (خودِ کاپاسیتور بهش رجوع می‌ده).
+        #   ۲) اگه این مورد نبود ولی یه تمِ خواهر بدون پسوند Launch/NoActionBarLaunch پیدا
+        #      بشه (الگوی استاندارد قالب کاپاسیتور)، به همون وصل می‌کنیم.
+        #   ۳) در نهایت، اگه هیچ‌کدوم پیدا نشد، به‌عنوان آخرین راه، خودِ تمِ لانچ رو ویرایش
+        #      می‌کنیم: parent اسپلش‌اسکرین و آیتم‌های مربوطش رو حذف می‌کنیم.
+        # در هر سه حالت اسمِ خودِ تم عوض نمی‌شه مگه با یه تمِ از قبل موجود و معتبر، پس ریسک
+        # "استایل ناموجود" عملاً صفره.
+        run: |
+          set -e
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+
+          python3 - "$MANIFEST" <<'PYEOF'
+          import re, sys
+
+          manifest_path = sys.argv[1]
+          with open(manifest_path, encoding='utf-8') as f:
+              manifest_src = f.read()
+
+          m = re.search(r'android:name="\.MainActivity"[^>]*?android:theme="@style/([\w.]+)"', manifest_src, re.S)
+          if not m:
+              m = re.search(r'android:theme="@style/([\w.]+)"[^>]*?android:name="\.MainActivity"', manifest_src, re.S)
+          if not m:
+              print("::warning::MainActivity theme attribute not found in AndroidManifest.xml -- skipping native splash removal")
+              sys.exit(0)
+          launch_theme = m.group(1)
+          print(f"MainActivity launch theme: {launch_theme}")
+
+          styles_candidates = [
+              "android/app/src/main/res/values/styles.xml",
+              "android/app/src/main/res/values-night/styles.xml",
+          ]
+
+          def find_style_block(src, name):
+              pat = re.compile(r'<style\s+name="' + re.escape(name) + r'"[^>]*>.*?</style>', re.S)
+              mm = pat.search(src)
+              return mm
+
+          def style_exists(src, name):
+              return re.search(r'<style\s+name="' + re.escape(name) + r'"[^>\s]*[^>]*>', src) is not None
+
+          redirect_target = None
+          styles_path_used = None
+          styles_src = None
+          for styles_path in styles_candidates:
+              try:
+                  with open(styles_path, encoding='utf-8') as f:
+                      src = f.read()
+              except FileNotFoundError:
+                  continue
+              block = find_style_block(src, launch_theme)
+              if not block:
+                  continue
+              styles_path_used = styles_path
+              styles_src = src
+              body = block.group(0)
+
+              # Strategy 1: an explicit postSplashScreenTheme inside the launch style is the
+              # most reliable signal -- Capacitor itself must point it at a real, working theme.
+              pm = re.search(r'<item\s+name="postSplashScreenTheme">\s*@style/([\w.]+)\s*</item>', body)
+              if pm:
+                  redirect_target = pm.group(1)
+                  print(f"Found postSplashScreenTheme -> redirecting MainActivity straight to '{redirect_target}'")
+              break
+
+          # Strategy 2: standard Capacitor naming convention is "<Base>Launch" / "<Base>.Launch"
+          # sitting next to its non-launch sibling "<Base>" -- try stripping a trailing
+          # "Launch" (with an optional preceding '.') and see if that style actually exists.
+          if redirect_target is None and styles_src is not None:
+              candidate = re.sub(r'\.?Launch$', '', launch_theme)
+              if candidate and candidate != launch_theme and style_exists(styles_src, candidate):
+                  redirect_target = candidate
+                  print(f"No postSplashScreenTheme found -- derived sibling theme '{redirect_target}' exists, redirecting to it")
+
+          if redirect_target is not None:
+              new_manifest_src = manifest_src.replace(
+                  f'android:theme="@style/{launch_theme}"',
+                  f'android:theme="@style/{redirect_target}"',
+              )
+              if new_manifest_src == manifest_src:
+                  print("::warning::redirect target computed but the theme string was not found verbatim in the manifest -- no change made")
+              else:
+                  with open(manifest_path, 'w', encoding='utf-8') as f:
+                      f.write(new_manifest_src)
+                  print(f"MainActivity now uses '@style/{redirect_target}' directly -- native splash bypassed entirely")
+              sys.exit(0)
+
+          # Strategy 3 (last resort): no safe redirect target found, so edit the launch style
+          # itself in place -- strip the SplashScreen parent and any splash-specific items.
+          if styles_path_used is None:
+              print("::warning::could not locate the launch theme's <style> block in any styles.xml -- native splash may still show")
+              sys.exit(0)
+
+          block = find_style_block(styles_src, launch_theme)
+          open_tag_m = re.match(r'<style\s+name="' + re.escape(launch_theme) + r'"([^>]*)>', block.group(0))
+          attrs = open_tag_m.group(1)
+          new_attrs = re.sub(r'\s+parent="Theme\.SplashScreen[^"]*"', ' parent="Theme.AppCompat.DayNight.NoActionBar"', attrs)
+          body_only = block.group(0)[open_tag_m.end():-len('</style>')]
+          new_body = re.sub(r'\s*<item\s+name="[^"]*[Ss]plash[Ss]creen[^"]*"[^>]*>.*?</item>', '', body_only, flags=re.S)
+          new_body = re.sub(r'\s*<item\s+name="postSplashScreenTheme"[^>]*>.*?</item>', '', new_body, flags=re.S)
+          new_body = re.sub(r'\s*<item\s+name="[^"]*[Ww]indow[Bb]ackground"[^>]*>\s*@drawable/splash\s*</item>', '', new_body, flags=re.S)
+          new_block = f'<style name="{launch_theme}"{new_attrs}>{new_body}</style>'
+
+          styles_src = styles_src[:block.start()] + new_block + styles_src[block.end():]
+          with open(styles_path_used, 'w', encoding='utf-8') as f:
+              f.write(styles_src)
+          print(f"Fallback: stripped native splash-screen items directly from style '{launch_theme}' in {styles_path_used}")
+          PYEOF
+
+          if [ -f capacitor.config.json ]; then
+            python3 - <<'PYEOF'
+          import json
+
+          path = "capacitor.config.json"
+          with open(path, encoding='utf-8') as f:
+              cfg = json.load(f)
+
+          plugins = cfg.get('plugins', {})
+          if 'SplashScreen' in plugins:
+              plugins['SplashScreen']['launchShowDuration'] = 0
+              plugins['SplashScreen']['launchAutoHide'] = True
+              cfg['plugins'] = plugins
+              with open(path, 'w', encoding='utf-8') as f:
+                  json.dump(cfg, f, ensure_ascii=False, indent=2)
+              print("capacitor.config.json: SplashScreen launchShowDuration set to 0")
+          else:
+              print("capacitor.config.json has no SplashScreen plugin block (nothing to patch there)")
+          PYEOF
+          fi
+
+      - name: Set app version (versionCode/versionName) from VERSION file
+        # مایکت (و گوگل‌پلی) رد می‌کنن اگه ورژن آپلودی از آخرین نسخه‌ی تأییدشده بالاتر
+        # نباشه. تا قبل از این، این ورک‌فلو اصلاً دست به versionCode/versionName نمی‌زد،
+        # پس هر بار همون مقدار پیش‌فرضِ Capacitor (versionCode=1, versionName="1.0")
+        # می‌موند — دقیقاً برای همین هر بیلد جدید رد می‌شد (حتی وقتی فایل VERSION تو ریپو
+        # عوض شده بود، چون هیچ‌کس این عدد رو واقعاً به build.gradle نمی‌رسوند).
+        # از این به بعد: versionName = دقیقاً همون متن فایل VERSION (مثلاً "1.5")، و
+        # versionCode = major*10000 + minor*100 + patch، که تا وقتی VERSION رو ببری بالا
+        # همیشه از قبلی بزرگ‌تره. اگه مایکت بازم رد کرد، دقیق عددی که تو پنلش به‌عنوان
+        # «آخرین نسخه‌ی پذیرفته‌شده» نشون می‌ده رو بگو تا offset این محاسبه رو باهاش هماهنگ کنم.
+        run: |
+          APP_GRADLE="android/app/build.gradle"
+          python3 - "$APP_GRADLE" <<'PYEOF'
+          import sys, re
+          path = sys.argv[1]
+          with open('VERSION', encoding='utf-8') as f:
+              version_name = f.read().strip()
+          parts = (version_name.split('.') + ['0','0'])[:3]
+          major, minor, patch = (int(p) if p.isdigit() else 0 for p in parts)
+          version_code = major*10000 + minor*100 + patch
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+          new_src, n1 = re.subn(r'versionCode\s+\d+', f'versionCode {version_code}', src, count=1)
+          if n1 == 0:
+              print(f"::error::could not find a 'versionCode' line in {path}")
+              sys.exit(1)
+          new_src, n2 = re.subn(r'versionName\s+"[^"]*"', f'versionName "{version_name}"', new_src, count=1)
+          if n2 == 0:
+              print(f"::error::could not find a 'versionName' line in {path}")
+              sys.exit(1)
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(new_src)
+          print(f"Set versionName={version_name!r}, versionCode={version_code}")
+          PYEOF
 
       - name: Generate app icon manually (legacy + adaptive, from repo-root icon)
         # Builds every launcher icon file by hand with ImageMagick instead of relying on
@@ -195,81 +366,6 @@ jobs:
 
           echo "Generated launcher icons manually from $SRC:"
           find "$RES_BASE" -iname "ic_launcher*"
-
-      - name: Align Android 12+ system splash screen with the app's brand purple
-        # On Android 12+, the OS shows its OWN splash (icon + background) at cold start,
-        # BEFORE MainActivity/WebView exists — no app can skip this, it's enforced by the
-        # platform. Left uncustomized, it falls back to a generic color/icon presentation
-        # that doesn't necessarily match #4338CA (index.html's splash gradient starts at
-        # exactly that color), so it can look like an unrelated purple flash before the
-        # real (HTML) splash appears. This makes the OS splash use the same #4338CA and the
-        # app's own adaptive icon, so the hand-off into the HTML splash feels continuous.
-        # Uses only the native `Theme.SplashScreen` (built into API 31+ — no Gradle
-        # dependency needed) via a values-v31 override, so behavior on <31 is untouched.
-        run: |
-          set -e
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          COLORS="android/app/src/main/res/values/colors.xml"
-          V31_DIR="android/app/src/main/res/values-v31"
-          mkdir -p "$V31_DIR"
-
-          python3 - "$MANIFEST" "$COLORS" "$V31_DIR" <<'PYEOF'
-          import re, sys, os
-          manifest_path, colors_path, v31_dir = sys.argv[1], sys.argv[2], sys.argv[3]
-
-          with open(manifest_path, encoding='utf-8') as f:
-              manifest = f.read()
-
-          # Find the MainActivity element and whatever theme it currently declares (if any).
-          activity_match = re.search(r'<activity\b[^>]*android:name="\.MainActivity"[^>]*>', manifest)
-          base_theme = 'AppTheme.NoActionBarLaunch'  # Capacitor's default; used only if none found
-          if activity_match:
-              theme_match = re.search(r'android:theme="@style/([^"]+)"', activity_match.group(0))
-              if theme_match:
-                  base_theme = theme_match.group(1)
-
-          # 1) Add/ensure the brand-purple color resource exists.
-          if os.path.exists(colors_path):
-              with open(colors_path, encoding='utf-8') as f:
-                  colors_src = f.read()
-          else:
-              colors_src = '<resources>\n</resources>\n'
-          if 'dreamlifeSplashBg' not in colors_src:
-              colors_src = colors_src.replace(
-                  '</resources>',
-                  '    <color name="dreamlifeSplashBg">#4338CA</color>\n</resources>'
-              )
-          with open(colors_path, 'w', encoding='utf-8') as f:
-              f.write(colors_src)
-
-          # 2) values-v31/styles.xml: define the splash theme, then hand off to the app's
-          #    real theme once the system splash finishes.
-          starting_theme = (
-              '<resources>\n'
-              '    <style name="AppTheme.Starting" parent="Theme.SplashScreen">\n'
-              '        <item name="windowSplashScreenBackground">@color/dreamlifeSplashBg</item>\n'
-              '        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>\n'
-              f'        <item name="postSplashScreenTheme">@style/{base_theme}</item>\n'
-              '    </style>\n'
-              '</resources>\n'
-          )
-          with open(os.path.join(v31_dir, 'styles.xml'), 'w', encoding='utf-8') as f:
-              f.write(starting_theme)
-
-          # 3) Point MainActivity at the new starting theme (v31 devices only use this —
-          #    values-v31/styles.xml doesn't exist on <31, so nothing changes there).
-          if activity_match:
-              old_tag = activity_match.group(0)
-              if 'android:theme=' in old_tag:
-                  new_tag = re.sub(r'android:theme="@style/[^"]+"', 'android:theme="@style/AppTheme.Starting"', old_tag)
-              else:
-                  new_tag = old_tag[:-1] + ' android:theme="@style/AppTheme.Starting">'
-              manifest = manifest.replace(old_tag, new_tag, 1)
-              with open(manifest_path, 'w', encoding='utf-8') as f:
-                  f.write(manifest)
-          else:
-              print('::warning::Could not find MainActivity in AndroidManifest.xml — system splash screen color/icon left as default.')
-          PYEOF
 
       - name: Generate notification small icon (ic_stat_icon)
         run: |
@@ -378,11 +474,11 @@ jobs:
               f.write(src)
           PYEOF
 
-          # Same silent-failure class as MainActivity registration above: if this insertion
-          # ever no-ops (e.g. because some other plugin already left an unrelated <queries>
-          # tag in the manifest, which makes the script skip insertion entirely), the build
-          # still succeeds and signs fine, but bindService() to Myket's billing service will
-          # fail on every Android 11+ device with no build-time warning at all.
+          # Fail loudly instead of shipping an APK where Myket's billing service is
+          # invisible to bindService() on Android 11+ (package-visibility / <queries>).
+          # This exact silent-failure class (build succeeds, APK signs fine, button
+          # does nothing on-device) is what previously bit MainActivity registration —
+          # same guard, applied here too.
           if ! grep -q 'ir.mservices.market.BILLING' "$MANIFEST"; then
             echo "::error::Myket BILLING <uses-permission> was not added to AndroidManifest.xml"
             exit 1
@@ -414,9 +510,10 @@ jobs:
               f.write(src)
           PYEOF
 
-          # Same class of silent failure: if neither regex branch matched, aidl compilation
-          # stays off and MarketBillingPlugin fails to compile with "cannot find symbol:
-          # IInAppBillingService" — verify the flag actually landed.
+          # Same class of silent failure as above: if neither branch of the regex matched
+          # (e.g. build.gradle isn't formatted the way these regexes expect), aidl
+          # compilation stays off and MarketBillingPlugin fails to compile with
+          # "cannot find symbol: IInAppBillingService" — verify the flag actually landed.
           if ! grep -q 'aidl true' "$APP_GRADLE"; then
             echo "::error::'aidl true' was not added to android/app/build.gradle — IInAppBillingService.aidl will be silently ignored and MarketBillingPlugin will fail to compile."
             exit 1
@@ -496,6 +593,7 @@ jobs:
                       .apply();
                   ChecklistWidgetProvider.refreshAll(getContext());
                   DayProgressWidgetProvider.refreshAll(getContext());
+                  QuoteWidgetProvider.refreshAll(getContext());
                   call.resolve();
               }
 
@@ -633,6 +731,492 @@ jobs:
                   int id = context.getResources().getIdentifier("widget_pattern_" + pattern, "drawable", appId);
                   return id;
               }
+          }
+          JAVAEOF
+
+          # ---- QuoteCatalog.java (curated pool of real, attributed quotes for the
+          #      daily quote widget -- see QuoteWidgetProvider for how one is picked per day) ----
+          cat > "$WIDGET_DIR/QuoteCatalog.java" <<JAVAEOF
+          package ${APP_ID}.widget;
+
+          /** Curated pool of real, attributed quotes for the daily quote widget. Each entry is
+           *  {quote, author}. One is picked deterministically per calendar day (see
+           *  QuoteWidgetProvider.todayIndex), so every device shows the same quote on the same day. */
+          class QuoteCatalog {
+              static final String[][] QUOTES = {
+                  // --- ماهاتما گاندی ---
+                  {"قدرت واقعی از توانایی جسمی نمی‌آید؛ از اراده‌ای شکست‌ناپذیر می‌آید.", "ماهاتما گاندی"},
+                  {"فردا طوری زندگی کن که انگار قرار است بمیری؛ طوری بیاموز که انگار قرار است تا ابد زنده بمانی.", "ماهاتما گاندی"},
+                  {"خوشبختی زمانی است که آنچه فکر می‌کنی، آنچه می‌گویی و آنچه انجام می‌دهی با هم هماهنگ باشند.", "ماهاتما گاندی"},
+                  {"ضعیف‌ها هرگز نمی‌توانند ببخشند؛ بخشش خصلت نیرومندان است.", "ماهاتما گاندی"},
+                  {"انسان چیزی نیست جز محصول افکار خودش؛ آنچه می‌اندیشد، همان می‌شود.", "ماهاتما گاندی"},
+                  {"بهترین راه برای یافتن خود، گم‌کردن خود در خدمت به دیگران است.", "ماهاتما گاندی"},
+                  {"آزادی اگر شامل آزادی اشتباه‌کردن نباشد، ارزشی ندارد.", "ماهاتما گاندی"},
+                  {"کیفیت کاری که انجام می‌دهیم اهمیت دارد، نه کمیت آن.", "ماهاتما گاندی"},
+                  {"هر جا عشق باشد، زندگی هم هست.", "ماهاتما گاندی"},
+                  {"اختلاف‌نظر صادقانه اغلب نشانه‌ی خوبی از پیشرفت است.", "ماهاتما گاندی"},
+                  {"ایمانت را به انسانیت از دست نده؛ انسانیت اقیانوسی است که چند قطره‌ی کثیف، آن را کثیف نمی‌کند.", "ماهاتما گاندی"},
+                  {"نمی‌توانی از خشونت به صلح برسی، همان‌طور که نمی‌توانی با ماندن بیدار، خواب را تجربه کنی.", "ماهاتما گاندی"},
+
+                  // --- رنه دکارت ---
+                  {"من می‌اندیشم، پس هستم.", "رنه دکارت"},
+                  {"همین کافی نیست که ذهنی خوب داشته باشی؛ نکته‌ی اصلی، به‌کاربردن درست آن است.", "رنه دکارت"},
+                  {"عقل سلیم، منصفانه‌ترین چیز در جهان است، چون هرکس گمان می‌کند به اندازه‌ی کافی از آن برخوردار است.", "رنه دکارت"},
+                  {"برای جست‌وجوی حقیقت، لازم است یک‌بار در زندگی، تا جایی که ممکن است، در همه‌چیز شک کرد.", "رنه دکارت"},
+                  {"تقسیم هر دشواری به بخش‌های کوچک‌تر، تا جایی که برای حل آن لازم و ممکن است، ضروری است.", "رنه دکارت"},
+                  {"خواندن کتاب‌های خوب مانند گفت‌وگو با بهترین انسان‌های قرن‌های گذشته است.", "رنه دکارت"},
+                  {"شک‌کردن، نشانه‌ی خردمندی است.", "رنه دکارت"},
+                  {"برای زیستن خوب، نخست باید اندیشیدن خوب را بیاموزیم.", "رنه دکارت"},
+
+                  // --- فردریش نیچه ---
+                  {"آنچه مرا نمی‌کشد، قوی‌ترم می‌کند.", "فردریش نیچه"},
+                  {"هر که چرایی برای زیستن دارد، تقریباً هر چگونه‌ای را تاب می‌آورد.", "فردریش نیچه"},
+                  {"باید در خود آشوبی داشته باشی تا بتوانی ستاره‌ای رقصان بزایی.", "فردریش نیچه"},
+                  {"کسی که با هیولاها می‌جنگد، باید مراقب باشد که خود به هیولا تبدیل نشود.", "فردریش نیچه"},
+                  {"بسیاری از افراد، به این دلیل هرگز رهایی نمی‌یابند که زنجیری را که باید بشکنند، خیلی محکم گرفته‌اند.", "فردریش نیچه"},
+                  {"آنچه بر پایه‌ی عشق انجام می‌شود، همیشه فراسوی نیک و بد اتفاق می‌افتد.", "فردریش نیچه"},
+                  {"در انتقام و در عشق، زن وحشی‌تر از مرد است.", "فردریش نیچه"},
+                  {"بدون موسیقی، زندگی اشتباه بزرگی بود.", "فردریش نیچه"},
+                  {"کسی که هدفی برای رسیدن دارد، مسیرهای سخت را نیز تحمل می‌کند.", "فردریش نیچه"},
+                  {"در نهایت، آدمی فقط تجربه‌ی خودش را دوست دارد.", "فردریش نیچه"},
+                  {"باید یاد بگیریم از خودمان دوست بداریم، با شادی سالم و کامل؛ تا بتوانیم بی‌آنکه سرگردان شویم، پابرجا بمانیم.", "فردریش نیچه"},
+                  {"هیچ‌کس نمی‌تواند پلی برایت بسازد که تو خود باید از رودخانه‌ی زندگی عبور کنی، جز خودت.", "فردریش نیچه"},
+                  {"در هر کاری، بلوغ یعنی بازیافتن جدیتی که در کودکی هنگام بازی داشتیم.", "فردریش نیچه"},
+                  {"اگر نگاه طولانی به ژرفا بیندازی، ژرفا هم به تو خیره می‌شود.", "فردریش نیچه"},
+                  {"یک درخت برای رسیدن به آسمان، ریشه‌هایش باید تا دوزخ برود.", "فردریش نیچه"},
+                  {"ما هنر داریم تا از حقیقت نمیریم.", "فردریش نیچه"},
+
+                  // --- ارسطو ---
+                  {"ما همان چیزی هستیم که بارها انجام می‌دهیم؛ پس برتری یک عمل نیست، بلکه یک عادت است.", "ارسطو"},
+                  {"آموزش ذهن بدون آموزش قلب، هیچ آموزشی نیست.", "ارسطو"},
+                  {"ریشه‌ی آموزش تلخ است، اما میوه‌اش شیرین است.", "ارسطو"},
+                  {"شناخت خویشتن، آغاز همه‌ی خردمندی‌هاست.", "ارسطو"},
+                  {"کسی که ترسناک نیست و از هیچ‌چیز نمی‌ترسد، دیوانه است، نه شجاع.", "ارسطو"},
+                  {"کیفیتی که بارها تکرار می‌کنیم، ما را می‌سازد؛ برتری، عمل نیست، عادت است.", "ارسطو"},
+                  {"هدف زندگی، نه دانش، که عمل است.", "ارسطو"},
+                  {"امیدواربودن به معنای داشتن اعتماد به خود است.", "ارسطو"},
+                  {"دوستی، یک روح واحد است که در دو بدن جای گرفته.", "ارسطو"},
+                  {"کسی که خشمگین شدن را در زمان درست، به اندازه‌ی درست و برای دلیل درست بلد باشد، شایسته‌ی ستایش است.", "ارسطو"},
+                  {"شادکامی به خودمان بستگی دارد.", "ارسطو"},
+                  {"طبیعت هیچ‌چیز را بی‌هدف نمی‌آفریند.", "ارسطو"},
+                  {"کل، چیزی بیش از مجموع اجزای خود است.", "ارسطو"},
+                  {"برای انجام کارهای بزرگ، نباید فقط عمل کرد، بلکه باید رؤیا هم دید؛ نه‌فقط برنامه‌ریزی کرد، بلکه باور هم داشت.", "ارسطو"},
+                  {"صبر، تلخ است، اما میوه‌اش شیرین است.", "ارسطو"},
+                  {"آنچه در قدرت ماست انجام دهیم، عادت به انجام آن به ما شخصیت می‌دهد.", "ارسطو"},
+
+                  // --- اریک اریکسون ---
+                  {"در جنگل اجتماعی هستی انسان، بدون حس هویت، احساس زنده‌بودن ممکن نیست.", "اریک اریکسون"},
+                  {"امید، هم نخستین و هم ضروری‌ترین فضیلتِ زنده‌بودن است.", "اریک اریکسون"},
+                  {"کودکان سالم از زندگی نمی‌ترسند، اگر بزرگ‌ترهایشان به اندازه‌ی کافی درستکار باشند که از مرگ نترسند.", "اریک اریکسون"},
+                  {"کودکان را نمی‌توان با تحسین توخالی و تشویق از سرِ ترحم فریب داد.", "اریک اریکسون"},
+                  {"در هر مرحله از زندگی، معجزه‌ای تازه از شکوفایی نیرومند وجود دارد.", "اریک اریکسون"},
+                  {"غنی‌ترین و کامل‌ترین زندگی‌ها می‌کوشند میان سه حوزه‌ی کار، عشق و بازی، توازنی درونی برقرار کنند.", "اریک اریکسون"},
+                  {"جست‌وجوی جوانی، نه برای آزادی مطلق، بلکه برای راه‌های تازه‌ی روبه‌روشدن با آنچه واقعاً اهمیت دارد است.", "اریک اریکسون"},
+                  {"نمی‌توان یک کودک را با علامت و نشانه‌ی بیماری‌اش یکی دانست.", "اریک اریکسون"},
+
+                  // --- الکس هرمزی ---
+                  {"هر روز فرصتی تازه برای بهترشدن است.", "الکس هرمزی"},
+                  {"شک، بیش از شکست، رؤیاها را می‌کشد.", "الکس هرمزی"},
+                  {"زندگی تو، بازتاب طرز فکر توست.", "الکس هرمزی"},
+                  {"فرصت‌ها اغلب در لباس کار سخت پنهان شده‌اند.", "الکس هرمزی"},
+                  {"تنها میان‌بر واقعی در زندگی، پایداری است.", "الکس هرمزی"},
+                  {"تفاوت میان موفقیت و شکست، انجام‌دادن کار در روزهایی است که حوصله‌اش را نداری.", "الکس هرمزی"},
+                  {"انضباط یعنی توانایی نگه‌داشتن قول‌هایی که به خودت می‌دهی.", "الکس هرمزی"},
+                  {"آدم‌های باانضباط، اراده‌ی بیشتری ندارند؛ آن‌ها از قبل محیط را طوری می‌چینند که کار درست، کار ساده باشد.", "الکس هرمزی"},
+                  {"همه‌ی آدم‌های موفق از صفر شروع کرده‌اند؛ تنها تفاوتشان با بقیه این است که واقعاً شروع کردند.", "الکس هرمزی"},
+                  {"ما آرزوی زندگی دیگران را داریم، نه آرزوی فداکاری‌هایشان را؛ آرزوی جایزه را داریم، نه آرزوی بهایی که پرداختند.", "الکس هرمزی"},
+                  {"استانداردی که وقتی کسی نگاهت نمی‌کند رعایت می‌کنی، همان استاندارد واقعی توست.", "الکس هرمزی"},
+                  {"یک احمق متمرکز، بیش از یک نابغه‌ی حواس‌پرت پیش می‌رود.", "الکس هرمزی"},
+
+                  // --- مارکوس اورلیوس ---
+                  {"زندگی ما همان چیزی است که افکارمان آن را می‌سازند.", "مارکوس اورلیوس"},
+                  {"بهترین راه انتقام، شبیه‌کسی که به تو بدی کرده نشدن است.", "مارکوس اورلیوس"},
+                  {"کاری که در این لحظه انجام می‌دهی را با تمام وجود انجام بده.", "مارکوس اورلیوس"},
+                  {"اگر از چیزی بیرونی رنج می‌بری، درد از خود آن چیز نیست، بلکه از برآورد توست از آن؛ و این برآورد را هر لحظه می‌توانی پس بگیری.", "مارکوس اورلیوس"},
+                  {"مانع عمل، عمل را پیش می‌برد؛ آنچه سرِ راه است، خودِ راه می‌شود.", "مارکوس اورلیوس"},
+                  {"وقتی صبح بیدار می‌شوی، به خودت بگو: امروز با آدم‌های فضول، ناسپاس، خودخواه روبه‌رو خواهم شد.", "مارکوس اورلیوس"},
+                  {"دیگر درباره‌ی این‌که آدم خوب چه‌جور آدمی است بحث نکن؛ خودت آن باش.", "مارکوس اورلیوس"},
+                  {"سعادت زندگی‌ات به کیفیت افکارت بستگی دارد.", "مارکوس اورلیوس"},
+                  {"چیزهایی که نگرانشان هستی را در نظر بگیر و بگو چند وقت دیگر همه‌شان از یاد خواهند رفت.", "مارکوس اورلیوس"},
+                  {"هرکس فقط همین لحظه‌ی حال را زندگی می‌کند؛ گذشته از دست رفته و آینده نامعلوم است.", "مارکوس اورلیوس"},
+                  {"وقتی کسی به تو آسیب می‌رساند، بگذار ذهنت درگیر این باشد که چه چیزی در او آسیب دیده که باعث این کار شده.", "مارکوس اورلیوس"},
+                  {"هر لحظه به آنچه پیشِ روست فکر کن، دقیق و بی‌طرفانه.", "مارکوس اورلیوس"},
+                  {"تسلط بر خشم، نشانه‌ی قدرت واقعی است.", "مارکوس اورلیوس"},
+                  {"آدمی که خشمگین می‌شود، اغلب دلیلش را فراموش می‌کند و فقط خشم باقی می‌ماند.", "مارکوس اورلیوس"},
+                  {"زمان، رودخانه‌ای است از رویدادها و جریانش شدید است؛ به‌محض این‌که چیزی دیده می‌شود، از برابر چشم می‌رود و چیز دیگری جایش را می‌گیرد.", "مارکوس اورلیوس"},
+                  {"از پرسه‌زدن دست بردار؛ دیگر قرار نیست جوابِ نامه‌های خودت را بخوانی، قرار است زندگی کنی.", "مارکوس اورلیوس"},
+
+                  // --- سنکا ---
+                  {"همه‌ی زندگی یک شاگردی است.", "سنکا"},
+                  {"ما اغلب بیشتر از رنج واقعی، از تصورمان درباره‌ی رنج، رنج می‌بریم.", "سنکا"},
+                  {"دشواری‌ها همیشه بهانه‌ای برای پیشرفت هستند.", "سنکا"},
+                  {"مسیر طولانی است اگر از راه دستورها بروی، اما کوتاه است اگر از راه سرمشق‌ها بروی.", "سنکا"},
+                  {"همه‌ی هنر زندگی، در دانستنِ فرق میان لذت مضر و لذت نافع است.", "سنکا"},
+                  {"هیچ باد مساعدی برای کشتی‌ای که مقصدش را نمی‌داند، وجود ندارد.", "سنکا"},
+                  {"وقتی که بیمار می‌شویم درمی‌یابیم که چقدر ثروت زیاد، بی‌فایده است.", "سنکا"},
+                  {"بخشی از سلامتی، آرزوی سلامتی داشتن است.", "سنکا"},
+                  {"همان‌طور که یک شعله در باد شدید خاموش، ولی در باد ملایم پرشورتر می‌شود، همین‌طور باید در برابر خواسته‌های شدید، ملایم بود.", "سنکا"},
+                  {"اگر می‌خواهی از هر ترسی رها شوی، فرض کن هر آنچه از آن می‌ترسی، حتماً رخ خواهد داد.", "سنکا"},
+                  {"مردم بیشتر برای رسیدن به چیزهایی که ندارند تلاش می‌کنند تا از چیزهایی که دارند لذت ببرند.", "سنکا"},
+                  {"ما بیشتر به خاطر شایعات رنج می‌بریم تا واقعیت.", "سنکا"},
+
+                  // --- اپیکتتوس ---
+                  {"ما را رویدادها آزار نمی‌دهند، بلکه دیدگاه ما درباره‌ی آن رویدادهاست.", "اپیکتتوس"},
+                  {"نخست بگو با خودت که چه می‌خواهی باشی، سپس آنچه لازم است انجام بده.", "اپیکتتوس"},
+                  {"تنها یک راه به سوی سعادت هست، و آن رهاکردن نگرانی درباره‌ی چیزهایی است که فراتر از قدرت انتخاب ماست.", "اپیکتتوس"},
+                  {"مردان نه با خودِ چیزها، بلکه با نظرشان درباره‌ی آن چیزها آشفته می‌شوند.", "اپیکتتوس"},
+                  {"از میان چیزهایی که وجود دارند، بعضی در دست ما هستند و بعضی نیستند.", "اپیکتتوس"},
+                  {"اگر می‌خواهی بهتر شوی، بپذیر که در بعضی چیزها نادان به‌نظر برسی و کم‌عقل جلوه کنی.", "اپیکتتوس"},
+                  {"آزادی، تنها با نخواستن چیزهایی که در قدرت ما نیست به دست می‌آید.", "اپیکتتوس"},
+                  {"با دو گوش و یک دهان به دنیا آمده‌ایم تا بیشتر بشنویم و کمتر حرف بزنیم.", "اپیکتتوس"},
+                  {"نه چیزها، که باورهایمان درباره‌ی چیزها، دنیای ما را می‌سازند.", "اپیکتتوس"},
+                  {"نخست خودت را با خودت آشتی بده، بعد بکوش که دیگران را با خودشان آشتی دهی.", "اپیکتتوس"},
+
+                  // --- کنفوسیوس ---
+                  {"فرقی نمی‌کند چقدر آهسته می‌روی، مادامی‌که متوقف نشوی.", "کنفوسیوس"},
+                  {"ما دو زندگی داریم و دومی از روزی شروع می‌شود که بفهمیم فقط یکی داریم.", "کنفوسیوس"},
+                  {"کسی که ایستاده بماند، هرگز به مقصد نمی‌رسد.", "کنفوسیوس"},
+                  {"مسیر هزار مایلی، با یک گام آغاز می‌شود.", "کنفوسیوس"},
+                  {"کارت را دوست بدار، آن‌وقت هرگز یک روز از زندگی‌ات را کار نکرده‌ای.", "کنفوسیوس"},
+                  {"وقتی روشن است که هدف قابل‌دستیابی نیست، هدف را تنظیم نکن؛ اقدام‌هایت را تنظیم کن.", "کنفوسیوس"},
+                  {"اگر اشتباهی کردی و آن را اصلاح نکنی، این خودش اشتباهی دیگر است.", "کنفوسیوس"},
+                  {"انسان نجیب در آرامش می‌اندیشد؛ انسان فرومایه همیشه نگران است.", "کنفوسیوس"},
+                  {"بهترین رنگین‌کمان همیشه بعد از بدترین طوفان می‌آید.", "کنفوسیوس"},
+                  {"هر جا که بروی، با تمام دل و جانت برو.", "کنفوسیوس"},
+                  {"دانستن این‌که چه می‌دانی و چه نمی‌دانی، خودِ دانش واقعی است.", "کنفوسیوس"},
+                  {"طلا را می‌توان با آتش آزمود، زن را با طلا، مرد را با زن، و انسان را با غرورش.", "کنفوسیوس"},
+
+                  // --- سقراط ---
+                  {"زندگی‌ای که بازبینی نشود، ارزش زیستن ندارد.", "سقراط"},
+                  {"من فقط یک چیز می‌دانم، و آن این است که هیچ نمی‌دانم.", "سقراط"},
+                  {"راز تغییر، در تمرکز تمام انرژی‌ات نه بر جنگیدن با گذشته، بلکه بر ساختن آینده است.", "سقراط"},
+                  {"قوی‌ترین‌ها کسانی هستند که بر خواسته‌های خود چیره می‌شوند، نه کسانی که دشمنانشان را شکست می‌دهند.", "سقراط"},
+                  {"شکوه واقعی، در نبودن هرگز است، بلکه در برخاستن هر بار که می‌افتیم.", "سقراط"},
+                  {"آموزش، شعله‌افروزی است، نه پرکردن یک ظرف.", "سقراط"},
+                  {"کسی که کمترین نیازها را دارد، به خدایان نزدیک‌تر است.", "سقراط"},
+                  {"وقتت را با شکایت از دشمنانت هدر نده؛ آن را صرف رسیدن به هدف‌هایت کن.", "سقراط"},
+
+                  // --- رالف والدو امرسون ---
+                  {"آنچه پشتِ سر ما و آنچه پیشِ روی ماست، در برابر آنچه در درون ماست، اهمیتی ندارد.", "رالف والدو امرسون"},
+                  {"موفقیت این نیست که هرگز نلغزی، بلکه این است که هر بار پس از افتادن برخیزی.", "رالف والدو امرسون"},
+                  {"آنچه هستی، آن‌قدر بلند فریاد می‌زند که نمی‌گذارد بشنوم چه می‌گویی.", "رالف والدو امرسون"},
+                  {"مسیری را که دیگران رفته‌اند، نرو؛ به‌جایش به‌جایی برو که هیچ راهی نیست و ردی از خود به‌جا بگذار.", "رالف والدو امرسون"},
+                  {"بزرگ‌ترین جایزه‌ی زندگی این است که هیچ‌کس نمی‌تواند صادقانه به دیگری کمک کند، بی‌آنکه خودش هم کمک بگیرد.", "رالف والدو امرسون"},
+                  {"آنچه اراده می‌کنیم، انجامش می‌دهیم؛ و آنچه انجام می‌دهیم، همان می‌شویم.", "رالف والدو امرسون"},
+                  {"بخش بزرگی از شجاعت، همان شهامتِ داشتنِ چشمان بازِ خطر است.", "رالف والدو امرسون"},
+                  {"شخصیت، بیش از عقل حرف می‌زند.", "رالف والدو امرسون"},
+                  {"هر دیواری یک در است.", "رالف والدو امرسون"},
+                  {"اعتماد به خودت، رازِ نخستِ موفقیت است.", "رالف والدو امرسون"},
+                  {"زندگی، یک سفر است، نه یک مقصد.", "رالف والدو امرسون"},
+                  {"نبوغ یعنی دوباره دیدنِ آنچه در کودکی می‌دیدیم.", "رالف والدو امرسون"},
+
+                  // --- بنجامین فرانکلین ---
+                  {"سرمایه‌گذاری در دانش، همیشه بهترین سود را می‌دهد.", "بنجامین فرانکلین"},
+                  {"وقتی که کارت تمام شد، تمام شده؛ اما اگر آن را کامل انجام دادی، برای همیشه انجام شده.", "بنجامین فرانکلین"},
+                  {"به من بگو و فراموش می‌کنم؛ به من بیاموز و شاید به‌یاد بسپارم؛ درگیرم کن و یاد می‌گیرم.", "بنجامین فرانکلین"},
+                  {"شکست‌خوردن در آماده‌شدن، یعنی آماده‌شدن برای شکست‌خوردن.", "بنجامین فرانکلین"},
+                  {"انرژی و پایداری، هر مانعی را از میان برمی‌دارند.", "بنجامین فرانکلین"},
+                  {"زود بخواب و زود بیدار شو تا سالم، ثروتمند و خردمند شوی.", "بنجامین فرانکلین"},
+                  {"کسی که وقتش را هدر می‌دهد، زندگی‌اش را هدر می‌دهد.", "بنجامین فرانکلین"},
+                  {"بدون تلاش، تلاش‌کردنی وجود ندارد و بدون تلاش، پیشرفتی هم وجود ندارد.", "بنجامین فرانکلین"},
+                  {"عدالت هرگز اجرا نمی‌شود مگر آن‌ها که آسیب ندیده‌اند به اندازه‌ی آن‌ها که آسیب دیده‌اند خشمگین باشند.", "بنجامین فرانکلین"},
+                  {"سرمایه‌گذاری بر خودت، کمترین ریسک را دارد و بیشترین سود را می‌دهد.", "بنجامین فرانکلین"},
+
+                  // --- ویکتور فرانکل ---
+                  {"وقتی دیگر نمی‌توانیم شرایط را تغییر دهیم، در برابر چالش تغییر خودمان قرار می‌گیریم.", "ویکتور فرانکل"},
+                  {"میان محرک و پاسخ، فضایی هست؛ در آن فضا قدرت انتخاب پاسخ ما نهفته است.", "ویکتور فرانکل"},
+                  {"کسانی که چرایی برای زیستن دارند، تقریباً هر چگونه‌ای را تاب می‌آورند.", "ویکتور فرانکل"},
+                  {"آنچه انسان را واقعاً به حرکت وامی‌دارد، نه لذت، بلکه معناست.", "ویکتور فرانکل"},
+                  {"آزادترین چیزی که از انسان نمی‌توان گرفت، انتخاب نگرش او در هر شرایطی است.", "ویکتور فرانکل"},
+                  {"در معنابخشیدن به رنج، رنج دیگر رنج نیست.", "ویکتور فرانکل"},
+                  {"موفقیت را نباید دنبال کرد؛ باید گذاشت که به‌عنوان اثر جانبی وقف‌شدن به هدفی بزرگ‌تر از خودمان، پیش آید.", "ویکتور فرانکل"},
+                  {"زندگی هرگز به‌خاطر شرایط، بی‌معنا نمی‌شود؛ فقط ما هستیم که ممکن است معنایش را نبینیم.", "ویکتور فرانکل"},
+
+                  // --- کارل یونگ ---
+                  {"تا وقتی ناخودآگاه را آگاه نکنی، آن ناخودآگاه زندگی‌ات را هدایت می‌کند و تو آن را سرنوشت می‌نامی.", "کارل یونگ"},
+                  {"کسی که به بیرون نگاه می‌کند، خواب می‌بیند؛ کسی که به درون نگاه می‌کند، بیدار می‌شود.", "کارل یونگ"},
+                  {"چیزی که در برابرش مقاومت می‌کنی، ماندگار می‌شود.", "کارل یونگ"},
+                  {"امتیاز یک عمر، این است که خودِ واقعی‌ات باشی.", "کارل یونگ"},
+                  {"تا وقتی که شعله‌ای در تو روشن است، ذوب می‌شوی؛ در آتش خودآگاهی نیز همین‌طور.", "کارل یونگ"},
+                  {"من همان نیستم که در کودکی بر من گذشت، بلکه انتخابی هستم که با آن روبه‌رو شدم.", "کارل یونگ"},
+                  {"در هر بزرگسال، کودکی نهفته است که همیشه در حال شدن است.", "کارل یونگ"},
+                  {"سایه‌ی خودت را بشناس، وگرنه او بی‌آنکه بدانی، تو را هدایت می‌کند.", "کارل یونگ"},
+
+                  // --- ناپلئون هیل ---
+                  {"آنچه ذهن می‌تواند تصور و باور کند، می‌تواند به دست آورد.", "ناپلئون هیل"},
+                  {"هر شکستی، بذر یک سود برابر یا بزرگ‌تر را همراه خود دارد.", "ناپلئون هیل"},
+                  {"قدرت اندیشه‌ات را کنترل کن، و اندیشه‌ات محیطت را کنترل خواهد کرد.", "ناپلئون هیل"},
+                  {"صبر کن، اندیشه‌هایت را سازمان بده، مسیرت را مشخص کن و سپس با اطمینان به سمت هدفت حرکت کن.", "ناپلئون هیل"},
+                  {"شکست موقت، تنها زمانی به شکست دائمی تبدیل می‌شود که آن را به‌عنوان بهانه بپذیریم.", "ناپلئون هیل"},
+                  {"هدف مشخص، آغاز همه‌ی موفقیت‌های ارزشمند است.", "ناپلئون هیل"},
+                  {"بیشتر افراد بزرگ، درست پیش از بزرگ‌ترین لحظه‌ی موفقیتشان، بزرگ‌ترین شکستشان را تجربه کرده‌اند.", "ناپلئون هیل"},
+                  {"عمل کن، نه فقط فکر؛ ایده‌ها بدون عمل، فقط ایده باقی می‌مانند.", "ناپلئون هیل"},
+
+                  // --- جیم ران ---
+                  {"اگر نظمی که برای رسیدن به رؤیایت لازم است را نپذیری، باید رنجِ از دست‌دادنش را بپذیری.", "جیم ران"},
+                  {"هر روز، یا نظم را می‌سازی، یا پشیمانی را.", "جیم ران"},
+                  {"شکل‌دادن به زندگی خودت، وظیفه‌ی توست؛ نمی‌توانی این مسئولیت را به کس دیگری بدهی.", "جیم ران"},
+                  {"موفقیت چیزی نیست که دنبالش بروی؛ چیزی است که با آنچه هستی، به سویت می‌آید.", "جیم ران"},
+                  {"عملکردت را برای رسیدن به هدف تنظیم کن، نه فقط برای رسیدن به احساس خوب.", "جیم ران"},
+                  {"روزها سخت‌اند اما پرثمر؛ آسان‌ترین روزها، اغلب کم‌ثمرترین‌اند.", "جیم ران"},
+                  {"از کاری که برایت آسان است شروع کن؛ سختی‌ها را در راه یاد می‌گیری.", "جیم ران"},
+                  {"اگر تو مراقب زندگی‌ات نباشی، دیگران آن را برایت مدیریت می‌کنند.", "جیم ران"},
+
+                  // --- بروس لی ---
+                  {"از آنچه هستی مأیوس نشو؛ نگران این باش که چه چیزی می‌توانی بشوی.", "بروس لی"},
+                  {"نه از فردی که ده‌هزار مشت جدا از هم زده، بلکه از فردی که یک مشت را ده‌هزار بار تمرین کرده می‌ترسم.", "بروس لی"},
+                  {"مانند آب باش، دوستِ من.", "بروس لی"},
+                  {"همیشه پویا باش، سازگار باش، و شکل ثابتی برای خودت نگیر.", "بروس لی"},
+                  {"مهم نیست چقدر آهسته پیش می‌روی، مادامی‌که متوقف نشوی.", "بروس لی"},
+                  {"دانش خودت را بشناس؛ حالا سراغش برو و آن را از آنِ خودت کن.", "بروس لی"},
+                  {"باورت درباره‌ی خودت، مهم‌ترین باوری است که خواهی داشت.", "بروس لی"},
+                  {"در تلاش برای یادگیری از خودم، من نه هرروز افزوده‌ام، بلکه هرروز چیزی کم کرده‌ام.", "بروس لی"},
+                  {"یک هدف، بدون برنامه فقط یک آرزوست.", "بروس لی"},
+                  {"اگر همیشه محدودیت‌ها را در نظر بگیری، تمام زندگی‌ات را محدود خواهی کرد.", "بروس لی"},
+
+                  // --- هلن کلر ---
+                  {"زندگی یا یک ماجراجویی جسورانه است یا هیچ.", "هلن کلر"},
+                  {"خوش‌بینی، ایمانی است که به هر دستاوردی راه می‌برد؛ هیچ‌چیزی بدون امید و اعتمادبه‌نفس انجام نمی‌شود.", "هلن کلر"},
+                  {"هرچند دنیا پر از رنج است، اما پر از چیره‌شدن بر آن رنج نیز هست.", "هلن کلر"},
+                  {"شخصیت با آسایش و راحتی ساخته نمی‌شود؛ فقط از راه تجربه‌ی آزمون و رنج، روح تقویت می‌شود.", "هلن کلر"},
+                  {"هرچند من نمی‌توانم راهی را که پیش رویم است ببینم، اما می‌توانم گام بردارم.", "هلن کلر"},
+                  {"من فقط یک نفرم، اما هنوز هم یک نفرم؛ نمی‌توانم همه‌کار را انجام دهم، اما می‌توانم کاری انجام دهم.", "هلن کلر"},
+
+                  // --- وینستون چرچیل ---
+                  {"موفقیت، رفتن از شکستی به شکست دیگر است، بی‌آنکه شور و اشتیاق را از دست بدهی.", "وینستون چرچیل"},
+                  {"بدبین در هر فرصتی دشواری می‌بیند؛ خوش‌بین در هر دشواری‌ای فرصتی می‌بیند.", "وینستون چرچیل"},
+                  {"شهامت، نخستین فضیلت انسانی است، چون همه‌ی فضیلت‌های دیگر را ممکن می‌سازد.", "وینستون چرچیل"},
+                  {"نگرشِ ما نسبت به زندگی، نگرشِ زندگی را نسبت به ما تعیین می‌کند.", "وینستون چرچیل"},
+                  {"ما با آنچه به دست می‌آوریم زندگی می‌سازیم؛ با آنچه می‌بخشیم، زندگی می‌سازیم.", "وینستون چرچیل"},
+
+                  // --- مولانا ---
+                  {"زخم همان جایی‌ست که نور به درونت راه پیدا می‌کند.", "مولانا"},
+                  {"هر چیزی که دنبالش می‌گردی، خودش هم دنبال توست.", "مولانا"},
+                  {"به‌جای این‌که بپرسی «چرا این اتفاق برای من افتاد؟»، بپرس «این اتفاق چه چیزی به من می‌آموزد؟»", "مولانا"},
+                  {"دیروز رفته، فردا نیامده؛ فقط امروز را داری، پس زندگی کن.", "مولانا"},
+                  {"هر روز صبح، دوباره متولد شو.", "مولانا"},
+                  {"از درهای بسته دلسرد نشو؛ از میان آن‌ها که باز مانده‌اند بگذر.", "مولانا"},
+                  {"دلت را از هر آنچه سنگین می‌کند خالی کن تا سبک‌تر پرواز کنی.", "مولانا"},
+                  {"کسی که در جست‌وجوی حقیقت است، باید نخست از لجاجت خودش دست بردارد.", "مولانا"},
+                  {"تاریکی راهی است که باید از آن گذشت تا به روشنایی رسید، نه دیواری که باید از آن برگشت.", "مولانا"},
+                  {"بگذار سکوتت، عمیق‌تر از هر سخنی حرف بزند.", "مولانا"},
+
+                  // --- حافظ ---
+                  {"هیچ غمی ابدی نیست؛ روزگار می‌گذرد و بهار از پی زمستان می‌آید.", "حافظ"},
+                  {"دل را به امید روشن نگه‌دار، حتی در تاریک‌ترین شب‌ها.", "حافظ"},
+                  {"آنچه از دست می‌رود، جای خود را به چیزی تازه می‌دهد.", "حافظ"},
+                  {"زندگی کوتاه‌تر از آن است که صرف کینه‌توزی شود.", "حافظ"},
+                  {"شادی را در لحظه‌های کوچک بجوی، نه در آرزوهای بزرگ و دور.", "حافظ"},
+                  {"هر شب تاریکی به پایان می‌رسد؛ صبر داشته باش تا سپیده بدمد.", "حافظ"},
+                  {"کسی که با امید زندگی می‌کند، هرگز به‌راستی شکست نمی‌خورد.", "حافظ"},
+                  {"عشق به زندگی، از هر گنجی گران‌بهاتر است.", "حافظ"},
+                  {"روزگار همیشه یک‌جور نمی‌ماند؛ این را دلداری بدان، نه دلیل ناامیدی.", "حافظ"},
+                  {"دل خوش‌دار، که فردا از امروز روشن‌تر خواهد بود.", "حافظ"},
+
+                  // --- سعدی ---
+                  {"همه‌ی انسان‌ها اعضای یک پیکرند؛ رنج یکی، رنج همه است.", "سعدی"},
+                  {"هر که را طاقت شنیدن سخن راست نیست، خیال نکند دوستدار راستی است.", "سعدی"},
+                  {"توانگری به عقل است نه به مال؛ و بزرگی به همت است نه به سال.", "سعدی"},
+                  {"کسی که از تجربه‌ی گذشته درس نمی‌گیرد، بارها یک اشتباه را تکرار می‌کند.", "سعدی"},
+                  {"نیکی به دیگران، در نهایت نیکی به خود است.", "سعدی"},
+                  {"به‌قدر همت هر کس، اقبال بلند اوست.", "سعدی"},
+                  {"خواب راحت، نصیب آن کس می‌شود که وجدانش آسوده است.", "سعدی"},
+                  {"بردباری، بزرگ‌ترین دارایی است که یک انسان می‌تواند داشته باشد.", "سعدی"},
+                  {"زبان خوش، دلِ رنجیده را هم آرام می‌کند.", "سعدی"},
+                  {"سفر، آدمی را با خودش هم آشناتر می‌کند.", "سعدی"},
+
+                  // --- فردوسی ---
+                  {"توانایی واقعی، از دانایی برمی‌خیزد.", "فردوسی"},
+                  {"هر کس که برای هدفی استوار بکوشد، سرانجام به آن می‌رسد.", "فردوسی"},
+                  {"نام نیک، از هر گنجی ماندگارتر است.", "فردوسی"},
+                  {"پهلوانی، در شکست‌ناپذیری نیست؛ در برخاستن پس از هر افتادن است.", "فردوسی"},
+                  {"ریشه‌ی هر ملتی، در زبان و فرهنگش زنده می‌ماند.", "فردوسی"},
+                  {"کسی که از گذشته‌اش بی‌خبر است، آینده‌ای روشن هم نخواهد ساخت.", "فردوسی"},
+                  {"دلاوری بی‌خرد، به نابودی می‌انجامد؛ خرد بی‌دلاوری، به سستی.", "فردوسی"},
+                  {"هر تلاشی، هرچند کوچک، سنگ‌بنای پیروزی بزرگ است.", "فردوسی"},
+                  {"آزادگی، گران‌بهاترین میراث یک انسان است.", "فردوسی"},
+                  {"کسی که برای آرمانش می‌کوشد، هرگز به‌راستی شکست‌خورده نیست.", "فردوسی"},
+
+                  // --- عمر خیام ---
+                  {"امروز را غنیمت بدان، چرا که فردا هنوز نیامده است.", "عمر خیام"},
+                  {"زندگی کوتاه‌تر از آن است که صرف نگرانی‌های بی‌پایان شود.", "عمر خیام"},
+                  {"هر نفس، فرصتی است که دیگر تکرار نمی‌شود.", "عمر خیام"},
+                  {"به‌جای حسرتِ گذشته، شادیِ امروز را دریاب.", "عمر خیام"},
+                  {"دانش، تنها زمانی ارزش دارد که به عمل تبدیل شود.", "عمر خیام"},
+                  {"جهان را چنان که هست بپذیر، نه چنان‌که آرزو داری باشد.", "عمر خیام"},
+                  {"کسی که کمتر می‌خواهد، آزادتر زندگی می‌کند.", "عمر خیام"},
+                  {"هر روزی که با آرامش بگذرد، روزی است که به‌درستی زیسته‌ای.", "عمر خیام"},
+                  {"ذهن کنجکاو، هرگز از پرسیدن نمی‌ایستد.", "عمر خیام"},
+                  {"زندگی را باید تا آخرین لحظه‌اش با طعم و رغبت نوشید.", "عمر خیام"},
+
+                  // --- مریم میرزاخانی ---
+                  {"زیبایی ریاضیات را وقتی می‌بینی که برای حل یک مسئله صبور بمانی.", "مریم میرزاخانی"},
+                  {"پیشرفت در هر کاری، نتیجه‌ی سال‌ها تلاش بی‌سروصداست.", "مریم میرزاخانی"},
+                  {"بزرگ‌ترین لذت، لحظه‌ی کشف چیزی تازه است، هرچند کوچک باشد.", "مریم میرزاخانی"},
+                  {"نباید از پرسیدن سؤال‌های ساده ترسید؛ همان‌ها گاهی به بزرگ‌ترین کشف‌ها می‌رسند.", "مریم میرزاخانی"},
+                  {"هیچ مسئله‌ای حل‌نشدنی نیست؛ فقط هنوز راهش را نیافته‌ای.", "مریم میرزاخانی"},
+                  {"پشتکار، مهم‌تر از استعداد است.", "مریم میرزاخانی"},
+                  {"باید به خودت اجازه بدهی که در مسیر یادگیری، اشتباه کنی.", "مریم میرزاخانی"},
+                  {"کار عمیق و طولانی‌مدت، از هیجان‌های زودگذر ارزشمندتر است.", "مریم میرزاخانی"},
+                  {"هر مسئله‌ی دشوار، از زاویه‌ای دیگر، ساده‌تر به‌نظر می‌رسد.", "مریم میرزاخانی"},
+                  {"داشتن رؤیای بزرگ، نخستین قدم برای رسیدن به آن است.", "مریم میرزاخانی"},
+
+                  // --- آلبرت اینشتین ---
+                  {"تخیل، مهم‌تر از دانش است.", "آلبرت اینشتین"},
+                  {"دیوانگی یعنی یک کار را بارها تکرار کنی و انتظار نتیجه‌ای متفاوت داشته باشی.", "آلبرت اینشتین"},
+                  {"زندگی مثل دوچرخه‌سواری است؛ برای حفظ تعادل، باید حرکت کنی.", "آلبرت اینشتین"},
+                  {"کسی که هرگز اشتباه نکرده، هرگز چیز تازه‌ای هم امتحان نکرده است.", "آلبرت اینشتین"},
+                  {"مهم این است که هرگز از پرسیدن دست نکشی.", "آلبرت اینشتین"},
+                  {"در میان هر دشواری، فرصتی نهفته است.", "آلبرت اینشتین"},
+                  {"خلاقیت، هوش در حال بازی‌کردن است.", "آلبرت اینشتین"},
+                  {"پیروزی واقعی، بهتر شدن نسبت به دیروزِ خودت است.", "آلبرت اینشتین"},
+                  {"علاقه، قوی‌ترین انگیزه برای یادگیری است.", "آلبرت اینشتین"},
+                  {"همه‌چیز باید تا حد ممکن ساده باشد، اما نه ساده‌تر از آن.", "آلبرت اینشتین"},
+
+                  // --- استیو جابز ---
+                  {"تنها راه انجام کار بزرگ، دوست‌داشتن آن کار است.", "استیو جابز"},
+                  {"زمان محدود است؛ آن را صرف زندگی‌کردنِ زندگی دیگران نکن.", "استیو جابز"},
+                  {"نوآوری، تفاوت میان یک رهبر و یک دنباله‌رو است.", "استیو جابز"},
+                  {"گاهی زندگی با آجر به سرت می‌زند؛ ایمانت را از دست نده.", "استیو جابز"},
+                  {"تشنه بمان، فروتن بمان.", "استیو جابز"},
+                  {"کیفیت، مهم‌تر از کمیت است.", "استیو جابز"},
+                  {"طراحی فقط ظاهر نیست؛ طراحی یعنی چگونه‌کارکردن.", "استیو جابز"},
+                  {"تمرکز یعنی به هزار چیز خوبِ دیگر، نه گفتن.", "استیو جابز"},
+                  {"کارت را دوست بدار، وگرنه در سختی‌هایش دوام نمی‌آوری.", "استیو جابز"},
+                  {"نقاط زندگی را فقط با نگاه به گذشته می‌توان به هم وصل کرد.", "استیو جابز"},
+
+                  // --- مایا آنجلو ---
+                  {"مردم فراموش می‌کنند چه گفتی، فراموش می‌کنند چه کردی، اما هرگز فراموش نمی‌کنند چه حسی به آن‌ها دادی.", "مایا آنجلو"},
+                  {"اگر چیزی را دوست نداری، تغییرش بده؛ اگر نمی‌توانی تغییرش دهی، طرز نگاهت را به آن تغییر بده.", "مایا آنجلو"},
+                  {"شجاعت، مهم‌ترین فضیلت است، چون بدون آن نمی‌توان هیچ فضیلت دیگری را پیوسته به کار برد.", "مایا آنجلو"},
+                  {"هر تجربه‌ای، حتی دردناک‌ترین‌ها، بخشی از رشد توست.", "مایا آنجلو"},
+                  {"پرنده‌ی در قفس هم آواز می‌خواند، چون آزادی را از یاد نمی‌برد.", "مایا آنجلو"},
+                  {"امید، بدون عمل، فقط یک رؤیا می‌ماند.", "مایا آنجلو"},
+                  {"بهترین راه موفقیت، خدمت صادقانه به دیگران است.", "مایا آنجلو"},
+                  {"هیچ‌کس نمی‌تواند کرامتت را از تو بگیرد، مگر آن‌که خودت اجازه دهی.", "مایا آنجلو"},
+                  {"زندگی تو را دگرگون می‌کند تا یاد بگیری از تجربه‌هایت درس بگیری.", "مایا آنجلو"},
+                  {"هر روز فرصتی تازه است برای انسان بهتری شدن.", "مایا آنجلو"},
+
+                  // --- نلسون ماندلا ---
+                  {"شکست نمی‌خورم مگر آن‌که تسلیم شوم.", "نلسون ماندلا"},
+                  {"همیشه به‌نظر غیرممکن می‌رسد، تا زمانی که انجام شود.", "نلسون ماندلا"},
+                  {"شجاعت، نبودِ ترس نیست، بلکه پیروزی بر آن است.", "نلسون ماندلا"},
+                  {"آموزش، قدرتمندترین ابزاری است که می‌توان با آن جهان را تغییر داد.", "نلسون ماندلا"},
+                  {"بزرگ‌ترین شکوه در زندگی، هرگز نیفتادن نیست، بلکه برخاستن پس از هر سقوط است.", "نلسون ماندلا"},
+                  {"هیچ‌کس با نفرت متولد نمی‌شود؛ نفرت آموختنی است، و اگر آموختنی باشد، دوست‌داشتن هم آموختنی است.", "نلسون ماندلا"},
+                  {"بعد از فتح یک قله، تازه می‌فهمی که قله‌های دیگری هم هستند که باید فتح شوند.", "نلسون ماندلا"},
+                  {"رهبر واقعی کسی است که مردم را در جهت درست، بدون احساس فشار، هدایت کند.", "نلسون ماندلا"},
+                  {"روحیه‌ی امید را می‌توان حتی در تاریک‌ترین روزها هم حفظ کرد.", "نلسون ماندلا"},
+                  {"آزادی من، بدون آزادی دیگران، ناقص است.", "نلسون ماندلا"},
+
+                  // --- فروغ فرخزاد ---
+                  {"باید جرأت داشت و همان بود که واقعاً هستی، نه آن‌که دیگران می‌خواهند.", "فروغ فرخزاد"},
+                  {"هیچ‌چیز ابدی نیست؛ همین ناپایداری است که به هر لحظه ارزش می‌دهد.", "فروغ فرخزاد"},
+                  {"صدای خودت را پیدا کن، حتی اگر با هیچ صدای دیگری هم‌آهنگ نباشد.", "فروغ فرخزاد"},
+                  {"تغییر، ترسناک است، اما ماندن در جایی که رشد نمی‌کنی، ترسناک‌تر است.", "فروغ فرخزاد"},
+                  {"زندگی یعنی جسارتِ متفاوت‌بودن، حتی وقتی همه شبیه هم‌اند.", "فروغ فرخزاد"},
+                  {"هر آغاز تازه‌ای، از دل یک پایان متولد می‌شود.", "فروغ فرخزاد"},
+                  {"کسی که از قضاوت دیگران می‌ترسد، هرگز خودِ واقعی‌اش را نمی‌یابد.", "فروغ فرخزاد"},
+                  {"زیبایی، در صداقت با خویشتن است، نه در شبیه‌بودن به الگوهای دیگران.", "فروغ فرخزاد"},
+                  {"باید نوشت، باید گفت، حتی اگر صدایت بلرزد.", "فروغ فرخزاد"},
+                  {"هیچ قفسی، پرنده‌ای را که پرواز را باور دارد، نگه نمی‌دارد.", "فروغ فرخزاد"},
+
+                  // --- احمد شاملو ---
+                  {"آزادی، روزی فرا می‌رسد که هیچ‌کس مجبور نباشد برای گفتنِ حقیقت، شجاعت نشان دهد.", "احمد شاملو"},
+                  {"عشق، تنها زبانی است که در همه‌ی جهان یک معنا دارد.", "احمد شاملو"},
+                  {"کلمه، وقتی راستین باشد، از هر سلاحی برنده‌تر است.", "احمد شاملو"},
+                  {"انسان، هر چقدر هم کوچک باشد، سرنوشتش را خودش رقم می‌زند.", "احمد شاملو"},
+                  {"امید، حتی در سیاه‌ترین شب‌ها، چراغی است که خاموش نمی‌شود.", "احمد شاملو"},
+                  {"هر کلمه‌ای که از سرِ صداقت گفته شود، جایی در جهان اثر می‌گذارد.", "احمد شاملو"},
+                  {"کسی که برای آزادی دیگران نمی‌کوشد، آزادی خودش را هم به‌درستی نمی‌شناسد.", "احمد شاملو"},
+                  {"زیستن، یعنی هر روز دوباره انتخاب‌کردنِ زندگی.", "احمد شاملو"},
+                  {"دلی که عاشق است، هیچ‌گاه به‌راستی تنها نیست.", "احمد شاملو"},
+                  {"شعر، صدای خاموشِ آن‌هاست که نمی‌توانند فریاد بزنند.", "احمد شاملو"},
+
+                  // --- توماس ادیسون ---
+                  {"من شکست نخوردم؛ فقط ده‌هزار راهی را پیدا کردم که جواب نمی‌دهد.", "توماس ادیسون"},
+                  {"نبوغ، یک درصد الهام است و نودونه درصد عرق‌ریزی.", "توماس ادیسون"},
+                  {"بسیاری از شکست‌خورده‌های زندگی، کسانی بودند که نفهمیدند وقتِ تسلیم‌شدن، چقدر به موفقیت نزدیک بوده‌اند.", "توماس ادیسون"},
+                  {"اگر همه‌ی کارهایی که ممکن است انجام دهیم را انجام می‌دادیم، خودمان را واقعاً شگفت‌زده می‌کردیم.", "توماس ادیسون"},
+                  {"فرصت‌ها اغلب از دست می‌روند، چون لباسِ کار سخت پوشیده‌اند و ما آن‌ها را نمی‌شناسیم.", "توماس ادیسون"},
+                  {"بهترین فکرها معمولاً وقتی می‌آیند که دیگران تسلیم شده‌اند.", "توماس ادیسون"},
+                  {"من هیچ‌وقت با شکست دلسرد نشدم؛ هر تلاشِ ناموفق، یک قدم به جلوست.", "توماس ادیسون"},
+                  {"کنجکاوی، سوختِ اصلیِ هر اختراعی است.", "توماس ادیسون"},
+                  {"زمان، تنها سرمایه‌ای است که واقعاً داری؛ آن را هدر نده.", "توماس ادیسون"},
+                  {"همیشه راهی بهتر برای انجامِ هر کاری وجود دارد؛ آن را پیدا کن.", "توماس ادیسون"},
+
+                  // --- مارک تواین ---
+                  {"بیست سال دیگر، بیشتر از کارهایی که نکرده‌ای پشیمان می‌شوی تا کارهایی که کرده‌ای.", "مارک تواین"},
+                  {"شجاعت، مقاومت در برابر ترس نیست؛ چیره‌شدن بر آن است.", "مارک تواین"},
+                  {"راز پیشرفت، شروع‌کردن است.", "مارک تواین"},
+                  {"بهترین راه برای بالابردن روحیه‌ات، بالابردن روحیه‌ی کسی دیگر است.", "مارک تواین"},
+                  {"کاری که در موفقیتش مطمئن نیستی، باز هم ارزش امتحان‌کردن دارد.", "مارک تواین"},
+                  {"دو روز مهم در زندگی هست: روزی که به دنیا آمدی، و روزی که فهمیدی چرا.", "مارک تواین"},
+                  {"کسی که کتاب نمی‌خواند، بر کسی که نمی‌تواند بخواند، برتری‌ای ندارد.", "مارک تواین"},
+                  {"لنگر برداشتن، ایمنی موقتی است؛ کشتی برای دریانوردی ساخته شده، نه برای ماندن در بندر.", "مارک تواین"},
+                  {"بهتر است سکوت کنی و کسی گمان کند نادانی، تا آن‌که حرف بزنی و هر شکی را برطرف کنی.", "مارک تواین"},
+                  {"همیشه کارِ درست را انجام بده؛ بعضی‌ها را راضی می‌کند و بقیه را شگفت‌زده.", "مارک تواین"},
+
+                  // --- اپیکور ---
+                  {"ثروت واقعی، نه در داشتنِ بیشتر، بلکه در خواستنِ کمتر است.", "اپیکور"},
+                  {"کسی که به آنچه دارد قانع نیست، حتی با داشتنِ همه‌چیزِ جهان هم ناخشنود می‌ماند.", "اپیکور"},
+                  {"دوستی، از میان تمام چیزهایی که خرد برای خوشبختی فراهم می‌کند، بزرگ‌ترین است.", "اپیکور"},
+                  {"نترس از مرگ؛ تا هستی، مرگ نیست، و وقتی مرگ هست، تو دیگر نیستی.", "اپیکور"},
+                  {"لذتِ واقعی، در آرامشِ ذهن است، نه در انباشتنِ خواسته‌ها.", "اپیکور"},
+                  {"هیچ لذتی به‌خودی‌خود بد نیست؛ آنچه بد است، پیامدهایی است که گاه به‌همراه می‌آورد.", "اپیکور"},
+                  {"زندگی ساده، راهی مطمئن به‌سوی آرامش است.", "اپیکور"},
+                  {"کسی که کم‌ترین نیاز را دارد، بیشترین آزادی را داراست.", "اپیکور"},
+                  {"بهترین سلاح در برابر ترس، شناختن آن است.", "اپیکور"},
+                  {"شادی، در سنجش درستِ خواسته‌هاست، نه در برآوردنِ همه‌ی آن‌ها.", "اپیکور"},
+
+                  // --- پروین اعتصامی ---
+                  {"کار امروز را به فردا میفکن، که فردا خود روزی تازه با کاری تازه دارد.", "پروین اعتصامی"},
+                  {"بزرگی، در فروتنی است، نه در فخرفروشی.", "پروین اعتصامی"},
+                  {"دانه‌ای که کاشته می‌شود، اگر صبر داشته باشی، روزی درخت می‌شود.", "پروین اعتصامی"},
+                  {"هر کس به‌قدر همتش، در جهان راه می‌گشاید.", "پروین اعتصامی"},
+                  {"زبان تلخ، حتی سخنِ حق را هم ناخوشایند می‌کند.", "پروین اعتصامی"},
+                  {"آنچه با رنج به دست می‌آید، ارزشش را بهتر می‌فهمی.", "پروین اعتصامی"},
+                  {"خرد، چراغی است که در تاریک‌ترین راه‌ها هم روشنی می‌بخشد.", "پروین اعتصامی"},
+                  {"کسی که به کارِ خرد بی‌اعتناست، از کارِ بزرگ هم برنمی‌آید.", "پروین اعتصامی"},
+                  {"هر که با صبر بنشیند، سرانجام میوه‌ی کارش را می‌چیند.", "پروین اعتصامی"},
+                  {"نیکی‌کردن هرگز از یاد نمی‌رود، حتی اگر گیرنده‌اش آن را فراموش کند.", "پروین اعتصامی"},
+
+                  // --- مارتین لوتر کینگ ---
+                  {"تاریکی نمی‌تواند تاریکی را بیرون کند؛ فقط نور می‌تواند این کار را بکند.", "مارتین لوتر کینگ"},
+                  {"اگر نمی‌توانی پرواز کنی، بدو؛ اگر نمی‌توانی بدوی، راه برو؛ اگر نمی‌توانی راه بروی، بخز؛ اما هر طور شده، به‌پیش برو.", "مارتین لوتر کینگ"},
+                  {"ایمانِ واقعی یعنی گام‌نهادن روی اولین پله، حتی وقتی نمی‌بینی پله‌ی آخر کجاست.", "مارتین لوتر کینگ"},
+                  {"بزرگ‌ترین تراژدی، نه ظلمِ افراد بد، بلکه سکوتِ افراد خوب است.", "مارتین لوتر کینگ"},
+                  {"ما باید یاد بگیریم مثل خواهر و برادر با هم زندگی کنیم، وگرنه مثل ابلهان با هم نابود می‌شویم.", "مارتین لوتر کینگ"},
+                  {"اندازه‌ی نهاییِ یک انسان را نه در لحظه‌های راحتی، بلکه در لحظه‌های چالش می‌سنجند.", "مارتین لوتر کینگ"},
+                  {"هیچ‌کس واقعاً آزاد نیست، تا زمانی که همه آزاد نباشند.", "مارتین لوتر کینگ"},
+                  {"عشق، تنها نیرویی است که می‌تواند دشمن را به دوست تبدیل کند.", "مارتین لوتر کینگ"},
+                  {"پیشرفت همیشه خطی نیست؛ گاهی باید چرخید تا بتوان جلو رفت.", "مارتین لوتر کینگ"},
+                  {"رؤیایی که برایش می‌کوشی، هر روز کمی زنده‌تر می‌شود.", "مارتین لوتر کینگ"},
+
+                  // --- لئوناردو داوینچی ---
+                  {"سادگی، نهایتِ پیچیدگی است.", "لئوناردو داوینچی"},
+                  {"یادگیری هرگز ذهن را خسته نمی‌کند.", "لئوناردو داوینچی"},
+                  {"کسی که کم می‌داند، کم اشتباه می‌کند.", "لئوناردو داوینچی"},
+                  {"زمانی که در حال کاری هستی که دوستش داری، خستگی معنایی ندارد.", "لئوناردو داوینچی"},
+                  {"چشمانت دروازه‌ی شناختِ جهان‌اند؛ خوب نگاه‌کردن را یاد بگیر.", "لئوناردو داوینچی"},
+                  {"هنر هرگز کامل نمی‌شود، فقط رها می‌شود.", "لئوناردو داوینچی"},
+                  {"کسی که یادِ گذشته را زنده نگه ندارد، از خاطره‌ها هم پاک می‌شود.", "لئوناردو داوینچی"},
+                  {"آهن، بی‌استفاده زنگ می‌زند؛ آب راکد فاسد می‌شود؛ ذهن هم بی‌تمرین، پژمرده می‌شود.", "لئوناردو داوینچی"},
+                  {"هر مانعی را می‌توان با تلاش و پشتکار از میان برداشت.", "لئوناردو داوینچی"},
+                  {"کنجکاوی، دری است که به هر کشفی باز می‌شود.", "لئوناردو داوینچی"},
+
+                  // --- اوپرا وینفری ---
+                  {"بزرگ‌ترین ماجراجویی که می‌توانی داشته باشی، زندگی‌کردنِ رؤیاهای خودت است.", "اوپرا وینفری"},
+                  {"شکست، فقط یعنی زندگی سعی کرد تو را در جهتِ دیگری هدایت کند.", "اوپرا وینفری"},
+                  {"هر چه بیشتر شکرگزار باشی، بیشتر به‌دست می‌آوری.", "اوپرا وینفری"},
+                  {"با خودت صادق باش؛ این پایه‌ی هر تصمیمِ درستی است.", "اوپرا وینفری"},
+                  {"چالش‌ها بخشی از زندگی‌اند؛ به تو یادآوری می‌کنند چه قدرتی داری.", "اوپرا وینفری"},
+                  {"هدف زندگی، پیداکردنِ استعدادت و بخشیدنش به جهان است.", "اوپرا وینفری"},
+                  {"هر تجربه‌ای که پشتِ سر می‌گذاری، تو را برای مرحله‌ی بعدی آماده می‌کند.", "اوپرا وینفری"},
+                  {"به‌جای شکایت از آنچه نداری، برای آنچه داری تلاش کن.", "اوپرا وینفری"},
+                  {"شهامت یعنی وقتی می‌ترسی هم قدم برداری.", "اوپرا وینفری"},
+                  {"هر روز، فرصتی برای شروعِ دوباره است.", "اوپرا وینفری"},
+              };
           }
           JAVAEOF
 
@@ -1078,6 +1662,155 @@ jobs:
                   } else {
                       views.setViewVisibility(R.id.clockLabelWrap, View.GONE);
                   }
+
+                  mgr.updateAppWidget(widgetId, views);
+              }
+          }
+          JAVAEOF
+
+          # ---- QuoteWidgetProvider.java (daily quote widget -- see QuoteCatalog for
+          #      the quote pool and todayIndex() below for how one is picked per day) ----
+          cat > "$WIDGET_DIR/QuoteWidgetProvider.java" <<JAVAEOF
+          package ${APP_ID}.widget;
+
+          import ${APP_ID}.R;
+          import android.app.AlarmManager;
+          import android.app.PendingIntent;
+          import android.appwidget.AppWidgetManager;
+          import android.appwidget.AppWidgetProvider;
+          import android.content.ComponentName;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.view.View;
+          import android.widget.RemoteViews;
+          import java.util.Calendar;
+
+          /** Home-screen "quote of the day" widget: shows one real, attributed quote from
+           *  QuoteCatalog, the same one all day, deterministically picked from the calendar date
+           *  (see todayIndex) so it doesn't depend on when the widget last happened to refresh.
+           *  A single exact alarm fires right after midnight to swap in the next day's quote; every
+           *  onUpdate also recomputes it as a safety net (covers reboots / missed alarms / a widget
+           *  freshly dropped on the home screen). No configure activity -- it simply follows
+           *  whatever look WidgetStyle.resolve() resolves to (defaults to the app's live theme),
+           *  same as a checklist/day-progress widget instance that was never customized. */
+          public class QuoteWidgetProvider extends AppWidgetProvider {
+
+              public static final String ACTION_QUOTE_TICK = "${APP_ID}.ACTION_QUOTE_TICK";
+
+              public static void refreshAll(Context context) {
+                  AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+                  int[] ids = mgr.getAppWidgetIds(new ComponentName(context, QuoteWidgetProvider.class));
+                  for (int id : ids) updateOne(context, mgr, id);
+              }
+
+              public static void refreshOne(Context context, int widgetId) {
+                  updateOne(context, AppWidgetManager.getInstance(context), widgetId);
+              }
+
+              private static PendingIntent tickIntent(Context context) {
+                  Intent intent = new Intent(context, QuoteWidgetProvider.class);
+                  intent.setAction(ACTION_QUOTE_TICK);
+                  return PendingIntent.getBroadcast(context, 0, intent,
+                          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+              }
+
+              /** Schedules one exact alarm for the next local midnight -- cheap (fires once a day,
+               *  not on a repeating cadence like the day-progress ring) and precise, using the same
+               *  SCHEDULE_EXACT_ALARM permission this app already requests for local notifications. */
+              private static void scheduleMidnightAlarm(Context context) {
+                  try {
+                      AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+                      if (am == null) return;
+                      Calendar next = Calendar.getInstance();
+                      next.add(Calendar.DAY_OF_YEAR, 1);
+                      next.set(Calendar.HOUR_OF_DAY, 0);
+                      next.set(Calendar.MINUTE, 0);
+                      next.set(Calendar.SECOND, 5);
+                      next.set(Calendar.MILLISECOND, 0);
+                      am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.getTimeInMillis(), tickIntent(context));
+                  } catch (Exception e) { /* best-effort */ }
+              }
+
+              private static void cancelMidnightAlarm(Context context) {
+                  try {
+                      AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+                      if (am != null) am.cancel(tickIntent(context));
+                  } catch (Exception e) { /* best-effort */ }
+              }
+
+              @Override
+              public void onEnabled(Context context) { scheduleMidnightAlarm(context); }
+
+              @Override
+              public void onDisabled(Context context) { cancelMidnightAlarm(context); }
+
+              @Override
+              public void onUpdate(Context context, AppWidgetManager mgr, int[] appWidgetIds) {
+                  scheduleMidnightAlarm(context); // safety net: re-arms the alarm in case it was lost (e.g. reboot)
+                  for (int id : appWidgetIds) updateOne(context, mgr, id);
+              }
+
+              @Override
+              public void onReceive(Context context, Intent intent) {
+                  super.onReceive(context, intent);
+                  if (ACTION_QUOTE_TICK.equals(intent.getAction())) {
+                      refreshAll(context);
+                      scheduleMidnightAlarm(context); // reschedule for the following midnight
+                  }
+              }
+
+              /** Deterministic per-day index: two devices (or the same device on two different days)
+               *  land on the same entry for the same calendar date, and it naturally cycles back
+               *  through the pool once every QuoteCatalog.QUOTES.length days. */
+              private static int todayIndex() {
+                  Calendar cal = Calendar.getInstance();
+                  int epochDay = cal.get(Calendar.YEAR) * 366 + cal.get(Calendar.DAY_OF_YEAR);
+                  int n = QuoteCatalog.QUOTES.length;
+                  return ((epochDay % n) + n) % n;
+              }
+
+              private static void updateOne(Context context, AppWidgetManager mgr, int widgetId) {
+                  WidgetStyle st = WidgetStyle.resolve(context, widgetId);
+                  RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_quote);
+
+                  // Same recolorable card treatment as the checklist widget (rounded/pill/sharp,
+                  // opaque/glass/transparent), so a quote widget dropped next to the others matches.
+                  if ("transparent".equals(st.bg)) {
+                      views.setViewVisibility(R.id.cardShadow, View.GONE);
+                      views.setViewVisibility(R.id.cardBg, View.GONE);
+                  } else {
+                      int shapeRes = "pill".equals(st.shape) ? R.drawable.widget_card_shape_pill
+                                   : "sharp".equals(st.shape) ? R.drawable.widget_card_shape_sharp
+                                   : R.drawable.widget_card_shape;
+                      int shadowRes = "pill".equals(st.shape) ? R.drawable.widget_card_shadow_pill
+                                    : "sharp".equals(st.shape) ? R.drawable.widget_card_shadow_sharp
+                                    : R.drawable.widget_card_shadow;
+                      views.setViewVisibility(R.id.cardShadow, View.VISIBLE);
+                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardShadow, shadowRes);
+                      views.setImageViewResource(R.id.cardBg, shapeRes);
+                      views.setInt(R.id.cardBg, "setColorFilter", st.card);
+                      boolean glass = "glass".equals(st.bg);
+                      views.setInt(R.id.cardBg, "setImageAlpha", glass ? 165 : 255);
+                      views.setInt(R.id.cardShadow, "setImageAlpha", glass ? 90 : 140);
+                  }
+
+                  int patternRes = "transparent".equals(st.bg) ? 0 : WidgetStyle.patternDrawableRes(context, st.pattern);
+                  if (patternRes != 0) {
+                      views.setViewVisibility(R.id.cardPattern, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardPattern, patternRes);
+                      views.setInt(R.id.cardPattern, "setColorFilter", st.accent2);
+                      views.setInt(R.id.cardPattern, "setImageAlpha", 46);
+                  } else {
+                      views.setViewVisibility(R.id.cardPattern, View.GONE);
+                  }
+
+                  String[] entry = QuoteCatalog.QUOTES[todayIndex()];
+                  views.setTextViewText(R.id.quoteText, entry[0]);
+                  views.setTextViewText(R.id.quoteAuthor, "\u2014 " + entry[1]);
+                  views.setInt(R.id.quoteMark, "setTextColor", st.accent2);
+                  views.setInt(R.id.quoteText, "setTextColor", st.text);
+                  views.setInt(R.id.quoteAuthor, "setTextColor", st.accent);
 
                   mgr.updateAppWidget(widgetId, views);
               }
@@ -1708,6 +2441,88 @@ jobs:
           </FrameLayout>
           XMLEOF
 
+          # ---- res/layout/widget_quote.xml (daily quote widget) ----
+          cat > "$RES_DIR/layout/widget_quote.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent">
+
+              <!-- Same floating-card treatment as the checklist widget: soft shadow, then the
+                   recolorable card (rounded/pill/sharp per WidgetStyle), then the optional pattern. -->
+              <ImageView
+                  android:id="@+id/cardShadow"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:layout_marginTop="3dp"
+                  android:src="@drawable/widget_card_shadow"
+                  android:scaleType="fitXY" />
+
+              <ImageView
+                  android:id="@+id/cardBg"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:src="@drawable/widget_card_shape"
+                  android:scaleType="fitXY" />
+
+              <ImageView
+                  android:id="@+id/cardPattern"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:scaleType="fitXY"
+                  android:visibility="gone" />
+
+              <!-- Large decorative quotation mark in the corner, same touch as the in-app "quote of
+                   the day" card on the Library tab, tinted with the secondary theme color at runtime. -->
+              <TextView
+                  android:id="@+id/quoteMark"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="top|end"
+                  android:layout_marginTop="-6dp"
+                  android:layout_marginEnd="10dp"
+                  android:alpha="0.28"
+                  android:fontFamily="serif"
+                  android:text="&quot;"
+                  android:textSize="42sp"
+                  android:textStyle="bold" />
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:orientation="vertical"
+                  android:gravity="center_vertical"
+                  android:padding="16dp">
+
+                  <TextView
+                      android:id="@+id/quoteText"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:textColor="#241F3D"
+                      android:textStyle="bold"
+                      android:textSize="13sp"
+                      android:lineSpacingMultiplier="1.35"
+                      android:maxLines="8"
+                      android:ellipsize="end" />
+
+                  <TextView
+                      android:id="@+id/quoteAuthor"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="8dp"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:textColor="#4338CA"
+                      android:textSize="11.5sp"
+                      android:maxLines="1"
+                      android:ellipsize="end" />
+
+              </LinearLayout>
+          </FrameLayout>
+          XMLEOF
+
           # ---- res/layout/activity_widget_config.xml (the widget customization screen) ----
           cat > "$RES_DIR/layout/activity_widget_config.xml" <<'XMLEOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -2135,6 +2950,25 @@ jobs:
               android:widgetCategory="home_screen" />
           XMLEOF
 
+          # ---- res/xml/widget_quote_info.xml (no configure activity -- it just follows
+          #      whatever look WidgetStyle.resolve() resolves to, same as an unconfigured
+          #      checklist/day-progress instance; see QuoteWidgetProvider) ----
+          cat > "$RES_DIR/xml/widget_quote_info.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="250dp"
+              android:minHeight="110dp"
+              android:minResizeWidth="140dp"
+              android:minResizeHeight="80dp"
+              android:targetCellWidth="4"
+              android:targetCellHeight="1"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_quote"
+              android:previewImage="@mipmap/ic_launcher"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen" />
+          XMLEOF
+
           # ---- res/drawable/widget_check_on.xml ----
           cat > "$RES_DIR/drawable/widget_check_on.xml" <<'XMLEOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -2187,6 +3021,13 @@ jobs:
                   '        </intent-filter>\n'
                   '        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_day_progress_info" />\n'
                   '    </receiver>\n'
+                  '    <receiver android:name="' + app_id + '.widget.QuoteWidgetProvider" android:exported="true">\n'
+                  '        <intent-filter>\n'
+                  '            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
+                  '            <action android:name="' + app_id + '.ACTION_QUOTE_TICK" />\n'
+                  '        </intent-filter>\n'
+                  '        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_quote_info" />\n'
+                  '    </receiver>\n'
                   '    <activity android:name="' + app_id + '.widget.WidgetConfigActivity"\n'
                   '        android:exported="true"\n'
                   '        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">\n'
@@ -2215,6 +3056,12 @@ jobs:
           with open(path, encoding='utf-8') as f:
               src = f.read()
 
+          notif_permissions = (
+              '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n'
+              '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n'
+              '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n'
+              '    <uses-permission android:name="android.permission.VIBRATE" />\n'
+          )
           for perm in [
               'android.permission.POST_NOTIFICATIONS',
               'android.permission.SCHEDULE_EXACT_ALARM',
