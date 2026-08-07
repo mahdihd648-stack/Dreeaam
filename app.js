@@ -1339,7 +1339,21 @@ function getLightModeCounts(doFullLen, avoidFullLen){
   const lightDoCount = lightTotal - lightAvoidCount;
   return { lightDoCount, lightAvoidCount };
 }
+/* ---- «برنامه دستی»: کاربرهایی که به‌جای برنامه‌ی خودکار (فازبندی‌شده بر اساس
+   پروفایل)، ترجیح می‌دن خودشون هرروز رو بچینن. تو این حالت، به‌جای fullPool (استخر
+   خودکار)، فقط سه چیز جمع می‌شن: کارهای همیشگی‌شون (customItems/customAvoidItems —
+   همون‌هایی که با «+ افزودن کار جدید» زیر چک‌لیست اضافه می‌کنن و هر روز تکرار می‌شه)،
+   و کارهای مخصوص همین روز (entry.extraDoItems/extraAvoidItems — همون فیلدی که قبلاً
+   فقط «برنامه فردا» پرش می‌کرد، حالا از ابزار چندروزه‌ی «ساخت برنامه» هم پر می‌شه).
+   totalToday/renderList/streak/XP/بج‌ها هیچ‌کدوم دست نمی‌خورن — همه از همین دو تابع
+   می‌خونن، پس همون مسیر امتیازدهی‌ای که برای برنامه‌ی خودکار کار می‌کنه، عیناً روی
+   برنامه‌ی دستی هم اعمال می‌شه. ---- */
 function getDoItems(){
+  if(storeData.profile && storeData.profile.manualProgramMode){
+    const extra = (entry && entry.extraDoItems) || [];
+    const items = (storeData.customItems || []).concat(extra);
+    return applyItemOverrides(items, entry && entry.doOverrides);
+  }
   const phases = scaledPhases();
   const phaseIdx = Math.max(0, phases.findIndex(p=>p.key===currentPhase.key));
   const fullPool = getPersonalizedPhaseItems(currentPhase, phaseIdx);
@@ -1356,6 +1370,11 @@ function getDoItems(){
 }
 function getMomentItems(){ return BASE_MOMENT_ITEMS; }
 function getAvoidItems(){
+  if(storeData.profile && storeData.profile.manualProgramMode){
+    const extra = (entry && entry.extraAvoidItems) || [];
+    const items = (storeData.customAvoidItems || []).concat(extra);
+    return applyItemOverrides(items, entry && entry.avoidOverrides);
+  }
   const fullPool = getAvoidFullPool();
   const extra = (entry && entry.extraAvoidItems) || [];
   let items;
@@ -1668,11 +1687,12 @@ function defaultProfile(){
     goalShort:"", goalLong:"", ifThenPlan:"", duration:"", frequency:"", riskTimes:[],
     commitmentReward:"", commitmentRewardOther:"", commitmentPunishment:"", commitmentPunishOther:"",
     health:{ hasCondition:false, tags:[], otherTagText:"", detailsText:"", medicationsText:"", considerInPlan:true },
-    onboardingComplete:false, accountCreated:false };
+    onboardingComplete:false, accountCreated:false, noProgramMode:false, manualProgramMode:false };
 }
 function defaultStoreData(){
   return { entries:{}, startDate:null, startTimestamp:null, peakCelebrated:false, profile:defaultProfile(), whyText:"", urgeLog:[],
     theme:"brand", programLength:90, intensity:"medium", customItems:[], customAvoidItems:[], customTasks:[], customTaskNotifSeq:0, badges:{}, maxStreak:0, maxPhaseIndex:0, selfieCount:0,
+    meditationLog:{}, maxMeditationStreak:0,
     reminder:{enabled:false, morning:"08:00", night:"22:30"}, smartReminder:{enabled:false, offsetMinutes:20}, streakMilestonesHit:{}, libraryDeepDive:{}, libraryWeekly:{}, courseProgress:{}, chatHistory:[],
     customCounters:[], customCounterMilestonesHit:{},
     supportContact:{name:"", phone:""}, lastModified:null,
@@ -1681,6 +1701,7 @@ function defaultStoreData(){
     musicEnabled:true, musicVolume:15,
     sfxEnabled:true, sfxVolume:10, specialDays:[],
     tomorrowPlan:{forKey:null, doItems:[], avoidItems:[]},
+    manualDayPlans:{},
     lbPrivacy:{age:false, habit:false, programLen:false, titles:false}, lbLastRank:null,
     reportSentDates:{}, aiFeatureUseCount:{}, xpPenaltyStartDate:null,
     riskNudge:{dismissedKey:null, lastNotifLevel:null},
@@ -1718,6 +1739,47 @@ function applyTomorrowPlanIfDue(){
   }
 }
 
+/* ---- «برنامه دستی» (ابزار چندروزه): storeData.manualDayPlans یه دیکشنریه با کلید
+   تاریخ («۱۴۰۵-۰۵-۱۵» و...) که کاربر تو ابزار «ساخت برنامه» برای چند روز جلوتر (تا
+   ۱۴ روز) از قبل پر می‌کنه. هر روز که می‌رسه (چه با باز کردن دوباره‌ی اپ، چه رد شدن
+   از نیمه‌شب وقتی اپ بازه)، applyManualDayPlansIfDue دقیقاً مثل applyTomorrowPlanIfDue
+   عمل می‌کنه: هر کلیدی که تاریخش <= امروزه رو به‌صورت دائم به entry همون روز
+   (extraDoItems/extraAvoidItems) اضافه می‌کنه و بعد اون کلید رو از دیکشنری پاک می‌کنه
+   (تا دوباره اعمال نشه). این دو مکانیزم (برنامه فردا + برنامه دستی چندروزه) کاملاً
+   مستقل و بی‌تداخلن — هر دو فقط entry.extraDoItems/extraAvoidItems رو پر می‌کنن، همون
+   فیلدی که getDoItems/getAvoidItems از قبل می‌خوندن؛ پس امتیازدهی/استریک/XP/بج‌ها
+   بدون هیچ تغییری روی برنامه‌ی دستی هم درست کار می‌کنن. */
+function ensureManualDayPlans(){
+  if(!storeData.manualDayPlans) storeData.manualDayPlans = {};
+}
+function applyManualDayPlansIfDue(){
+  ensureManualDayPlans();
+  const plans = storeData.manualDayPlans;
+  Object.keys(plans).forEach(key=>{
+    if(key > today) return; // هنوز نرسیده، دست نمی‌زنیم
+    const plan = plans[key] || { doItems:[], avoidItems:[] };
+    if((plan.doItems && plan.doItems.length) || (plan.avoidItems && plan.avoidItems.length)){
+      const e = storeData.entries[key] || { done:{}, avoidDone:{}, momentDone:{}, note:"", lesson:"", milestonesHit:{}, total:0,
+        phoneHours:null, meals:{b:"",l:"",d:"",snacks:""}, nightReview:null, mood:null, energy:null, weight:null, symptoms:{} };
+      if(!e.extraDoItems) e.extraDoItems = [];
+      if(!e.extraAvoidItems) e.extraAvoidItems = [];
+      e.extraDoItems = e.extraDoItems.concat(plan.doItems || []);
+      e.extraAvoidItems = e.extraAvoidItems.concat(plan.avoidItems || []);
+      storeData.entries[key] = e;
+    }
+    delete plans[key];
+  });
+}
+/* برای روزی که هنوز نرسیده (key > today)، اگه توی manualDayPlans چیزی نبود یه آبجکت
+   خالی می‌سازه تا ابزار «ساخت برنامه» همیشه چیزی برای نوشتن روش داشته باشه. */
+function ensureManualDayPlanFor(key){
+  ensureManualDayPlans();
+  if(!storeData.manualDayPlans[key]) storeData.manualDayPlans[key] = { doItems:[], avoidItems:[] };
+  if(!storeData.manualDayPlans[key].doItems) storeData.manualDayPlans[key].doItems = [];
+  if(!storeData.manualDayPlans[key].avoidItems) storeData.manualDayPlans[key].avoidItems = [];
+  return storeData.manualDayPlans[key];
+}
+
 /* ==================== Generic premium gate helper ====================
    isAppOwner (OWNER_EMAIL) always has storeData.premium forced true elsewhere,
    so this one check transparently covers the owner too — no separate bypass needed.
@@ -1741,8 +1803,8 @@ const PREMIUM_LOCK_SELECTORS = [
   '#tab-meditation .subseg button[data-sub="gratitude"]',
   '#tab-meditation .subseg button[data-sub="voidmind"]',
   '#tab-today .subseg button[data-sub="tomorrow"]',
-  // تب «تقویت هوش»: فقط بازی اول (محاسبه‌ی سریع) رایگانه؛ این سه‌تا پشت پرمیومن.
-  '#brainStroopStartBtn', '#brainSeqStartBtn', '#brainNbackStartBtn'
+  // تب «تقویت هوش»: فقط بازی اول (محاسبه‌ی سریع) رایگانه؛ این چهارتا پشت پرمیومن.
+  '#brainStroopStartBtn', '#brainSeqStartBtn', '#brainNbackStartBtn', '#brainOddStartBtn'
 ];
 function applyPremiumLocksUI(){
   const locked = !(storeData.premium || isInTrial());
@@ -1781,7 +1843,7 @@ function updatePlanBadge(){
     iconEl.innerHTML = PLAN_ICON_FREE;
     textEl.textContent = 'پلن رایگان';
     badge.title = 'برای ارتقا بزن';
-    badge.onclick = ()=>{ if(typeof openPremiumPage === 'function') openPremiumPage(); };
+    badge.onclick = ()=>{ if(typeof openPremiumPage === 'function') { openPremiumPage().catch(err=>console.error('Error opening premium page:', err)); } };
   }
 }
 /* Buy-button vs. already-owned state on the premium page itself. Called every time
@@ -1831,7 +1893,7 @@ function handleAiWorkerError(response, data){
   const msg = (data && data.error) || 'مشکلی پیش اومد، دوباره امتحان کن';
   showToast(msg, 'error');
   if(response.status === 402){
-    setTimeout(()=>{ if(typeof openPremiumPage === 'function') openPremiumPage(); }, 700);
+    setTimeout(()=>{ if(typeof openPremiumPage === 'function') { openPremiumPage().catch(err=>console.error('Error opening premium page:', err)); } }, 700);
   }
 }
 const AI_FEATURE_LABELS = { nightReview:'تحلیل شب', weeklyReview:'گزارش هفتگی', letter:'نامه‌ی آینده', libDeep:'کتابخونه‌ی عمیق', libWeekly:'مقاله‌ی هفته', lifeAnalyzer:'دفترچه هوشمند زندگی' };
@@ -2810,6 +2872,9 @@ function showPremiumSuccessCelebration(){
 document.getElementById('premSuccessClose').addEventListener('click',()=>{
   document.getElementById('premSuccessOverlay').classList.remove('show');
 });
+document.getElementById('coachDeepClose').addEventListener('click',()=>{
+  document.getElementById('coachDeepOverlay').classList.remove('show');
+});
 document.getElementById('celebrateClose').addEventListener('click',()=>{
   document.getElementById('celebrateOverlay').classList.remove('show');
   if(typeof celebrationQueue !== 'undefined' && celebrationQueue.length){
@@ -2849,6 +2914,42 @@ function updateStreakUI(){
   try{ scheduleDailyReminders(); }catch(err){}
   try{ if(typeof syncMyBuddyDailyStatus === 'function') syncMyBuddyDailyStatus(); }catch(err){}
   try{ updateRiskNudgeUI(); }catch(err){ console.error('updateRiskNudgeUI failed', err); }
+}
+// Days since the same startTimestamp that drives the روزشمار/streak-live-card (days/hours/
+// minutes/seconds since quitting) — reused here so the "پاکی" milestone badges (BADGES below)
+// always agree with what that card shows. 0 if the counter was never started.
+function daysSinceStreakStart(){
+  if(!storeData.startTimestamp) return 0;
+  return daysSince(new Date(storeData.startTimestamp).getTime());
+}
+/* ---- Daily meditation streak ----
+   Any completed session in the meditation tab — breathing, body scan, gratitude, or void-
+   mind — counts as "meditated today". storeData.meditationLog is a set of YYYY-MM-DD keys
+   (same format as storeData.entries) marking every calendar day with >=1 completed session;
+   computeMeditationStreak() walks backward from today the same way computeStreak() does for
+   the main checklist streak. logMeditationCompletion() is called from all 4 finish<Mode>()
+   functions in the meditation section below. ---- */
+function computeMeditationStreak(){
+  let streak=0; let d=new Date();
+  const log = storeData.meditationLog||{};
+  for(let i=0;i<365;i++){
+    const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    if(!log[key]) break;
+    streak++; d.setDate(d.getDate()-1);
+  }
+  return streak;
+}
+function logMeditationCompletion(){
+  if(!storeData.meditationLog) storeData.meditationLog = {};
+  const d = new Date();
+  const key = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  if(!storeData.meditationLog[key]){
+    storeData.meditationLog[key] = true;
+    const s = computeMeditationStreak();
+    if(s > (storeData.maxMeditationStreak||0)) storeData.maxMeditationStreak = s;
+    saveData();
+  }
+  try{ renderBadges(); }catch(err){}
 }
 /* ================= Header "catches fire" with the streak =================
    Anchor days -> intensity (0..1), linearly interpolated between anchors so the glow visibly
@@ -3043,6 +3144,7 @@ function checkDayRollover(){
   if(freshKey === today) return;
   today = freshKey;
   applyTomorrowPlanIfDue();
+  applyManualDayPlansIfDue();
   currentPhase = getPhase(pacedProgramDay());
   entry = storeData.entries[today] || { done:{}, avoidDone:{}, momentDone:{}, note:"", lesson:"", milestonesHit:{}, total: totalToday(),
     phoneHours:null, meals:{b:"",l:"",d:"",snacks:""}, nightReview:null, mood:null, energy:null, weight:null, symptoms:{} };
@@ -3635,6 +3737,7 @@ function getProgressFaceMood(baseMood){
   return 'happy';
 }
 function updateCoach(){
+  if(typeof coachCheckinState!=='undefined' && coachCheckinState!=='idle') return; // an in-progress check-in owns the bubble right now
   const avatarEl = document.getElementById('coachAvatar');
   const msgEl = document.getElementById('coachMsg');
   if(!avatarEl || !msgEl) return;
@@ -3646,11 +3749,275 @@ function updateCoach(){
   avatarEl.dataset.gender = gender;
   msgEl.textContent = data.text;
 }
+/* ================= Coach quick check-in (Today tab only) =================
+   Tapping the coach card never opens a popup. Instead the current message
+   crossfades OUT and 2-3 feeling chips crossfade IN, right inside the same
+   coach-bubble; picking a chip crossfades the chips back out for a tailored
+   reply, and swaps the avatar's face to match. Everything happens inside the
+   one box. A short idle timer then hands the bubble back to updateCoach(),
+   which normally owns it (blocked above while coachCheckinState!=='idle'). */
+let coachCheckinState = 'idle'; // 'idle' | 'options' | 'response'
+let coachCheckinAnimating = false;
+let coachCheckinRevertTimer = null;
+const COACH_CHECKIN_REPLIES = {
+  good: { mood:'excited', msgs:[
+    'عالیه! از همین انرژی برای امروز استفاده کن.',
+    'خوشحالم بشنوم. بیا امروز رو کامل ببریم.',
+    'همین حس خوب رو نگه دار، امروز روز خوبیه برای جلو رفتن.'
+  ]},
+  hard: { mood:'gentle', msgs:[
+    'باشه، سخت بودنش طبیعیه. لازم نیست همه‌چی امروز صددرصد باشه.',
+    'حتی یکی-دوتا کار کوچیک هم امروز رو نگه می‌داره. فشار نیار به خودت.',
+    'می‌دونم سخته. فقط یه قدم کوچیک بردار، همین کافیه.'
+  ]},
+  meh: { mood:'thinking', msgs:[
+    'بی‌حوصلگی هم می‌گذره. یه کار کوچیک شروع کن، حوصله خودش میاد.',
+    'لازم نیست با انگیزه‌ی زیاد شروع کنی؛ فقط شروع کن.',
+    'یه کار ریز رو تیک بزن، باقیش راحت‌تره.'
+  ]}
+};
+/* Crossfades hideEl out, then (once hidden) runs onMid to mutate showEl's
+   content, reveals showEl at showDisplayValue and crossfades it in, then
+   fires onDone. Both elements stay in the DOM the whole time — nothing is
+   removed, so there's no layout jump beyond the swap itself. */
+function coachSwap(hideEl, showEl, showDisplayValue, onMid, onDone){
+  if(!hideEl || !showEl) return;
+  hideEl.classList.add('coach-swap-hidden');
+  setTimeout(function(){
+    hideEl.style.display = 'none';
+    if(typeof onMid==='function') onMid();
+    showEl.style.display = showDisplayValue;
+    showEl.classList.add('coach-swap-hidden');
+    void showEl.offsetHeight; // force reflow so removing the class transitions
+    showEl.classList.remove('coach-swap-hidden');
+    setTimeout(function(){ if(typeof onDone==='function') onDone(); }, 200);
+  }, 200);
+}
+function openCoachCheckin(){
+  if(coachCheckinAnimating) return;
+  if(coachCheckinState==='options') return; // already open, let them pick a chip
+  const msgEl = document.getElementById('coachMsg');
+  const optsEl = document.getElementById('coachCheckinOptions');
+  if(!msgEl || !optsEl) return;
+  clearTimeout(coachCheckinRevertTimer);
+  dismissCoachHint();
+  coachCheckinAnimating = true;
+  coachSwap(msgEl, optsEl, 'flex', null, function(){
+    coachCheckinAnimating = false;
+    coachCheckinState = 'options';
+  });
+}
+function chooseCoachFeel(feel){
+  if(coachCheckinAnimating) return;
+  const reply = COACH_CHECKIN_REPLIES[feel];
+  const optsEl = document.getElementById('coachCheckinOptions');
+  const msgEl = document.getElementById('coachMsg');
+  const avatarEl = document.getElementById('coachAvatar');
+  if(!reply || !optsEl || !msgEl) return;
+  coachCheckinAnimating = true;
+  const text = seededPick(reply.msgs, 'checkin-'+feel+'-'+Date.now());
+  coachSwap(optsEl, msgEl, 'block', function(){
+    msgEl.textContent = text;
+    if(avatarEl){
+      const gender = (storeData.profile && storeData.profile.gender) || '';
+      avatarEl.innerHTML = buildCoachSVG(reply.mood, 'today', gender);
+      avatarEl.dataset.mood = reply.mood;
+      avatarEl.dataset.gender = gender;
+    }
+  }, function(){
+    coachCheckinAnimating = false;
+    coachCheckinState = 'response';
+    coachCheckinRevertTimer = setTimeout(function(){
+      coachCheckinState = 'idle';
+      if(typeof updateCoach==='function') updateCoach();
+    }, 6000);
+  });
+}
+const COACH_HINT_KEY = 'checklistApp:coachCheckinHintSeen';
+function dismissCoachHint(){
+  try{ localStorage.setItem(COACH_HINT_KEY, '1'); }catch(e){}
+  const card = document.getElementById('coachCard');
+  if(card) card.classList.remove('coach-hint-pulse');
+}
+/* Live "poke" reaction: every tap on the coach plays ONE random micro-animation on the
+   avatar wrapper (blink/wiggle/bounce/bigger-smile-pop) — never touches the message text.
+   Lives on the outer .coach-avatar div, so it composes independently on top of the SVG's
+   own idle float animation rather than fighting it. Rapid repeat taps restart cleanly. */
+const COACH_POKE_ANIMS = ['poke-bounce','poke-wiggle','poke-blink','poke-grin'];
+let coachPokeCleanupTimer = null;
+function coachPoke(){
+  const avatarEl = document.getElementById('coachAvatar');
+  if(!avatarEl) return;
+  avatarEl.classList.remove.apply(avatarEl.classList, COACH_POKE_ANIMS);
+  void avatarEl.offsetWidth; // reflow so a repeat tap restarts the animation instead of no-op-ing
+  const anim = COACH_POKE_ANIMS[Math.floor(Math.random()*COACH_POKE_ANIMS.length)];
+  avatarEl.classList.add(anim);
+  clearTimeout(coachPokeCleanupTimer);
+  coachPokeCleanupTimer = setTimeout(function(){ avatarEl.classList.remove(anim); }, 650);
+}
+function initCoachCheckin(){
+  const card = document.getElementById('coachCard');
+  if(!card) return;
+  let hintSeen = false;
+  try{ hintSeen = localStorage.getItem(COACH_HINT_KEY)==='1'; }catch(e){}
+  if(!hintSeen) card.classList.add('coach-hint-pulse');
+  card.addEventListener('click', function(e){
+    if(e.target.closest('.coach-checkin-btn')) return; // handled by the chip listener below, which pokes on its own
+    if(coachLongPressFired){ coachLongPressFired = false; return; } // this tap was actually the release of a completed long-press — the deep message already handled it
+    coachPoke();
+    if(coachCheckinState==='idle' || coachCheckinState==='response'){
+      clearTimeout(coachCheckinRevertTimer);
+      openCoachCheckin();
+    }
+  });
+  card.addEventListener('keydown', function(e){
+    if(e.key==='Enter' || e.key===' '){ e.preventDefault(); card.click(); }
+  });
+  const optsEl = document.getElementById('coachCheckinOptions');
+  if(optsEl){
+    optsEl.querySelectorAll('.coach-checkin-btn').forEach(function(btn){
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        coachPoke();
+        chooseCoachFeel(btn.dataset.feel);
+      });
+    });
+  }
+}
+/* ================= Deep coach message (long-press on the mascot) =================
+   The bubble's normal message is a short one-liner. Holding the mascot itself
+   (not the bubble/card) for ~4s reveals a bigger, more personal message in a
+   dedicated overlay — built from the user's real streak/phase/badge numbers so
+   it reads like the coach leaning in to say something meant for this exact
+   moment, not just another rotating line. A filling ring around the avatar
+   (.coach-longpress-active/-grow, pure CSS transition, driven by these two
+   class toggles) gives feedback while holding; releasing early cancels with no
+   side effect. Completing the hold sets coachLongPressFired so the coachCard
+   click handler above (which owns plain taps) skips once instead of also
+   opening the quick check-in for the same touch. */
+const COACH_LONGPRESS_MS = 2500;
+let coachLongPressTimer = null;
+let coachLongPressFired = false;
+function coachLongPressVisualStart(avatarEl){
+  avatarEl.classList.add('coach-longpress-active');
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){ avatarEl.classList.add('coach-longpress-grow'); });
+  });
+}
+function coachLongPressVisualEnd(avatarEl){
+  avatarEl.classList.remove('coach-longpress-grow');
+  setTimeout(function(){ avatarEl.classList.remove('coach-longpress-active'); }, 250);
+}
+let coachLongPressStartXY = null;
+function coachLongPressStart(x, y){
+  const avatarEl = document.getElementById('coachAvatar');
+  if(!avatarEl) return;
+  dismissCoachHint();
+  coachLongPressFired = false;
+  coachLongPressStartXY = {x:x, y:y};
+  coachLongPressVisualStart(avatarEl);
+  clearTimeout(coachLongPressTimer);
+  coachLongPressTimer = setTimeout(function(){
+    coachLongPressFired = true;
+    coachLongPressVisualEnd(avatarEl);
+    try{ if(navigator.vibrate) navigator.vibrate(15); }catch(err){}
+    openCoachDeepMessage();
+  }, COACH_LONGPRESS_MS);
+}
+function coachLongPressCancel(){
+  clearTimeout(coachLongPressTimer);
+  coachLongPressStartXY = null;
+  const avatarEl = document.getElementById('coachAvatar');
+  if(avatarEl) coachLongPressVisualEnd(avatarEl);
+}
+// A real scroll/drag starting on the avatar shouldn't be mistaken for a hold —
+// cancel as soon as the finger/pointer moves more than a few px from where it landed.
+const COACH_LONGPRESS_MOVE_TOLERANCE = 10;
+function coachLongPressMove(e){
+  if(!coachLongPressStartXY) return;
+  const dx = e.clientX - coachLongPressStartXY.x, dy = e.clientY - coachLongPressStartXY.y;
+  if(Math.sqrt(dx*dx + dy*dy) > COACH_LONGPRESS_MOVE_TOLERANCE) coachLongPressCancel();
+}
+function initCoachLongPress(){
+  const avatarEl = document.getElementById('coachAvatar');
+  if(!avatarEl) return;
+  avatarEl.addEventListener('pointerdown', function(e){
+    if(e.button!==undefined && e.button!==0) return; // primary touch/pen/left-click only
+    coachLongPressStart(e.clientX, e.clientY);
+  });
+  avatarEl.addEventListener('pointermove', coachLongPressMove);
+  ['pointerup','pointercancel','pointerleave'].forEach(function(evt){
+    avatarEl.addEventListener(evt, coachLongPressCancel);
+  });
+}
+/* Builds the longer, personal message. Deterministically varies within a day
+   (seededPick keyed off todayKey()) rather than randomly, matching how the
+   rest of the coach's messaging works elsewhere in this file. */
+function getCoachDeepMessage(){
+  const name = (storeData.profile && storeData.profile.firstName) ? storeData.profile.firstName.trim() : '';
+  const namePart = name ? (name+'، ') : '';
+  const day = programDay();
+  const streak = computeStreak();
+  const maxStreak = storeData.maxStreak || 0;
+  const phase = currentPhase || PHASES[0];
+  const daysLeftInPhase = Math.max(0, phase.max - day);
+  const earnedBadges = BADGES.filter(function(b){ return storeData.badges && storeData.badges[b.id]; });
+  const badgeCount = earnedBadges.length;
+  const seed = todayKey()+'-deep';
+  let mood = 'gentle', lines = [];
+  if(!storeData.startDate || day<=0){
+    mood = 'gentle';
+    lines = [
+      namePart+'هنوز شروع نکردی، و این یعنی هنوز همه‌چی جلوته. من عجله‌ای ندارم؛ هر وقت آماده بودی، اولین قدم رو با هم برمی‌داریم.',
+      namePart+'شروع کردن ترسناک‌تر از ادامه دادنه. هر وقت آماده شدی، من دقیقاً همینجام.'
+    ];
+  } else if(streak===0 && maxStreak>=3){
+    mood = 'concerned';
+    lines = [
+      namePart+'رکورد '+toFa(maxStreak)+' روزه‌ت رو یادم نرفته. یه وقفه اون رکورد رو پاک نمی‌کنه، فقط یعنی الان وقتشه دوباره شروع کنی. من هنوز پشتتم.',
+      namePart+'می‌دونم شاید الان حس کنی از صفر شروع کردی، ولی چیزی که '+toFa(maxStreak)+' روز نگه‌داشتی هنوز تو توئه. فقط باید دوباره روش دست بذاری.'
+    ];
+  } else if(streak >= 7){
+    mood = 'proud';
+    lines = [
+      namePart+toFa(streak)+' روزه که هر روز یه انتخاب کردی، حتی روزایی که راحت‌تر بود بی‌خیال بشی. الان تو «'+phase.name+'» هستی — این اتفاقی به دست نیومده.',
+      namePart+'از بیرون شاید فقط یه عدد به نظر بیاد، ولی '+toFa(streak)+' روز پشت‌سرهم یعنی '+toFa(streak)+' بار که تصمیم گرفتی ادامه بدی، نه ول کنی. من همه‌شو دیدم.'
+    ];
+  } else {
+    mood = 'happy';
+    lines = [
+      namePart+'روز '+toFa(day)+'ـته، تو «'+phase.name+'» هستی'+(daysLeftInPhase>0 ? (' و '+toFa(daysLeftInPhase)+' روز تا مرحله‌ی بعد مونده') : '')+'. همین روزای معمولی‌ان که مسیرو می‌سازن.',
+      namePart+'شاید امروز روز خاصی به نظر نیاد، ولی تو «'+phase.name+'» هستی و داری خوب پیش می‌ری. ادامه بده.'
+    ];
+  }
+  let text = seededPick(lines, seed);
+  if(badgeCount>0){
+    const highlight = seededPick(earnedBadges, seed+'-badge');
+    text += ' یادت باشه، «'+highlight.title+'» '+highlight.emoji+' هم یکی از کارهاییه که خودت به دست آوردی.';
+  }
+  return { mood: mood, text: text };
+}
+function openCoachDeepMessage(){
+  const data = getCoachDeepMessage();
+  const gender = (storeData.profile && storeData.profile.gender) || '';
+  const coachEl = document.getElementById('coachDeepCoach');
+  if(coachEl){
+    coachEl.innerHTML = buildCoachSVG(data.mood, 'deep', gender);
+    coachEl.dataset.mood = data.mood;
+    coachEl.dataset.gender = gender;
+  }
+  const textEl = document.getElementById('coachDeepText');
+  if(textEl) textEl.textContent = data.text;
+  const overlay = document.getElementById('coachDeepOverlay');
+  if(overlay) overlay.classList.add('show');
+  sfxPop();
+}
+
 function updateWorkoutCoach(){
   const avatarEl = document.getElementById('coachAvatarWorkout');
   const msgEl = document.getElementById('coachMsgWorkout');
   if(!avatarEl || !msgEl) return;
-  const template = SPLIT_TEMPLATES[woSplit];
+  const template = getActiveSplitTemplate();
   const day = template ? template[woActiveDay] : null;
   const seed = todayKey()+'-wo-'+woActiveDay+'-'+woSplit;
   const msgs = day ? [
@@ -4102,6 +4469,7 @@ function normalizeAndRenderStoreData(){
   }
   ensureTomorrowPlan();
   applyTomorrowPlanIfDue();
+  applyManualDayPlansIfDue();
   currentPhase = getPhase(pacedProgramDay());
   entry = storeData.entries[today] || { done:{}, avoidDone:{}, momentDone:{}, note:"", lesson:"", milestonesHit:{}, total: totalToday(),
     phoneHours:null, meals:{b:"",l:"",d:"",snacks:""}, nightReview:null, mood:null, energy:null, weight:null, symptoms:{} };
@@ -4134,6 +4502,7 @@ function normalizeAndRenderStoreData(){
   } else {
     overlay.classList.remove('show');
   }
+  try{ applyNoProgramModeUI(); }catch(err){ console.error('applyNoProgramModeUI failed', err); }
 
   // Start the live day/hour/minute/second counter immediately — this must not be
   // blocked by any other widget below failing to render.
@@ -4212,11 +4581,14 @@ function normalizeAndRenderStoreData(){
   safeRun(initWorkoutTab, 'initWorkoutTab');
   safeRun(checkCustomTaskReminders, 'checkCustomTaskReminders');
   safeRun(scheduleAllCustomTaskNotifs, 'scheduleAllCustomTaskNotifs');
+  safeRun(initCoachCheckin, 'initCoachCheckin');
+  safeRun(initCoachLongPress, 'initCoachLongPress');
   safeRun(render, 'render (final)');
 }
 
 function render(){
-  const onboardedForPlan = !!(storeData.profile && storeData.profile.onboardingComplete);
+  try{ applyNoProgramModeUI(); }catch(err){ console.error('applyNoProgramModeUI failed', err); }
+  const onboardedForPlan = !!(storeData.profile && (storeData.profile.onboardingComplete || storeData.profile.manualProgramMode));
   const doSectionEl = document.getElementById('doSection');
   const avoidSectionEl = document.getElementById('avoidSection');
   if(doSectionEl) doSectionEl.style.display = onboardedForPlan ? '' : 'none';
@@ -8306,6 +8678,165 @@ if(brainNbackNoBtn) brainNbackNoBtn.addEventListener('click', ()=> brainHandleNb
 const brainNbackStartBtn = document.getElementById('brainNbackStartBtn');
 if(brainNbackStartBtn) brainNbackStartBtn.addEventListener('click', brainStartNbackRound);
 
+/* ---- پیدا کردن فرق (توجه پایدار/جست‌وجوی دیداری): یه شبکه از خونه‌های هم‌شکل که فقط
+   یکیشون یه‌کم فرق داره — یا سایه‌ی رنگش کمی روشن‌تر/تیره‌تره، یا یه‌کم چرخیده. این
+   بخش کاملاً جدا از بقیه‌ی بازی‌های این تبه: نه محاسبه‌ست، نه تداخل (استروپ)، نه
+   حافظه‌ی توالی/کاری (توالی رنگی و N-back) — فقط دقت و اسکن دیداریه. هر بار یه راند
+   تصادفی «رنگ» یا «چرخش» انتخاب می‌شه تا زود قابل‌پیش‌بینی نشه. */
+const BRAIN_ODD_LEVELS = {
+  easy:   { label:'ساده',  cols:3, cells:9,  seconds:45, colorDelta:44, rotateDeg:36 },
+  medium: { label:'متوسط', cols:4, cells:16, seconds:42, colorDelta:28, rotateDeg:24 },
+  hard:   { label:'سخت',   cols:5, cells:25, seconds:38, colorDelta:16, rotateDeg:14 }
+};
+let brainOddLevel = 'easy';
+let brainOddTimerId = null;
+let brainOddRunning = false;
+let brainOddScore = 0;
+let brainOddStreak = 0;
+let brainOddCorrectIdx = -1;
+
+function brainGetOddStats(){
+  storeData.brainStats = storeData.brainStats || {};
+  storeData.brainStats.odd = storeData.brainStats.odd || { bestByLevel:{}, rounds:0 };
+  return storeData.brainStats.odd;
+}
+function brainOddClampL(l){ return Math.max(10, Math.min(90, l)); }
+
+function brainRenderOddRound(){
+  const cfg = BRAIN_ODD_LEVELS[brainOddLevel];
+  const grid = document.getElementById('brainOddGrid');
+  grid.style.gridTemplateColumns = 'repeat('+cfg.cols+',1fr)';
+  grid.innerHTML = '';
+  const correctIdx = Math.floor(Math.random()*cfg.cells);
+  brainOddCorrectIdx = correctIdx;
+  const hue = Math.floor(Math.random()*360);
+  const isColorRound = Math.random() < 0.5;
+  const baseL = 55;
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  for(let i=0;i<cfg.cells;i++){
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'brain-odd-cell';
+    cell.dataset.idx = i;
+    const fill = document.createElement('span');
+    fill.className = 'brain-odd-fill';
+    if(isColorRound){
+      const l = (i===correctIdx) ? brainOddClampL(baseL + dir*cfg.colorDelta) : baseL;
+      fill.style.background = 'hsl('+hue+',62%,'+l+'%)';
+    } else {
+      fill.style.background = 'hsl('+hue+',62%,'+baseL+'%)';
+      if(i===correctIdx) fill.style.transform = 'rotate('+(dir*cfg.rotateDeg)+'deg)';
+    }
+    cell.appendChild(fill);
+    cell.addEventListener('click', ()=> brainHandleOddAnswer(cell, i));
+    grid.appendChild(cell);
+  }
+}
+
+function brainUpdateOddStatsUI(){
+  document.getElementById('brainOddScore').textContent = faDigits(brainOddScore);
+  document.getElementById('brainOddStreak').textContent = faDigits(brainOddStreak);
+}
+
+function brainHandleOddAnswer(cellEl, idx){
+  if(!brainOddRunning || cellEl.disabled) return;
+  const grid = document.getElementById('brainOddGrid');
+  const isCorrect = idx === brainOddCorrectIdx;
+  grid.querySelectorAll('.brain-odd-cell').forEach(c=> c.disabled = true);
+  const correctEl = grid.querySelector('[data-idx="'+brainOddCorrectIdx+'"]');
+  if(correctEl) correctEl.classList.add('brain-correct');
+  if(isCorrect){
+    sfxSuccess();
+    brainOddScore++;
+    brainOddStreak++;
+  } else {
+    sfxError();
+    cellEl.classList.add('brain-wrong');
+    brainOddStreak = 0;
+  }
+  brainUpdateOddStatsUI();
+  setTimeout(()=>{ if(brainOddRunning) brainRenderOddRound(); }, 550);
+}
+
+function brainStartOddRound(){
+  if(!requirePremium()) return;
+  const cfg = BRAIN_ODD_LEVELS[brainOddLevel];
+  clearInterval(brainOddTimerId);
+  brainOddRunning = true;
+  brainOddScore = 0;
+  brainOddStreak = 0;
+  document.getElementById('brainOddStatsRow').style.display = 'flex';
+  document.getElementById('brainOddResult').style.display = 'none';
+  const stats = brainGetOddStats();
+  document.getElementById('brainOddBest').textContent = faDigits(stats.bestByLevel[brainOddLevel] || 0);
+  brainUpdateOddStatsUI();
+  const startBtn = document.getElementById('brainOddStartBtn');
+  startBtn.disabled = true;
+  startBtn.textContent = '⏱ در حال بازیه...';
+  document.getElementById('brainOddTimerWrap').style.display = 'block';
+  const fill = document.getElementById('brainOddBarFill');
+  const timerEl = document.getElementById('brainOddTimer');
+  let remaining = cfg.seconds;
+  function renderTimer(){
+    const m = String(Math.floor(remaining/60)).padStart(2,'0');
+    const s = String(remaining%60).padStart(2,'0');
+    timerEl.textContent = faDigits(m+':'+s);
+    fill.style.width = ((cfg.seconds-remaining)/cfg.seconds*100)+'%';
+  }
+  renderTimer();
+  brainRenderOddRound();
+  brainOddTimerId = setInterval(()=>{
+    remaining--;
+    if(remaining <= 0){
+      remaining = 0;
+      renderTimer();
+      brainFinishOddRound();
+    } else {
+      renderTimer();
+    }
+  }, 1000);
+}
+
+function brainFinishOddRound(){
+  clearInterval(brainOddTimerId);
+  brainOddRunning = false;
+  document.getElementById('brainOddGrid').innerHTML = '';
+  const startBtn = document.getElementById('brainOddStartBtn');
+  startBtn.disabled = false;
+  startBtn.textContent = '🔁 یه راند دیگه';
+  const stats = brainGetOddStats();
+  const prevBest = stats.bestByLevel[brainOddLevel] || 0;
+  const isNewBest = brainOddScore > prevBest;
+  if(isNewBest) stats.bestByLevel[brainOddLevel] = brainOddScore;
+  stats.rounds = (stats.rounds||0) + 1;
+  saveData();
+  renderXP();
+  document.getElementById('brainOddBest').textContent = faDigits(stats.bestByLevel[brainOddLevel]);
+  const resultEl = document.getElementById('brainOddResult');
+  resultEl.style.display = 'block';
+  resultEl.textContent = isNewBest
+    ? `🏆 رکورد جدید! ${faDigits(brainOddScore)} تا درست زدی.`
+    : `تموم شد! ${faDigits(brainOddScore)} تا درست زدی (رکوردت: ${faDigits(stats.bestByLevel[brainOddLevel])}).`;
+  if(isNewBest && typeof launchConfetti === 'function') launchConfetti();
+}
+
+const brainOddLevelSeg = document.getElementById('brainOddLevelSeg');
+if(brainOddLevelSeg){
+  brainOddLevelSeg.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(brainOddRunning) return;
+      brainOddLevelSeg.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      brainOddLevel = btn.dataset.level;
+      const stats = brainGetOddStats();
+      const bestEl = document.getElementById('brainOddBest');
+      if(bestEl) bestEl.textContent = faDigits(stats.bestByLevel[brainOddLevel] || 0);
+    });
+  });
+}
+const brainOddStartBtn = document.getElementById('brainOddStartBtn');
+if(brainOddStartBtn) brainOddStartBtn.addEventListener('click', brainStartOddRound);
+
 /* ================= Public chat moderation: block + abuse filter ================= */
 function getBlockedChatUsers(){
   try{ return JSON.parse(localStorage.getItem('checklistApp:blockedChatUsers') || '[]'); }
@@ -8422,6 +8953,7 @@ document.getElementById('deleteAccountBtn').addEventListener('click', async ()=>
     });
     const result = await res.json().catch(()=>({}));
     if(!res.ok || !result.ok){ showToast(result.error || 'حذف حساب انجام نشد، دوباره امتحان کن', 'error'); return; }
+    intentionalSignOut = true;
     await sb.auth.signOut();
     showToast('حسابت با موفقیت حذف شد', 'success');
     setTimeout(()=>{ location.reload(); }, 1200);
@@ -8453,7 +8985,9 @@ document.querySelectorAll('.subseg').forEach(seg=>{
       if(target) target.classList.add('active');
       if(panel.id === 'tab-today' && btn.dataset.sub === 'program') maybeSuggestTodayNarration();
       if(panel.id === 'tab-today' && btn.dataset.sub === 'tomorrow') renderTomorrowTab();
+      if(panel.id === 'tab-today' && btn.dataset.sub === 'manualbuild') renderManualPlanTab();
       if(panel.id === 'tab-workout' && btn.dataset.sub === 'history') renderWoHistory();
+      if(panel.id === 'tab-workout' && btn.dataset.sub === 'recovery') renderRecoveryTab();
       if(panel.id === 'tab-meditation'){
         stopMeditation();
         stopBodyScan();
@@ -8463,6 +8997,14 @@ document.querySelectorAll('.subseg').forEach(seg=>{
     });
   });
 });
+/* از جای دیگه‌ی اپ (مثلاً درست بعد از انتخاب «برنامه‌ی دستی» تو آنبوردینگ) مستقیم
+   می‌بره تب امروز -> زیرتب «ساخت برنامه». */
+function openManualPlanBuilder(){
+  const mainBtn = document.querySelector('.tab-btn[data-tab="today"]');
+  if(mainBtn) mainBtn.click();
+  const subBtn = document.querySelector('#tab-today .subseg button[data-sub="manualbuild"]');
+  if(subBtn) subBtn.click();
+}
 
 /* ================= Library: scientific research search (Semantic Scholar + MyMemory) =================
    Semantic Scholar: free, no key, and its `tldr` field already gives a ready-made one-line AI
@@ -8813,7 +9355,7 @@ document.querySelectorAll('.side-menu-item[data-tab]').forEach(item=>{
 });
 document.getElementById('premiumMenuItem').addEventListener('click', ()=>{
   closeSideMenu();
-  openPremiumPage();
+  openPremiumPage().catch(err=>console.error('Error opening premium page:', err));
 });
 
 /* ---------------- Telegram group join (robust, WebView-safe) ----------------
@@ -9000,6 +9542,14 @@ function renderXP(){
 const BADGE_CROWN_ICON = '<svg viewBox="0 0 24 24" style="width:1em;height:1em;vertical-align:-0.12em" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="badgeCrownGrad" x1="4" y1="5" x2="20" y2="19" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffe9b8"/><stop offset="1" stop-color="#e2a53a"/></linearGradient></defs><path d="M4 17 L4 9 L8 12 L12 5 L16 12 L20 9 L20 17 Z" fill="url(#badgeCrownGrad)" stroke="url(#badgeCrownGrad)" stroke-width="0.6" stroke-linejoin="round"/><rect x="4" y="17" width="16" height="2.4" rx="1" fill="url(#badgeCrownGrad)"/><circle cx="4" cy="9" r="1.15" fill="url(#badgeCrownGrad)"/><circle cx="12" cy="5" r="1.3" fill="url(#badgeCrownGrad)"/><circle cx="20" cy="9" r="1.15" fill="url(#badgeCrownGrad)"/></svg>';
 const BADGES = [
   {id:'first_day', emoji:'🌱', title:'اولین قدم', check:()=>Object.keys(storeData.entries||{}).length>=1},
+  // «پاکی»: مبتنی بر همون startTimestamp که خودِ روزشمار زنده (streak-live-card) رو
+  // می‌سازه، نه استریکِ چک‌لیست (maxStreak) — پس همیشه با همون عدد بالای صفحه یکی‌ان.
+  {id:'clean_1d', emoji:'🤩', title:'یک روز پاکی', check:()=>daysSinceStreakStart()>=1},
+  {id:'clean_1w', emoji:'🥳', title:'یک هفته پاکی', check:()=>daysSinceStreakStart()>=7},
+  {id:'clean_1m', emoji:'🥰', title:'یک ماه پاکی', check:()=>daysSinceStreakStart()>=30},
+  {id:'clean_2m', emoji:'😍', title:'دو ماه پاکی', check:()=>daysSinceStreakStart()>=60},
+  {id:'clean_3m', emoji:'🤗', title:'سه ماه پاکی', check:()=>daysSinceStreakStart()>=90},
+  {id:'clean_6m', emoji:'👑', title:'شش ماه پاکی', check:()=>daysSinceStreakStart()>=180},
   {id:'streak_7', emoji:'🔥', title:'۷ روز پشت‌هم', check:()=>(storeData.maxStreak||0)>=7},
   {id:'streak_30', emoji:'💪', title:'۳۰ روز پشت‌هم', check:()=>(storeData.maxStreak||0)>=30},
   {id:'streak_60', emoji:'🚀', title:'۶۰ روز پشت‌هم', check:()=>(storeData.maxStreak||0)>=60},
@@ -9029,6 +9579,18 @@ const BADGES = [
       (Object.values(e.done||{}).filter(Boolean).length+Object.values(e.avoidDone||{}).filter(Boolean).length+Object.values(e.momentDone||{}).filter(Boolean).length) >= e.total)).length>=7},
   {id:'perfect_30', emoji:'🌺', title:'۳۰ روز کامل', check:()=>Object.values(storeData.entries||{}).filter(e=>e.total && (
       (Object.values(e.done||{}).filter(Boolean).length+Object.values(e.avoidDone||{}).filter(Boolean).length+Object.values(e.momentDone||{}).filter(Boolean).length) >= e.total)).length>=30},
+  {id:'perfect_14', emoji:'🌷', title:'۱۴ روز کامل', check:()=>Object.values(storeData.entries||{}).filter(e=>e.total && (
+      (Object.values(e.done||{}).filter(Boolean).length+Object.values(e.avoidDone||{}).filter(Boolean).length+Object.values(e.momentDone||{}).filter(Boolean).length) >= e.total)).length>=14},
+  {id:'perfect_60', emoji:'🌹', title:'۶۰ روز کامل', check:()=>Object.values(storeData.entries||{}).filter(e=>e.total && (
+      (Object.values(e.done||{}).filter(Boolean).length+Object.values(e.avoidDone||{}).filter(Boolean).length+Object.values(e.momentDone||{}).filter(Boolean).length) >= e.total)).length>=60},
+  {id:'perfect_90', emoji:'💐', title:'۹۰ روز کامل', check:()=>Object.values(storeData.entries||{}).filter(e=>e.total && (
+      (Object.values(e.done||{}).filter(Boolean).length+Object.values(e.avoidDone||{}).filter(Boolean).length+Object.values(e.momentDone||{}).filter(Boolean).length) >= e.total)).length>=90},
+  // «یک ذهن آرام»: استریک روزانه‌ی مدیتیشن (هرکدوم از ۴ زیرحالت — تنفس/اسکن بدن/نعمت‌ها/خلأ
+  // ذهنی — باشه فرقی نمی‌کنه)، جدا از استریک اصلی چک‌لیست. منطقش تو logMeditationCompletion هست.
+  {id:'meditation_3', emoji:'🤝', title:'۳ روز مدیتیشن پشت‌هم', check:()=>(storeData.maxMeditationStreak||0)>=3},
+  {id:'meditation_7', emoji:'🧘', title:'یک ذهن آرام (۷ روز)', check:()=>(storeData.maxMeditationStreak||0)>=7},
+  {id:'meditation_30', emoji:'🕊️', title:'یک ماه ذهن آرام', check:()=>(storeData.maxMeditationStreak||0)>=30},
+  {id:'days_logged_7', emoji:'✨', title:'یک هفته فعالیت', check:()=>Object.keys(storeData.entries||{}).length>=7},
   {id:'days_logged_30', emoji:'📅', title:'۳۰ روز فعالیت', check:()=>Object.keys(storeData.entries||{}).length>=30},
   {id:'days_logged_90', emoji:'🗓️', title:'۹۰ روز فعالیت', check:()=>Object.keys(storeData.entries||{}).length>=90},
   {id:'days_logged_180', emoji:'📆', title:'۱۸۰ روز فعالیت', check:()=>Object.keys(storeData.entries||{}).length>=180},
@@ -9075,6 +9637,22 @@ function renderBadges(){
   }).join('');
   grid.innerHTML = html;
   if(changed) saveData();
+  try{ updateHeaderBadgesUI(); }catch(err){}
+}
+// Single fixed-size header icon (see .header-badges-btn) showing how many badges are earned
+// so far, capped at "۹+" like the notification bell counter next to it — this way the count
+// keeps climbing as new badge families (پاکی, مدیتیشن, برنامه‌ی روزانه...) get earned without
+// the header itself ever changing size or shifting the other header buttons around.
+function updateHeaderBadgesUI(){
+  const countEl = document.getElementById('headerBadgesCount');
+  if(!countEl) return;
+  const n = Object.keys(storeData.badges||{}).length;
+  if(n > 0){
+    countEl.textContent = n > 9 ? '۹+' : toFa(n);
+    countEl.classList.add('show');
+  } else {
+    countEl.classList.remove('show');
+  }
 }
 
 /* ================= Heatmap ================= */
@@ -9312,6 +9890,149 @@ function renderTomorrowTab(){
     saveData();
     renderTomorrowTab();
     showToast('برای پرهیز فردا اضافه شد');
+  });
+})();
+
+/* ---- ابزار «ساخت برنامه» (برنامه‌ی دستی): نوار روز (امروز تا ۱۳ روز جلوتر) + دو
+   لیست do/avoid برای همون روز + چیپ‌های پیشنهادی سریع + کپی‌کردن روی چند روز بعد.
+   برای امروز (offset=0) مستقیم رو entry.extraDoItems/extraAvoidItems کار می‌کنه (که
+   getDoItems/getAvoidItems همین الان می‌خوننش)؛ برای روزهای بعدی رو
+   storeData.manualDayPlans[key] که با رسیدن اون روز (applyManualDayPlansIfDue) به
+   همون entry.extra*Items منتقل می‌شه. ---- */
+let mpSelectedOffset = 0;
+const MP_DO_SUGGESTIONS = ['۲۰ دقیقه پیاده‌روی','۸ لیوان آب خوردن','۱۰ دقیقه مدیتیشن','مطالعه‌ی ۲۰ دقیقه‌ای','خواب به‌موقع (قبل از ۱۲)','نماز اول وقت','زنگ زدن به یه دوست یا خانواده'];
+const MP_AVOID_SUGGESTIONS = ['چک‌کردن گوشی صبح زود','خرید غیرضروری','پرخوری شبانه','دیر خوابیدن','افراط تو شبکه‌های اجتماعی','غذای فرآوری‌شده'];
+function mpKeyForOffset(off){ return off===0 ? today : addDaysToKey(today, off); }
+function mpItemsForOffset(off){
+  if(off===0){
+    if(!entry.extraDoItems) entry.extraDoItems = [];
+    if(!entry.extraAvoidItems) entry.extraAvoidItems = [];
+    return { doItems: entry.extraDoItems, avoidItems: entry.extraAvoidItems };
+  }
+  return ensureManualDayPlanFor(mpKeyForOffset(off));
+}
+function mpDayLabel(off){
+  if(off===0) return 'امروز';
+  if(off===1) return 'فردا';
+  if(off===2) return 'پس‌فردا';
+  return off+' روز دیگه';
+}
+function renderMpDayChips(){
+  const box = document.getElementById('mpDayChips');
+  if(!box) return;
+  let html = '';
+  for(let off=0; off<=13; off++){
+    const items = mpItemsForOffset(off);
+    const count = (items.doItems||[]).length + (items.avoidItems||[]).length;
+    html += '<button type="button" class="mp-day-chip'+(off===mpSelectedOffset?' active':'')+(count?' has-items':'')+'" data-off="'+off+'">'
+      + '<span class="mp-day-chip-label">'+mpDayLabel(off)+'</span>'
+      + '<span class="mp-day-chip-count">'+(count? count+' کار' : '—')+'</span></button>';
+  }
+  box.innerHTML = html;
+  box.querySelectorAll('.mp-day-chip').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      mpSelectedOffset = parseInt(el.dataset.off,10);
+      renderManualPlanTab();
+    });
+  });
+}
+function mpRenderList(boxId, emptyId, items, kind){
+  const box = document.getElementById(boxId);
+  const empty = document.getElementById(emptyId);
+  if(!box) return;
+  box.innerHTML = items.map((item,i)=>
+    '<div class="c-row"><span>'+item+'</span><span class="rm" data-idx="'+i+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span></div>').join('');
+  box.querySelectorAll('.rm').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      mpRemoveItem(kind, parseInt(el.dataset.idx,10));
+    });
+  });
+  if(empty) empty.style.display = items.length ? 'none' : 'block';
+}
+function mpRemoveItem(kind, idx){
+  const items = mpItemsForOffset(mpSelectedOffset);
+  const arr = kind==='do' ? items.doItems : items.avoidItems;
+  arr.splice(idx,1);
+  saveData();
+  if(mpSelectedOffset===0){ entry.total = totalToday(); render(); }
+  renderManualPlanTab();
+}
+function mpAddItem(kind, text){
+  const val = (text||'').trim();
+  if(!val) return false;
+  const items = mpItemsForOffset(mpSelectedOffset);
+  const arr = kind==='do' ? items.doItems : items.avoidItems;
+  if(arr.includes(val)) return false;
+  arr.push(val);
+  saveData();
+  if(mpSelectedOffset===0){ entry.total = totalToday(); render(); }
+  renderManualPlanTab();
+  return true;
+}
+function mpRenderSuggestChips(boxId, list, kind){
+  const box = document.getElementById(boxId);
+  if(!box) return;
+  const items = mpItemsForOffset(mpSelectedOffset);
+  const current = kind==='do' ? items.doItems : items.avoidItems;
+  box.innerHTML = list.map(txt=>{
+    const on = current.includes(txt);
+    return '<button type="button" class="mp-sugg-chip" data-txt="'+txt.replace(/"/g,'&quot;')+'"'
+      + (on? ' style="background:var(--accent);color:var(--accent-text);border-color:var(--accent);"' : '')
+      + '>'+(on?'✓ ':'')+txt+'</button>';
+  }).join('');
+  box.querySelectorAll('.mp-sugg-chip').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const txt = el.dataset.txt;
+      const items2 = mpItemsForOffset(mpSelectedOffset);
+      const arr = kind==='do' ? items2.doItems : items2.avoidItems;
+      const idx = arr.indexOf(txt);
+      if(idx>=0) mpRemoveItem(kind, idx); else mpAddItem(kind, txt);
+    });
+  });
+}
+function renderManualPlanTab(){
+  if(!document.getElementById('mpDayChips')) return;
+  renderMpDayChips();
+  const items = mpItemsForOffset(mpSelectedOffset);
+  const label = mpDayLabel(mpSelectedOffset);
+  const doHead = document.getElementById('mpDoHead');
+  const avoidHead = document.getElementById('mpAvoidHead');
+  if(doHead) doHead.textContent = '➕ کارهای '+label;
+  if(avoidHead) avoidHead.textContent = '🚫 پرهیزهای '+label;
+  mpRenderList('mpDoList','mpDoEmpty', items.doItems||[], 'do');
+  mpRenderList('mpAvoidList','mpAvoidEmpty', items.avoidItems||[], 'avoid');
+  mpRenderSuggestChips('mpDoSuggestChips', MP_DO_SUGGESTIONS, 'do');
+  mpRenderSuggestChips('mpAvoidSuggestChips', MP_AVOID_SUGGESTIONS, 'avoid');
+}
+(function(){
+  const doAddBtn = document.getElementById('mpDoAdd');
+  if(doAddBtn) doAddBtn.addEventListener('click', ()=>{
+    const input = document.getElementById('mpDoInput');
+    if(mpAddItem('do', input.value)){ input.value=''; showToast('اضافه شد'); }
+  });
+  const avoidAddBtn2 = document.getElementById('mpAvoidAdd');
+  if(avoidAddBtn2) avoidAddBtn2.addEventListener('click', ()=>{
+    const input = document.getElementById('mpAvoidInput');
+    if(mpAddItem('avoid', input.value)){ input.value=''; showToast('اضافه شد'); }
+  });
+  const copyBtn = document.getElementById('mpCopyBtn');
+  if(copyBtn) copyBtn.addEventListener('click', ()=>{
+    const daysInput = document.getElementById('mpCopyDaysInput');
+    let n = parseInt(daysInput.value,10); if(!n || n<1) n = 1; if(n>13) n = 13;
+    const src = mpItemsForOffset(mpSelectedOffset);
+    const srcDo = (src.doItems||[]).slice();
+    const srcAvoid = (src.avoidItems||[]).slice();
+    if(!srcDo.length && !srcAvoid.length){ showToast('اول یه کاری برای همین روز اضافه کن', 'info'); return; }
+    let copiedDays = 0;
+    for(let off=mpSelectedOffset+1; off<=Math.min(13, mpSelectedOffset+n); off++){
+      const target = mpItemsForOffset(off);
+      srcDo.forEach(it=>{ if(!target.doItems.includes(it)) target.doItems.push(it); });
+      srcAvoid.forEach(it=>{ if(!target.avoidItems.includes(it)) target.avoidItems.push(it); });
+      copiedDays++;
+    }
+    saveData();
+    renderManualPlanTab();
+    showToast(copiedDays ? 'روی '+copiedDays+' روز بعدی کپی شد ✅' : 'روز بعدی‌ای برای کپی نمونده');
   });
 })();
 
@@ -9737,6 +10458,30 @@ document.getElementById('voiceToggle').addEventListener('change', (e)=>{
   renderVoiceSettings();
   if(e.target.checked) speakText('صدا فعال شد');
   else if(ttsCurrentAudio){ ttsCurrentAudio.pause(); ttsCurrentAudio = null; }
+});
+document.getElementById('noProgramModeToggle').addEventListener('change', (e)=>{
+  storeData.profile.noProgramMode = e.target.checked;
+  if(e.target.checked) storeData.profile.manualProgramMode = false;
+  saveData();
+  applyNoProgramModeUI();
+  applyManualProgramModeUI();
+  render();
+  showToast(e.target.checked ? 'باشه، از الان فقط روزشمار و بقیه‌ی امکانات رو می‌بینی 🎯' : 'برنامه‌ی روزانه دوباره فعال شد 💪', 'info');
+});
+document.getElementById('manualProgramModeToggle').addEventListener('change', (e)=>{
+  storeData.profile.manualProgramMode = e.target.checked;
+  if(e.target.checked) storeData.profile.noProgramMode = false;
+  saveData();
+  applyNoProgramModeUI();
+  applyManualProgramModeUI();
+  entry.total = totalToday();
+  render();
+  if(e.target.checked){
+    showToast('باشه! حالا خودت برنامه‌ی روزهاتو بچین 📝', 'info');
+    openManualPlanBuilder();
+  } else {
+    showToast('برنامه‌ی خودکار دوباره فعال شد 💪', 'info');
+  }
 });
 
 /* ================= Program length ================= */
@@ -10605,6 +11350,7 @@ function finishMeditation(){
   stopMeditation();
   medVibrate([100,60,100,60,220]);
   showToast('مدیتیشن تموم شد 🌿 آفرین بهت');
+  try{ logMeditationCompletion(); }catch(err){}
 }
 document.getElementById('medStartBtn').addEventListener('click', startMeditation);
 document.getElementById('medStopBtn').addEventListener('click', stopMeditation);
@@ -10696,6 +11442,7 @@ function finishBodyScan(){
   stopBodyScan();
   medVibrate([100,60,100,60,220]);
   showToast('اسکن بدن تموم شد 🌿 آفرین بهت');
+  try{ logMeditationCompletion(); }catch(err){}
 }
 document.getElementById('bsStartBtn').addEventListener('click', startBodyScan);
 document.getElementById('bsStopBtn').addEventListener('click', stopBodyScan);
@@ -10906,6 +11653,7 @@ function finishGratitude(){
   stopGratitude();
   medVibrate([100,60,100,60,220]);
   showToast('مدیتیشن نعمت‌ها تموم شد 🙏 قدردان بودن یه مهارته که داری تمرینش می‌کنی');
+  try{ logMeditationCompletion(); }catch(err){}
 }
 document.getElementById('gratStartBtn').addEventListener('click', startGratitude);
 document.getElementById('gratStopBtn').addEventListener('click', stopGratitude);
@@ -10992,6 +11740,7 @@ function finishVoidMind(){
   stopVoidMind();
   medVibrate([100,60,100,60,220]);
   showToast('خلأ ذهنی تموم شد 🔴 چند دقیقه بدون فکر، خودش یه دستاورده');
+  try{ logMeditationCompletion(); }catch(err){}
 }
 document.getElementById('voidStartBtn').addEventListener('click', startVoidMind);
 document.getElementById('voidStopBtn').addEventListener('click', stopVoidMind);
@@ -11005,6 +11754,10 @@ document.getElementById('voidStopBtn').addEventListener('click', stopVoidMind);
 const SUPABASE_URL = "https://elrctpacwmsplxkbhlur.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_W0gxlYFD1uWfn3LGn4MvAA_qJUlJ5xs";
 let sb = null, publicChatUser = null, publicChatUsername = null, publicChatChannel = null, myProfileCache = null;
+// true فقط درست قبل از صدا زدن خودمون به sb.auth.signOut() (دکمه‌ی خروج، حذف حساب،
+// خروج اجباری موقع تعلیق) ست می‌شه. برای تشخیص خروج واقعی/عمدی از یه SIGNED_OUT
+// گذرا/کاذب که خودِ supabase-js گاهی می‌فرسته — ببین توضیح کامل بالای initChatAuth.
+let intentionalSignOut = false;
 let lastChatMsgUserId = null; // tracks the previous message's sender so back-to-back messages can be grouped (name/streak shown once)
 // Owner account: matched by the logged-in Supabase Auth email. This only controls what THIS
 // device shows/unlocks for that one signed-in session (premium UI, owner badge, delete-any-message
@@ -11143,9 +11896,44 @@ function initChatAuth(){
         showAuthForm('resetCode');
         return;
       }
+      // ================= جلوگیری از خروج خودکار اشتباهی =================
+      // اگه session اینجا null باشه ولی خودمون عمداً signOut() صدا نزده باشیم
+      // (intentionalSignOut === false)، این می‌تونه همون SIGNED_OUT گذرا/کاذبی
+      // باشه که supabase-js گاهی می‌فرسته (مثلاً بعد از یه مدت طولانی پس‌زمینه
+      // موندن اپ — توضیح کامل بالای handleAppForegroundChange). به‌جاش، فوراً
+      // handlePublicChatSession(null) رو صدا نمی‌زنیم (که کاربر رو می‌ندازه رو
+      // باکس ورود و پرمیومش رو موقتاً صفر می‌کنه)؛ اول چندبار صریح دوباره از
+      // خودِ Supabase سشن رو می‌پرسیم. فقط اگه واقعاً همه‌ی تلاش‌ها هم هیچی
+      // برنگردوندن، به‌عنوان خروج واقعی قبولش می‌کنیم.
+      if(!session && !intentionalSignOut){
+        confirmRealSignOut();
+        return;
+      }
+      intentionalSignOut = false;
       handlePublicChatSession(session);
     });
   }catch(err){ console.error('Supabase init error', err); }
+}
+let signOutRecheckInProgress = false;
+async function confirmRealSignOut(){
+  if(signOutRecheckInProgress) return;
+  signOutRecheckInProgress = true;
+  try{
+    for(let attempt=0; attempt<3; attempt++){
+      await new Promise(r=> setTimeout(r, 900 + attempt*900));
+      let freshSession = null;
+      try{ const {data} = await sb.auth.getSession(); freshSession = data && data.session; }catch(e){}
+      if(freshSession){
+        // false alarm بود؛ سشن واقعاً هنوز معتبره — کاربر رو بیرون نمی‌ندازیم
+        signOutRecheckInProgress = false;
+        handlePublicChatSession(freshSession);
+        return;
+      }
+    }
+  }catch(e){}
+  signOutRecheckInProgress = false;
+  // بعد از چند تلاش هم واقعاً هیچ سشنی برنگشت؛ این دیگه خروج واقعیه
+  handlePublicChatSession(null);
 }
 /* Toggle which of the 4 account-tab forms (login / signup / forgot / resetCode) is visible */
 function showAuthForm(which){
@@ -11173,8 +11961,16 @@ async function handlePublicChatSession(session){
     // now it's the very first request that goes out.
     loadPublicChatMessages();
     let profile = null;
-    try{ const res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url').eq('id', publicChatUser.id).single(); profile = res.data; }catch(err){}
-    myProfileCache = profile;
+    let profileFetchOk = false;
+    try{
+      const res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url').eq('id', publicChatUser.id).single();
+      if(!res.error){ profile = res.data; profileFetchOk = true; }
+    }catch(err){}
+    // اگه fetch شکست بخوره (مثلاً گوشی آفلاینه)، myProfileCache قبلی (آخرین باری که
+    // آنلاین بودیم) دست‌نخورده می‌مونه، نه اینکه null بشه — وگرنه جاهایی که مستقیم از
+    // myProfileCache.premium_until پرمیوم رو چک می‌کنن (مثلاً بج تب پروفایل) موقع
+    // آفلاین‌شدن غلط «عضو رایگان» نشون می‌دادن.
+    if(profileFetchOk) myProfileCache = profile;
     // ==================== پیام تشویقی «کسی با کد تو ثبت‌نام کرد» ====================
     // هر بار پروفایل واقعی از سرور میاد (باز شدن اپ، لاگین، رفرش سشن بعد از resume)،
     // referral_count واقعی رو با آخرین عددی که قبلاً رو همین گوشی دیده بودیم مقایسه
@@ -11216,7 +12012,16 @@ async function handlePublicChatSession(session){
     // این خط storeData.premium رو هر بار که سشن لود می‌شه بازنویسی می‌کنه — یعنی حتی اگه
     // کسی storeData.premium رو دستی تو کنسول true کرده باشه، با اولین لود بعدی برمی‌گرده به
     // همون چیزی که واقعاً روی سرور ثبته. مالک اپ (OWNER_EMAIL) همیشه true می‌مونه.
-    storeData.premium = isAppOwner || !!(profile && profile.premium_until && new Date(profile.premium_until) > new Date());
+    // نکته‌ی مهم برای حالت آفلاین: این بازنویسی فقط وقتی انجام می‌شه که fetch پروفایل
+    // واقعاً از سرور جواب گرفته باشه (profileFetchOk). اگه گوشی آفلاینه و fetch شکست
+    // خورده، به storeData.premium دست نمی‌زنیم — یعنی کسی که واقعاً پرمیوم خریده، با
+    // رفتن به حالت آفلاین دیگه هرگز به پلن رایگان برنمی‌گرده؛ همون وضعیت آخرین سینک
+    // آنلاین (که true بوده) دست‌نخورده می‌مونه، هم رو تب امروز/چت هم همه‌جای دیگه.
+    if(profileFetchOk){
+      storeData.premium = isAppOwner || !!(profile && profile.premium_until && new Date(profile.premium_until) > new Date());
+    } else if(isAppOwner){
+      storeData.premium = true;
+    }
     saveData();
     if(typeof applyPremiumLocksUI === 'function') applyPremiumLocksUI();
     // Session restored after the mandatory account gate was already shown (its login-state
@@ -12703,6 +13508,7 @@ document.getElementById('confirmResetCodeBtn').addEventListener('click', async (
 document.getElementById('logoutBtn').addEventListener('click', async ()=>{
   if(!sb) return;
   if(!confirm('مطمئنی می‌خوای از حسابت خارج بشی؟ باید دوباره وارد بشی.')) return;
+  intentionalSignOut = true;
   await sb.auth.signOut();
   showToast('خارج شدی');
 });
@@ -14875,6 +15681,7 @@ async function unmuteChatUserByEmail(){
 }
 document.getElementById('chatSuspendedLogoutBtn').addEventListener('click', async ()=>{
   if(!sb) return;
+  intentionalSignOut = true;
   await sb.auth.signOut();
   showToast('خارج شدی');
 });
@@ -15862,38 +16669,260 @@ const MUSCLE_LABELS = {chest:'سینه', back:'پشت', shoulders:'شانه', bi
 const FOCUS_TO_MUSCLES = {chest:['chest'], back:['back'], shoulders:['shoulders'], arms:['biceps','triceps'], legs:['legs'], glutes:['glutes'], abs:['abs']};
 const MUSCLE_EXERCISES = {
   chest: {
-    gym:[{name:'پرس سینه با هالتر', sets:'۴×۸-۱۰', type:'push'},{name:'پرس بالاسینه با دمبل', sets:'۳×۱۰-۱۲', type:'push'},{name:'قفسه سینه با کراس‌اور', sets:'۳×۱۲-۱۵', type:'push'},{name:'شنا سوئدی (فینیشر)', sets:'۲×حداکثر', type:'push'}],
+    gym:[{name:'پرس سینه با هالتر', sets:'۴×۸-۱۰', type:'push'},{name:'پرس بالاسینه با دمبل', sets:'۳×۱۰-۱۲', type:'push'},{name:'قفسه سینه با کراس‌اور', sets:'۳×۱۲-۱۵', type:'push'},{name:'شنا سوئدی (فینیشر)', sets:'۲×حداکثر', type:'push'},{name:'قفسه سینه با دمبل', sets:'۳×۱۲-۱۵', type:'push'},{name:'پرس بالاسینه با هالتر', sets:'۴×۸-۱۰', type:'push'},{name:'پرس سینه با دستگاه', sets:'۳×۱۰-۱۲', type:'push'},{name:'پک دک (دستگاه قفسه سینه)', sets:'۳×۱۲-۱۵', type:'push'},{name:'پرس سینه با دستگاه اسمیت', sets:'۴×۸-۱۰', type:'push'},{name:'کراس‌اور پایین به بالا', sets:'۳×۱۲-۱۵', type:'push'},{name:'پرس سینه با دمبل تخت', sets:'۴×۸-۱۰', type:'push'},{name:'پرس سینه شیب معکوس با هالتر', sets:'۴×۸-۱۰', type:'push'},{name:'پرس سینه با کتل‌بل (فلور پرس)', sets:'۳×۱۰-۱۲', type:'push'},{name:'دیپ سینه (متمایل به جلو)', sets:'۳×۸-۱۲', type:'push'},{name:'پرس سینه با دستگاه هامر', sets:'۳×۱۰-۱۲', type:'push'}],
     home:[{name:'شنا سوئدی', sets:'۴×۱۰-۱۵', type:'push'},{name:'شنا سوئدی شیب‌دار (پا بالا)', sets:'۳×۱۰-۱۲', type:'push'},{name:'شنا سوئدی دست باز', sets:'۳×۱۰-۱۵', type:'push'},{name:'شنا سوئدی آهسته (۴ ثانیه پایین)', sets:'۲×۸-۱۰', type:'push'}]
   },
   back: {
-    gym:[{name:'زیربغل هالتر خم', sets:'۴×۸-۱۰', type:'pull'},{name:'لت پول‌داون یا بارفیکس', sets:'۳×۸-۱۰', type:'pull'},{name:'زیربغل سیم‌کش نشسته', sets:'۳×۱۰-۱۲', type:'pull'},{name:'فیس‌پول (زیربغل بالا)', sets:'۳×۱۲-۱۵', type:'pull'}],
+    gym:[{name:'زیربغل هالتر خم', sets:'۴×۸-۱۰', type:'pull'},{name:'لت پول‌داون یا بارفیکس', sets:'۳×۸-۱۰', type:'pull'},{name:'زیربغل سیم‌کش نشسته', sets:'۳×۱۰-۱۲', type:'pull'},{name:'فیس‌پول (زیربغل بالا)', sets:'۳×۱۲-۱۵', type:'pull'},{name:'روئینگ تی‌بار', sets:'۴×۸-۱۰', type:'pull'},{name:'روئینگ دمبل تک‌دست', sets:'۳×۱۰-۱۲ هر دست', type:'pull'},{name:'پول‌اور با دمبل', sets:'۳×۱۲-۱۵', type:'pull'},{name:'لت پول‌داون دست باز', sets:'۳×۱۰-۱۲', type:'pull'},{name:'روئینگ سیم‌کش تک‌دست', sets:'۳×۱۰-۱۲ هر دست', type:'pull'},{name:'لت پول‌داون دست معکوس', sets:'۳×۱۰-۱۲', type:'pull'},{name:'میگ رو (Meadows Row) با هالتر', sets:'۳×۱۰-۱۲ هر طرف', type:'pull'},{name:'روئینگ کتل‌بل تک‌دست', sets:'۳×۱۰-۱۲ هر دست', type:'pull'},{name:'زیربغل سیم‌کش با میله راست', sets:'۳×۱۰-۱۲', type:'pull'},{name:'روئینگ با دستگاه هامر', sets:'۳×۱۰-۱۲', type:'pull'},{name:'زیربغل با دستگاه پولاور', sets:'۳×۱۲-۱۵', type:'pull'}],
     home:[{name:'سوپرمن', sets:'۳×۱۲-۱۵', type:'hinge'},{name:'زیربغل با کش مقاومتی', sets:'۴×۱۲-۱۵', type:'pull'},{name:'بارفیکس (اگه میله در دسترسه)', sets:'۳×حداکثر', type:'pull'},{name:'زیربغل تک‌دست با وسیله‌ی سنگین خونگی', sets:'۳×۱۰-۱۲', type:'pull'}]
   },
   shoulders: {
-    gym:[{name:'پرس سرشانه هالتر یا دمبل', sets:'۴×۸-۱۰', type:'push'},{name:'نشر جانب دمبل', sets:'۳×۱۲-۱۵', type:'push'},{name:'نشر خم برای دلتوئید خلفی', sets:'۳×۱۲-۱۵', type:'pull'},{name:'شراگ سرشانه', sets:'۳×۱۲-۱۵', type:'pull'}],
+    gym:[{name:'پرس سرشانه هالتر یا دمبل', sets:'۴×۸-۱۰', type:'push'},{name:'نشر جانب دمبل', sets:'۳×۱۲-۱۵', type:'push'},{name:'نشر خم برای دلتوئید خلفی', sets:'۳×۱۲-۱۵', type:'pull'},{name:'شراگ سرشانه', sets:'۳×۱۲-۱۵', type:'pull'},{name:'پرس سرشانه آرنولد', sets:'۳×۱۰-۱۲', type:'push'},{name:'نشر جانب با سیم‌کش', sets:'۳×۱۵', type:'push'},{name:'پرس سرشانه با دستگاه', sets:'۳×۱۰-۱۲', type:'push'},{name:'نشر جانب دستگاه', sets:'۳×۱۲-۱۵', type:'push'},{name:'پرس سرشانه اسمیت', sets:'۴×۸-۱۰', type:'push'},{name:'شراگ با دمبل', sets:'۳×۱۲-۱۵', type:'pull'},{name:'بالا کشیدن هالتر (آپرایت رو)', sets:'۳×۱۰-۱۲', type:'pull'},{name:'پرس سرشانه با کتل‌بل', sets:'۳×۸-۱۰ هر دست', type:'push'},{name:'شراگ با هالتر', sets:'۳×۱۲-۱۵', type:'pull'},{name:'نشر جلو با دمبل', sets:'۳×۱۲-۱۵', type:'push'},{name:'چرخش خارجی شانه با سیم‌کش', sets:'۳×۱۵ هر دست', type:'pull'}],
     home:[{name:'شنا سوئدی سرشانه (پایک پوش‌آپ)', sets:'۳×۸-۱۲', type:'push'},{name:'نشر جانب با کش یا بطری آب', sets:'۳×۱۲-۱۵', type:'push'},{name:'نشر خم با کش', sets:'۳×۱۲-۱۵', type:'pull'}]
   },
   biceps: {
-    gym:[{name:'جلوبازو هالتر', sets:'۳×۸-۱۰', type:'curl'},{name:'جلوبازو دمبل چکشی', sets:'۳×۱۰-۱۲', type:'curl'},{name:'جلوبازو لاری روی میز', sets:'۲×۱۲-۱۵', type:'curl'}],
+    gym:[{name:'جلوبازو هالتر', sets:'۳×۸-۱۰', type:'curl'},{name:'جلوبازو دمبل چکشی', sets:'۳×۱۰-۱۲', type:'curl'},{name:'جلوبازو لاری روی میز', sets:'۲×۱۲-۱۵', type:'curl'},{name:'جلوبازو کانسنتریشن', sets:'۳×۱۰-۱۲ هر دست', type:'curl'},{name:'جلوبازو سیم‌کش', sets:'۳×۱۲-۱۵', type:'curl'},{name:'جلوبازو با دستگاه', sets:'۳×۱۰-۱۲', type:'curl'},{name:'جلوبازو دمبل روی نیمکت شیب‌دار', sets:'۳×۱۰-۱۲', type:'curl'},{name:'جلوبازو با هالتر EZ', sets:'۳×۸-۱۰', type:'curl'},{name:'جلوبازو با کتل‌بل', sets:'۳×۱۰-۱۲', type:'curl'},{name:'جلوبازو سیم‌کش با میله راست', sets:'۳×۱۲-۱۵', type:'curl'},{name:'جلوبازو معکوس با هالتر', sets:'۳×۱۰-۱۲', type:'curl'},{name:'جلوبازو تک‌دست سیم‌کش', sets:'۳×۱۲ هر دست', type:'curl'},{name:'جلوبازو دمبل ایستاده تناوبی', sets:'۳×۱۰-۱۲ هر دست', type:'curl'},{name:'جلوبازو سیم‌کش با میله خمیده', sets:'۳×۱۲-۱۵', type:'curl'}],
     home:[{name:'جلوبازو با کش مقاومتی', sets:'۴×۱۲-۱۵', type:'curl'},{name:'جلوبازو با وزنه‌ی خانگی (بطری/کوله)', sets:'۳×۱۰-۱۵', type:'curl'}]
   },
   triceps: {
-    gym:[{name:'پشت‌بازو سیم‌کش', sets:'۳×۱۰-۱۲', type:'extend'},{name:'پرس سینه دست جمع', sets:'۳×۸-۱۰', type:'push'},{name:'پشت‌بازو دمبل خوابیده', sets:'۲×۱۰-۱۲', type:'extend'}],
-    home:[{name:'دیپ روی صندلی', sets:'۴×۱۰-۱۵', type:'extend'},{name:'شنا سوئدی الماسی', sets:'۳×۸-۱۲', type:'push'}]
+    gym:[{name:'پشت‌بازو سیم‌کش', sets:'۳×۱۰-۱۲', type:'extend'},{name:'پرس سینه دست جمع', sets:'۳×۸-۱۰', type:'push'},{name:'پشت‌بازو دمبل خوابیده', sets:'۲×۱۰-۱۲', type:'extend'},{name:'پشت‌بازو خوابیده هالتر (فرانسوی)', sets:'۳×۱۰-۱۲', type:'extend'},{name:'پشت‌بازو سیم‌کش بالای سر', sets:'۳×۱۲-۱۵', type:'extend'},{name:'دیپ با دستگاه (اسیستد)', sets:'۳×۸-۱۰', type:'extend'},{name:'پشت‌بازو کیک‌بک با دمبل', sets:'۳×۱۲-۱۵ هر دست', type:'extend'},{name:'دیپ روی میله موازی', sets:'۳×۸-۱۲', type:'push'},{name:'پشت‌بازو سیم‌کش با طناب', sets:'۳×۱۲-۱۵', type:'extend'},{name:'پشت‌بازو تک‌دست با کتل‌بل بالای سر', sets:'۳×۱۰-۱۲ هر دست', type:'extend'},{name:'پشت‌بازو سیم‌کش معکوس تک‌دست', sets:'۳×۱۲-۱۵ هر دست', type:'extend'},{name:'پشت‌بازو نشسته با دستگاه', sets:'۳×۱۰-۱۲', type:'extend'},{name:'پشت‌بازو سیم‌کش تک‌دست با طناب', sets:'۳×۱۲ هر دست', type:'extend'},{name:'دیپ روی نیمکت با وزنه اضافه', sets:'۳×۱۰-۱۵', type:'extend'}],
+    home:[{name:'دیپ روی صندلی', sets:'۴×۱۰-۱۵', type:'extend'},{name:'شنا سوئدی الماسی', sets:'۳×۸-۱۲', type:'push'},{name:'پشت‌بازو با کش مقاومتی', sets:'۳×۱۲-۱۵', type:'extend'}]
   },
   legs: {
-    gym:[{name:'اسکات با هالتر', sets:'۴×۸-۱۰', type:'squat'},{name:'پرس پا', sets:'۳×۱۰-۱۲', type:'squat'},{name:'ددلیفت رومانیایی', sets:'۳×۸-۱۰', type:'hinge'},{name:'جلو پا و پشت پا دستگاه', sets:'۳×۱۲', type:'squat'},{name:'ساق پا ایستاده', sets:'۳×۱۵-۲۰', type:'calf'}],
-    home:[{name:'اسکات بدون وزنه', sets:'۴×۱۵-۲۰', type:'squat'},{name:'لانج', sets:'۳×۱۲ هر پا', type:'squat'},{name:'اسکات بلغاری با صندلی', sets:'۳×۱۰ هر پا', type:'squat'},{name:'ساق پا ایستاده', sets:'۴×۲۰', type:'calf'}]
+    gym:[{name:'اسکات با هالتر', sets:'۴×۸-۱۰', type:'squat'},{name:'پرس پا', sets:'۳×۱۰-۱۲', type:'squat'},{name:'ددلیفت رومانیایی', sets:'۳×۸-۱۰', type:'hinge'},{name:'جلو پا و پشت پا دستگاه', sets:'۳×۱۲', type:'squat'},{name:'ساق پا ایستاده', sets:'۳×۱۵-۲۰', type:'calf'},{name:'جلو پا دستگاه', sets:'۳×۱۲-۱۵', type:'squat'},{name:'هاگ اسکات دستگاه', sets:'۴×۸-۱۰', type:'squat'},{name:'لانج راه‌رفتنی با دمبل', sets:'۳×۱۲ هر پا', type:'squat'},{name:'پرس پا تک‌پا', sets:'۳×۱۰-۱۲ هر پا', type:'squat'},{name:'اسکات با دستگاه اسمیت', sets:'۴×۸-۱۰', type:'squat'},{name:'پشت پا دستگاه نشسته', sets:'۳×۱۰-۱۲', type:'curl'},{name:'ساق پا نشسته', sets:'۴×۱۵-۲۰', type:'calf'},{name:'ددلیفت با هالتر (کلاسیک)', sets:'۴×۵-۸', type:'hinge'},{name:'اسکات جلو با هالتر', sets:'۴×۶-۸', type:'squat'},{name:'اسکات گابلت با کتل‌بل', sets:'۴×۱۰-۱۲', type:'squat'},{name:'لانج با کتل‌بل', sets:'۳×۱۰ هر پا', type:'squat'},{name:'ددلیفت با میله تراپ‌بار', sets:'۴×۶-۸', type:'hinge'},{name:'لانج پشت‌سر با دمبل', sets:'۳×۱۰ هر پا', type:'squat'},{name:'پرس ساق پا با دستگاه پرس پا', sets:'۴×۱۵-۲۰', type:'calf'}],
+    home:[{name:'اسکات بدون وزنه', sets:'۴×۱۵-۲۰', type:'squat'},{name:'لانج', sets:'۳×۱۲ هر پا', type:'squat'},{name:'اسکات بلغاری با صندلی', sets:'۳×۱۰ هر پا', type:'squat'},{name:'ساق پا ایستاده', sets:'۴×۲۰', type:'calf'},{name:'لانج معکوس بدون وزنه', sets:'۳×۱۲ هر پا', type:'squat'}]
   },
   glutes: {
-    gym:[{name:'هیپ تراست با هالتر', sets:'۴×۱۰-۱۲', type:'hinge'},{name:'ددلیفت رومانیایی', sets:'۳×۸-۱۰', type:'hinge'},{name:'کیک‌بک با سیم‌کش', sets:'۳×۱۲ هر پا', type:'hinge'}],
-    home:[{name:'پل باسن (Glute Bridge)', sets:'۴×۱۵-۲۰', type:'hinge'},{name:'لانج بلغاری با صندلی', sets:'۳×۱۲ هر پا', type:'squat'},{name:'پل باسن تک‌پا', sets:'۳×۱۲ هر پا', type:'hinge'}]
+    gym:[{name:'هیپ تراست با هالتر', sets:'۴×۱۰-۱۲', type:'hinge'},{name:'ددلیفت رومانیایی', sets:'۳×۸-۱۰', type:'hinge'},{name:'کیک‌بک با سیم‌کش', sets:'۳×۱۲ هر پا', type:'hinge'},{name:'پابداکتور دستگاه', sets:'۳×۱۵-۲۰', type:'hinge'},{name:'ددلیفت سومو', sets:'۴×۶-۸', type:'hinge'},{name:'استپ‌آپ با دمبل', sets:'۳×۱۰ هر پا', type:'hinge'},{name:'هیپ تراست با دستگاه', sets:'۴×۱۰-۱۲', type:'hinge'},{name:'بک اکستنشن روی نیمکت رومی', sets:'۳×۱۲-۱۵', type:'hinge'},{name:'کتل‌بل سوئینگ', sets:'۴×۱۵-۲۰', type:'hinge'},{name:'اکستنشن کمر با دستگاه فیله کمر', sets:'۳×۱۲-۱۵', type:'hinge'},{name:'پل باسن با هالتر تک‌پا', sets:'۳×۱۰-۱۲ هر پا', type:'hinge'},{name:'استپ‌آپ روی جعبه با کتل‌بل', sets:'۳×۱۰ هر پا', type:'hinge'},{name:'کیک‌بک با دستگاه گلوت', sets:'۳×۱۲-۱۵ هر پا', type:'hinge'}],
+    home:[{name:'پل باسن (Glute Bridge)', sets:'۴×۱۵-۲۰', type:'hinge'},{name:'لانج بلغاری با صندلی', sets:'۳×۱۲ هر پا', type:'squat'},{name:'پل باسن تک‌پا', sets:'۳×۱۲ هر پا', type:'hinge'},{name:'ددلیفت تک‌پا بدون وزنه', sets:'۳×۱۰-۱۲ هر پا', type:'hinge'},{name:'ددلیفت رومانیایی با وزنه‌ی خانگی', sets:'۳×۱۲-۱۵', type:'hinge'}]
   },
   abs: {
-    gym:[{name:'کرانچ با کابل', sets:'۳×۱۵', type:'core'},{name:'پلانک', sets:'۳×۴۵ ثانیه', type:'core'},{name:'بالا آوردن پا آویزان', sets:'۳×۱۲', type:'core'}],
-    home:[{name:'پلانک', sets:'۳×۳۰-۶۰ ثانیه', type:'core'},{name:'کرانچ', sets:'۳×۱۵-۲۰', type:'core'},{name:'بالا آوردن پا (Leg Raise)', sets:'۳×۱۲-۱۵', type:'core'}]
+    gym:[{name:'کرانچ با کابل', sets:'۳×۱۵', type:'core'},{name:'پلانک', sets:'۳×۴۵ ثانیه', type:'core'},{name:'بالا آوردن پا آویزان', sets:'۳×۱۲', type:'core'},{name:'چرخش تنه با سیم‌کش (وودچاپر)', sets:'۳×۱۲ هر طرف', type:'core'},{name:'چرخ شکم (اب ویل)', sets:'۳×۸-۱۲', type:'core'},{name:'زیر شکم دستگاه', sets:'۳×۱۲-۱۵', type:'core'},{name:'کرانچ معکوس', sets:'۳×۱۵', type:'core'},{name:'پلانک جانبی', sets:'۳×۳۰-۴۵ ثانیه هر طرف', type:'core'},{name:'کرانچ دستگاه (Ab Crunch Machine)', sets:'۳×۱۵', type:'core'},{name:'چرخش روسی با دیسک وزنه', sets:'۳×۲۰ هر طرف', type:'core'},{name:'لمبرینگ (خم جانبی) با دمبل', sets:'۳×۱۵ هر طرف', type:'core'},{name:'بالا آوردن زانو روی دستگاه خلبانی', sets:'۳×۱۲-۱۵', type:'core'},{name:'بالا آوردن پا روی صندلی رومی', sets:'۳×۱۲-۱۵', type:'core'},{name:'پلانک با وزنه اضافه', sets:'۳×۳۰-۴۵ ثانیه', type:'core'},{name:'چرخش تنه با دستگاه توری تویست', sets:'۳×۱۵ هر طرف', type:'core'}],
+    home:[{name:'پلانک', sets:'۳×۳۰-۶۰ ثانیه', type:'core'},{name:'کرانچ', sets:'۳×۱۵-۲۰', type:'core'},{name:'بالا آوردن پا (Leg Raise)', sets:'۳×۱۲-۱۵', type:'core'},{name:'کوهنورد (Mountain Climber)', sets:'۳×۳۰-۴۰ ثانیه', type:'core'}]
   }
 };
+const RECOVERY_MUSCLE_LABELS = {
+  delt_front: "دلتوئید (سر قدامی)",
+  delt_mid: "دلتوئید (سر میانی)",
+  delt_rear: "دلتوئید (سر خلفی)",
+  pec: "سینه (پکتورالیس ماژور)",
+  serratus: "دندانه‌ای قدامی",
+  intercostals: "عضلات بین دنده‌ای",
+  biceps_br: "جلو بازو (دوسر بازویی)",
+  brachialis: "براکیالیس",
+  forearm_flex: "ساعد (فلکسورها)",
+  forearm_ext: "ساعد (اکستنسورها)",
+  abs_upper: "شکم بالایی",
+  abs_mid: "شکم میانی",
+  abs_lower: "شکم پایینی",
+  obliq_ext: "مورب خارجی شکم",
+  obliq_int: "مورب داخلی شکم",
+  hip_flexors: "فلکسورهای لگن",
+  sartorius: "خیاطه",
+  quad_rf: "چهارسر ران (راست رانی)",
+  quad_vl: "چهارسر ران (پهن خارجی)",
+  quad_vm: "چهارسر ران (پهن داخلی)",
+  tib_ant: "تیبیالیس قدامی",
+  traps: "ذوزنقه‌ای (تراپیزیوس)",
+  rhomboids: "لوزی",
+  lats: "لت (پهن پشتی)",
+  teres_major: "گرد بزرگ",
+  teres_minor: "گرد کوچک",
+  infraspinatus: "زیر خاری",
+  subscap: "زیر کتف",
+  erectors: "راست‌کننده‌های ستون فقرات",
+  triceps: "پشت بازو (سه‌سر)",
+  glute_max: "سرینی بزرگ",
+  glute_med: "سرینی میانی",
+  glute_min: "سرینی کوچک",
+  ham_bf: "همسترینگ (دوسر رانی)",
+  ham_st: "همسترینگ (نیم‌وتری)",
+  ham_sm: "همسترینگ (نیم‌غشایی)",
+  gastroc_med: "دوقلو داخلی (گاستروکنمیوس)",
+  gastroc_lat: "دوقلو خارجی (گاستروکنمیوس)",
+  soleus: "سولئوس",
+};
+
+// Exercise -> muscle engagement map. Score 0-100 = relative training-stimulus
+// intensity for that muscle in that specific exercise (100 = prime mover under
+// full load, ~50-70 = major synergist, ~15-30 = stabilizer / minor assist).
+// Keyed by the exact exercise name string used in MUSCLE_EXERCISES above, so any
+// exercise actually shown/performed in a session resolves directly to this map.
+const EXERCISE_MUSCLE_MAP = {
+  "پرس سینه با هالتر": [{m:"pec",s:100},{m:"triceps",s:60},{m:"delt_front",s:50},{m:"serratus",s:20}],
+  "پرس بالاسینه با دمبل": [{m:"pec",s:90},{m:"delt_front",s:60},{m:"triceps",s:50}],
+  "قفسه سینه با کراس‌اور": [{m:"pec",s:100},{m:"delt_front",s:25},{m:"biceps_br",s:15}],
+  "شنا سوئدی (فینیشر)": [{m:"pec",s:80},{m:"triceps",s:60},{m:"delt_front",s:40},{m:"serratus",s:20},{m:"abs_mid",s:15}],
+  "شنا سوئدی": [{m:"pec",s:90},{m:"triceps",s:60},{m:"delt_front",s:45},{m:"serratus",s:20},{m:"abs_mid",s:15}],
+  "شنا سوئدی شیب‌دار (پا بالا)": [{m:"pec",s:90},{m:"delt_front",s:55},{m:"triceps",s:55},{m:"abs_mid",s:15}],
+  "شنا سوئدی دست باز": [{m:"pec",s:95},{m:"delt_front",s:40},{m:"triceps",s:35},{m:"serratus",s:20}],
+  "شنا سوئدی آهسته (۴ ثانیه پایین)": [{m:"pec",s:95},{m:"triceps",s:55},{m:"delt_front",s:45},{m:"abs_mid",s:20}],
+  "زیربغل هالتر خم": [{m:"lats",s:90},{m:"rhomboids",s:60},{m:"traps",s:50},{m:"teres_major",s:40},{m:"biceps_br",s:40},{m:"erectors",s:35},{m:"delt_rear",s:30}],
+  "لت پول‌داون یا بارفیکس": [{m:"lats",s:100},{m:"teres_major",s:50},{m:"biceps_br",s:55},{m:"rhomboids",s:35},{m:"traps",s:25},{m:"forearm_flex",s:25}],
+  "زیربغل سیم‌کش نشسته": [{m:"lats",s:80},{m:"rhomboids",s:60},{m:"traps",s:40},{m:"biceps_br",s:35},{m:"teres_major",s:30},{m:"erectors",s:15}],
+  "فیس‌پول (زیربغل بالا)": [{m:"delt_rear",s:80},{m:"traps",s:50},{m:"rhomboids",s:45},{m:"infraspinatus",s:30},{m:"teres_minor",s:25}],
+  "سوپرمن": [{m:"erectors",s:90},{m:"glute_max",s:40},{m:"traps",s:15},{m:"ham_st",s:15}],
+  "زیربغل با کش مقاومتی": [{m:"lats",s:75},{m:"rhomboids",s:60},{m:"traps",s:40},{m:"biceps_br",s:35},{m:"delt_rear",s:25}],
+  "بارفیکس (اگه میله در دسترسه)": [{m:"lats",s:100},{m:"teres_major",s:50},{m:"biceps_br",s:55},{m:"rhomboids",s:35},{m:"traps",s:25},{m:"forearm_flex",s:25}],
+  "زیربغل تک‌دست با وسیله‌ی سنگین خونگی": [{m:"lats",s:85},{m:"rhomboids",s:55},{m:"biceps_br",s:40},{m:"traps",s:30},{m:"obliq_ext",s:15}],
+  "پرس سرشانه هالتر یا دمبل": [{m:"delt_front",s:90},{m:"delt_mid",s:60},{m:"triceps",s:50},{m:"traps",s:30},{m:"abs_mid",s:15}],
+  "نشر جانب دمبل": [{m:"delt_mid",s:100},{m:"delt_front",s:20},{m:"traps",s:20}],
+  "نشر خم برای دلتوئید خلفی": [{m:"delt_rear",s:100},{m:"traps",s:30},{m:"rhomboids",s:30},{m:"teres_minor",s:20}],
+  "شراگ سرشانه": [{m:"traps",s:100},{m:"delt_mid",s:15},{m:"forearm_flex",s:20}],
+  "شنا سوئدی سرشانه (پایک پوش‌آپ)": [{m:"delt_front",s:85},{m:"triceps",s:50},{m:"delt_mid",s:30},{m:"pec",s:20}],
+  "نشر جانب با کش یا بطری آب": [{m:"delt_mid",s:100},{m:"delt_front",s:20}],
+  "نشر خم با کش": [{m:"delt_rear",s:95},{m:"traps",s:25},{m:"rhomboids",s:25}],
+  "جلوبازو هالتر": [{m:"biceps_br",s:100},{m:"brachialis",s:40},{m:"forearm_flex",s:30}],
+  "جلوبازو دمبل چکشی": [{m:"brachialis",s:80},{m:"biceps_br",s:60},{m:"forearm_flex",s:50}],
+  "جلوبازو لاری روی میز": [{m:"biceps_br",s:100},{m:"brachialis",s:30}],
+  "جلوبازو با کش مقاومتی": [{m:"biceps_br",s:95},{m:"brachialis",s:35},{m:"forearm_flex",s:25}],
+  "جلوبازو با وزنه‌ی خانگی (بطری/کوله)": [{m:"biceps_br",s:90},{m:"brachialis",s:35},{m:"forearm_flex",s:25}],
+  "پشت‌بازو سیم‌کش": [{m:"triceps",s:100}],
+  "پرس سینه دست جمع": [{m:"triceps",s:85},{m:"pec",s:45},{m:"delt_front",s:35}],
+  "پشت‌بازو دمبل خوابیده": [{m:"triceps",s:100}],
+  "دیپ روی صندلی": [{m:"triceps",s:90},{m:"pec",s:30},{m:"delt_front",s:30}],
+  "شنا سوئدی الماسی": [{m:"triceps",s:85},{m:"pec",s:50},{m:"delt_front",s:35}],
+  "اسکات با هالتر": [{m:"quad_rf",s:85},{m:"quad_vl",s:85},{m:"quad_vm",s:85},{m:"glute_max",s:70},{m:"ham_bf",s:30},{m:"erectors",s:40},{m:"abs_mid",s:20}],
+  "پرس پا": [{m:"quad_rf",s:90},{m:"quad_vl",s:85},{m:"quad_vm",s:85},{m:"glute_max",s:55},{m:"ham_st",s:20}],
+  "ددلیفت رومانیایی": [{m:"ham_bf",s:90},{m:"ham_st",s:90},{m:"ham_sm",s:90},{m:"glute_max",s:70},{m:"erectors",s:60},{m:"forearm_flex",s:15}],
+  "جلو پا و پشت پا دستگاه": [{m:"quad_rf",s:90},{m:"quad_vl",s:70},{m:"quad_vm",s:70},{m:"ham_bf",s:70},{m:"ham_st",s:70},{m:"ham_sm",s:70}],
+  "ساق پا ایستاده": [{m:"gastroc_med",s:100},{m:"gastroc_lat",s:100},{m:"soleus",s:40}],
+  "اسکات بدون وزنه": [{m:"quad_rf",s:70},{m:"quad_vl",s:70},{m:"quad_vm",s:70},{m:"glute_max",s:55},{m:"ham_bf",s:20}],
+  "لانج": [{m:"quad_rf",s:80},{m:"quad_vl",s:75},{m:"quad_vm",s:75},{m:"glute_max",s:60},{m:"ham_st",s:25},{m:"sartorius",s:20}],
+  "اسکات بلغاری با صندلی": [{m:"quad_rf",s:85},{m:"quad_vl",s:85},{m:"quad_vm",s:85},{m:"glute_max",s:65},{m:"glute_med",s:30},{m:"ham_bf",s:25}],
+  "هیپ تراست با هالتر": [{m:"glute_max",s:100},{m:"ham_bf",s:40},{m:"ham_st",s:40},{m:"ham_sm",s:40},{m:"erectors",s:20}],
+  "کیک‌بک با سیم‌کش": [{m:"glute_max",s:90},{m:"glute_med",s:30},{m:"ham_bf",s:25}],
+  "پل باسن (Glute Bridge)": [{m:"glute_max",s:90},{m:"ham_bf",s:30},{m:"ham_st",s:30},{m:"ham_sm",s:30},{m:"erectors",s:15}],
+  "لانج بلغاری با صندلی": [{m:"glute_max",s:70},{m:"quad_rf",s:70},{m:"quad_vl",s:70},{m:"quad_vm",s:70},{m:"glute_med",s:30},{m:"ham_bf",s:25}],
+  "پل باسن تک‌پا": [{m:"glute_max",s:95},{m:"glute_med",s:35},{m:"ham_bf",s:35},{m:"ham_st",s:35},{m:"ham_sm",s:35}],
+  "کرانچ با کابل": [{m:"abs_upper",s:90},{m:"abs_mid",s:80},{m:"abs_lower",s:30},{m:"obliq_ext",s:20}],
+  "پلانک": [{m:"abs_mid",s:80},{m:"abs_lower",s:60},{m:"obliq_ext",s:50},{m:"obliq_int",s:50},{m:"erectors",s:20}],
+  "بالا آوردن پا آویزان": [{m:"abs_lower",s:100},{m:"hip_flexors",s:70},{m:"abs_mid",s:40},{m:"forearm_flex",s:30}],
+  "کرانچ": [{m:"abs_upper",s:90},{m:"abs_mid",s:70},{m:"abs_lower",s:20}],
+  "بالا آوردن پا (Leg Raise)": [{m:"abs_lower",s:95},{m:"hip_flexors",s:65},{m:"abs_mid",s:35}],
+  "قفسه سینه با دمبل": [{m:"pec",s:100},{m:"delt_front",s:20}],
+  "پرس بالاسینه با هالتر": [{m:"pec",s:90},{m:"delt_front",s:65},{m:"triceps",s:50}],
+  "روئینگ تی‌بار": [{m:"lats",s:85},{m:"rhomboids",s:65},{m:"traps",s:45},{m:"biceps_br",s:35},{m:"erectors",s:30}],
+  "روئینگ دمبل تک‌دست": [{m:"lats",s:90},{m:"rhomboids",s:50},{m:"teres_major",s:40},{m:"biceps_br",s:35},{m:"erectors",s:20}],
+  "پول‌اور با دمبل": [{m:"lats",s:70},{m:"pec",s:40},{m:"triceps",s:20},{m:"serratus",s:20}],
+  "پرس سرشانه آرنولد": [{m:"delt_front",s:90},{m:"delt_mid",s:60},{m:"triceps",s:40}],
+  "نشر جانب با سیم‌کش": [{m:"delt_mid",s:100},{m:"traps",s:15}],
+  "جلوبازو کانسنتریشن": [{m:"biceps_br",s:100},{m:"brachialis",s:20}],
+  "جلوبازو سیم‌کش": [{m:"biceps_br",s:95},{m:"brachialis",s:30},{m:"forearm_flex",s:20}],
+  "پشت‌بازو خوابیده هالتر (فرانسوی)": [{m:"triceps",s:100}],
+  "پشت‌بازو سیم‌کش بالای سر": [{m:"triceps",s:95}],
+  "جلو پا دستگاه": [{m:"quad_rf",s:90},{m:"quad_vl",s:85},{m:"quad_vm",s:85}],
+  "هاگ اسکات دستگاه": [{m:"quad_rf",s:90},{m:"quad_vl",s:90},{m:"quad_vm",s:90},{m:"glute_max",s:40}],
+  "لانج راه‌رفتنی با دمبل": [{m:"quad_rf",s:80},{m:"quad_vl",s:75},{m:"quad_vm",s:75},{m:"glute_max",s:60},{m:"ham_st",s:20}],
+  "پابداکتور دستگاه": [{m:"glute_med",s:90},{m:"glute_min",s:60},{m:"glute_max",s:20}],
+  "ددلیفت سومو": [{m:"glute_max",s:90},{m:"ham_bf",s:70},{m:"ham_st",s:70},{m:"ham_sm",s:70},{m:"erectors",s:50},{m:"quad_rf",s:30}],
+  "چرخش تنه با سیم‌کش (وودچاپر)": [{m:"obliq_ext",s:90},{m:"obliq_int",s:70},{m:"abs_mid",s:30}],
+  "چرخ شکم (اب ویل)": [{m:"abs_mid",s:90},{m:"abs_upper",s:60},{m:"abs_lower",s:40},{m:"erectors",s:20}],
+  "زیر شکم دستگاه": [{m:"abs_lower",s:90},{m:"hip_flexors",s:60},{m:"abs_mid",s:30}],
+  "پرس سینه با دستگاه": [{m:"pec",s:95},{m:"triceps",s:40},{m:"delt_front",s:30}],
+  "لت پول‌داون دست باز": [{m:"lats",s:95},{m:"teres_major",s:40},{m:"rhomboids",s:30},{m:"biceps_br",s:30}],
+  "پرس سرشانه با دستگاه": [{m:"delt_front",s:85},{m:"delt_mid",s:50},{m:"triceps",s:35}],
+  "جلوبازو با دستگاه": [{m:"biceps_br",s:100},{m:"brachialis",s:25}],
+  "دیپ با دستگاه (اسیستد)": [{m:"triceps",s:90},{m:"pec",s:35},{m:"delt_front",s:25}],
+  "پرس پا تک‌پا": [{m:"quad_rf",s:85},{m:"quad_vl",s:80},{m:"quad_vm",s:80},{m:"glute_max",s:40}],
+  "اسکات با دستگاه اسمیت": [{m:"quad_rf",s:85},{m:"quad_vl",s:85},{m:"quad_vm",s:85},{m:"glute_max",s:50}],
+  "استپ‌آپ با دمبل": [{m:"glute_max",s:80},{m:"quad_rf",s:60},{m:"quad_vl",s:55},{m:"quad_vm",s:55},{m:"ham_st",s:20}],
+  "کرانچ معکوس": [{m:"abs_lower",s:85},{m:"abs_mid",s:40},{m:"hip_flexors",s:30}],
+  "پلانک جانبی": [{m:"obliq_ext",s:90},{m:"obliq_int",s:70},{m:"abs_mid",s:20}],
+  "پک دک (دستگاه قفسه سینه)": [{m:"pec",s:100},{m:"delt_front",s:20}],
+  "پرس سینه با دستگاه اسمیت": [{m:"pec",s:90},{m:"triceps",s:50},{m:"delt_front",s:40}],
+  "کراس‌اور پایین به بالا": [{m:"pec",s:95},{m:"delt_front",s:30}],
+  "روئینگ سیم‌کش تک‌دست": [{m:"lats",s:85},{m:"rhomboids",s:55},{m:"biceps_br",s:35},{m:"teres_major",s:30},{m:"traps",s:20}],
+  "لت پول‌داون دست معکوس": [{m:"lats",s:95},{m:"biceps_br",s:60},{m:"teres_major",s:40},{m:"rhomboids",s:25}],
+  "میگ رو (Meadows Row) با هالتر": [{m:"lats",s:85},{m:"rhomboids",s:55},{m:"traps",s:35},{m:"biceps_br",s:30},{m:"erectors",s:20}],
+  "نشر جانب دستگاه": [{m:"delt_mid",s:100},{m:"delt_front",s:15}],
+  "پرس سرشانه اسمیت": [{m:"delt_front",s:90},{m:"delt_mid",s:55},{m:"triceps",s:45},{m:"traps",s:25}],
+  "جلوبازو دمبل روی نیمکت شیب‌دار": [{m:"biceps_br",s:100},{m:"brachialis",s:30},{m:"forearm_flex",s:20}],
+  "جلوبازو با هالتر EZ": [{m:"biceps_br",s:100},{m:"brachialis",s:35},{m:"forearm_flex",s:25}],
+  "پشت‌بازو کیک‌بک با دمبل": [{m:"triceps",s:100}],
+  "دیپ روی میله موازی": [{m:"triceps",s:85},{m:"pec",s:50},{m:"delt_front",s:35}],
+  "پشت پا دستگاه نشسته": [{m:"ham_bf",s:90},{m:"ham_st",s:90},{m:"ham_sm",s:90}],
+  "ساق پا نشسته": [{m:"soleus",s:100},{m:"gastroc_med",s:40},{m:"gastroc_lat",s:40}],
+  "ددلیفت با هالتر (کلاسیک)": [{m:"ham_bf",s:80},{m:"ham_st",s:80},{m:"ham_sm",s:80},{m:"glute_max",s:80},{m:"erectors",s:70},{m:"traps",s:30},{m:"forearm_flex",s:30},{m:"quad_rf",s:20}],
+  "هیپ تراست با دستگاه": [{m:"glute_max",s:100},{m:"ham_bf",s:30},{m:"ham_st",s:30},{m:"ham_sm",s:30}],
+  "بک اکستنشن روی نیمکت رومی": [{m:"erectors",s:90},{m:"glute_max",s:60},{m:"ham_bf",s:40},{m:"ham_st",s:40},{m:"ham_sm",s:40}],
+  "کرانچ دستگاه (Ab Crunch Machine)": [{m:"abs_upper",s:95},{m:"abs_mid",s:60}],
+  "چرخش روسی با دیسک وزنه": [{m:"obliq_ext",s:90},{m:"obliq_int",s:80},{m:"abs_mid",s:30}],
+  "لمبرینگ (خم جانبی) با دمبل": [{m:"obliq_ext",s:100},{m:"obliq_int",s:60}],
+  "پرس سینه با دمبل تخت": [{m:"pec",s:95},{m:"triceps",s:45},{m:"delt_front",s:35}],
+  "شراگ با دمبل": [{m:"traps",s:100},{m:"forearm_flex",s:15}],
+  "بالا کشیدن هالتر (آپرایت رو)": [{m:"delt_mid",s:70},{m:"traps",s:60},{m:"biceps_br",s:20}],
+  "اسکات جلو با هالتر": [{m:"quad_rf",s:90},{m:"quad_vl",s:85},{m:"quad_vm",s:85},{m:"glute_max",s:40},{m:"abs_mid",s:20},{m:"erectors",s:20}],
+  "لانج معکوس بدون وزنه": [{m:"quad_rf",s:75},{m:"quad_vl",s:70},{m:"quad_vm",s:70},{m:"glute_max",s:55},{m:"ham_st",s:20}],
+  "پشت‌بازو با کش مقاومتی": [{m:"triceps",s:100}],
+  "ددلیفت تک‌پا بدون وزنه": [{m:"glute_max",s:80},{m:"ham_bf",s:60},{m:"ham_st",s:60},{m:"ham_sm",s:60},{m:"erectors",s:20}],
+  "ددلیفت رومانیایی با وزنه‌ی خانگی": [{m:"ham_bf",s:80},{m:"ham_st",s:80},{m:"ham_sm",s:80},{m:"glute_max",s:60},{m:"erectors",s:30}],
+  "کوهنورد (Mountain Climber)": [{m:"abs_mid",s:70},{m:"hip_flexors",s:60},{m:"abs_upper",s:30},{m:"obliq_ext",s:20}],
+  "پرس سینه شیب معکوس با هالتر": [{m:"pec",s:95},{m:"triceps",s:55},{m:"delt_front",s:20}],
+  "پرس سینه با کتل‌بل (فلور پرس)": [{m:"pec",s:85},{m:"triceps",s:60},{m:"delt_front",s:35}],
+  "روئینگ کتل‌بل تک‌دست": [{m:"lats",s:85},{m:"rhomboids",s:50},{m:"biceps_br",s:35},{m:"teres_major",s:30},{m:"erectors",s:20}],
+  "زیربغل سیم‌کش با میله راست": [{m:"lats",s:85},{m:"rhomboids",s:55},{m:"traps",s:35},{m:"biceps_br",s:25},{m:"teres_major",s:25}],
+  "پرس سرشانه با کتل‌بل": [{m:"delt_front",s:90},{m:"delt_mid",s:55},{m:"triceps",s:45},{m:"traps",s:20},{m:"abs_mid",s:15}],
+  "شراگ با هالتر": [{m:"traps",s:100},{m:"forearm_flex",s:20}],
+  "جلوبازو با کتل‌بل": [{m:"biceps_br",s:95},{m:"brachialis",s:35},{m:"forearm_flex",s:25}],
+  "جلوبازو سیم‌کش با میله راست": [{m:"biceps_br",s:95},{m:"brachialis",s:30},{m:"forearm_flex",s:20}],
+  "جلوبازو معکوس با هالتر": [{m:"brachialis",s:80},{m:"forearm_ext",s:60},{m:"biceps_br",s:40}],
+  "پشت‌بازو سیم‌کش با طناب": [{m:"triceps",s:100}],
+  "پشت‌بازو تک‌دست با کتل‌بل بالای سر": [{m:"triceps",s:100}],
+  "پشت‌بازو سیم‌کش معکوس تک‌دست": [{m:"triceps",s:95},{m:"forearm_ext",s:20}],
+  "اسکات گابلت با کتل‌بل": [{m:"quad_rf",s:85},{m:"quad_vl",s:80},{m:"quad_vm",s:80},{m:"glute_max",s:55},{m:"abs_mid",s:15}],
+  "لانج با کتل‌بل": [{m:"quad_rf",s:80},{m:"quad_vl",s:75},{m:"quad_vm",s:75},{m:"glute_max",s:60},{m:"ham_st",s:20}],
+  "ددلیفت با میله تراپ‌بار": [{m:"glute_max",s:80},{m:"ham_bf",s:70},{m:"ham_st",s:70},{m:"ham_sm",s:70},{m:"quad_rf",s:50},{m:"erectors",s:50},{m:"traps",s:20}],
+  "کتل‌بل سوئینگ": [{m:"glute_max",s:100},{m:"ham_bf",s:60},{m:"ham_st",s:60},{m:"ham_sm",s:60},{m:"erectors",s:35},{m:"delt_mid",s:15}],
+  "اکستنشن کمر با دستگاه فیله کمر": [{m:"erectors",s:100},{m:"glute_max",s:40},{m:"ham_bf",s:20},{m:"ham_st",s:20}],
+  "بالا آوردن زانو روی دستگاه خلبانی": [{m:"abs_lower",s:100},{m:"hip_flexors",s:60},{m:"abs_mid",s:30},{m:"forearm_flex",s:15}],
+  "دیپ سینه (متمایل به جلو)": [{m:"pec",s:90},{m:"triceps",s:50},{m:"delt_front",s:30}],
+  "پرس سینه با دستگاه هامر": [{m:"pec",s:95},{m:"triceps",s:55},{m:"delt_front",s:40}],
+  "روئینگ با دستگاه هامر": [{m:"lats",s:90},{m:"rhomboids",s:55},{m:"traps",s:45},{m:"teres_major",s:35},{m:"biceps_br",s:30}],
+  "زیربغل با دستگاه پولاور": [{m:"lats",s:90},{m:"teres_major",s:40},{m:"serratus",s:25}],
+  "نشر جلو با دمبل": [{m:"delt_front",s:100},{m:"pec",s:15}],
+  "چرخش خارجی شانه با سیم‌کش": [{m:"infraspinatus",s:90},{m:"teres_minor",s:60},{m:"delt_rear",s:20}],
+  "جلوبازو تک‌دست سیم‌کش": [{m:"biceps_br",s:100},{m:"forearm_flex",s:20}],
+  "جلوبازو دمبل ایستاده تناوبی": [{m:"biceps_br",s:95},{m:"brachialis",s:30}],
+  "جلوبازو سیم‌کش با میله خمیده": [{m:"biceps_br",s:100},{m:"brachialis",s:25}],
+  "پشت‌بازو نشسته با دستگاه": [{m:"triceps",s:100}],
+  "پشت‌بازو سیم‌کش تک‌دست با طناب": [{m:"triceps",s:100},{m:"forearm_ext",s:15}],
+  "دیپ روی نیمکت با وزنه اضافه": [{m:"triceps",s:85},{m:"pec",s:30},{m:"delt_front",s:25}],
+  "لانج پشت‌سر با دمبل": [{m:"quad_rf",s:80},{m:"quad_vl",s:75},{m:"quad_vm",s:75},{m:"glute_max",s:55},{m:"ham_bf",s:20}],
+  "پرس ساق پا با دستگاه پرس پا": [{m:"gastroc_med",s:90},{m:"gastroc_lat",s:85},{m:"soleus",s:60}],
+  "پل باسن با هالتر تک‌پا": [{m:"glute_max",s:100},{m:"ham_bf",s:30},{m:"ham_st",s:30}],
+  "استپ‌آپ روی جعبه با کتل‌بل": [{m:"glute_max",s:85},{m:"quad_rf",s:60},{m:"quad_vl",s:55}],
+  "کیک‌بک با دستگاه گلوت": [{m:"glute_max",s:100},{m:"ham_bf",s:20}],
+  "بالا آوردن پا روی صندلی رومی": [{m:"abs_lower",s:100},{m:"hip_flexors",s:40}],
+  "پلانک با وزنه اضافه": [{m:"abs_mid",s:90},{m:"obliq_ext",s:30},{m:"erectors",s:20}],
+  "چرخش تنه با دستگاه توری تویست": [{m:"obliq_ext",s:80},{m:"obliq_int",s:80},{m:"abs_mid",s:30}],
+};
+
+// ---- Detection helpers: given exercise name(s), return which muscles were engaged and how much ----
+function getExerciseMuscleEngagement(exerciseName){
+  const rows = EXERCISE_MUSCLE_MAP[exerciseName];
+  if(!rows) return [];
+  return rows.map(r=>({ muscle:r.m, label:RECOVERY_MUSCLE_LABELS[r.m]||r.m, score:r.s }))
+    .sort((a,b)=> b.score - a.score);
+}
+// entries: array of {name, phase} (e.g. from the session queue). Only 'main' phase entries
+// count toward muscle engagement — warm-up/cool-down mobility work isn't heavy enough to
+// need 72h recovery. When multiple exercises hit the same muscle, we keep the *highest*
+// score for that muscle rather than summing — extra sets/exercises don't push a muscle past
+// "fully worked", they just make that "fully worked" state more certain.
+function computeSessionMuscleEngagement(entries){
+  const merged = {}; // muscleKey -> best score
+  (entries||[]).forEach(e=>{
+    if(e.phase && e.phase !== 'main') return;
+    const rows = EXERCISE_MUSCLE_MAP[e.name];
+    if(!rows) return;
+    rows.forEach(r=>{ if(!merged[r.m] || merged[r.m] < r.s) merged[r.m] = r.s; });
+  });
+  return Object.entries(merged)
+    .map(([muscle,score])=>({ muscle, label:RECOVERY_MUSCLE_LABELS[muscle]||muscle, score }))
+    .sort((a,b)=> b.score - a.score);
+}
+
 const SPLIT_TEMPLATES = {
   3: [ {label:'روز ۱', sub:'هول (سینه/شانه/پشت‌بازو)', muscles:['chest','shoulders','triceps']},
        {label:'روز ۲', sub:'پول (پشت/جلوبازو)', muscles:['back','biceps']},
@@ -15903,57 +16932,134 @@ const SPLIT_TEMPLATES = {
        {label:'روز ۳', sub:'پا و باسن', muscles:['legs','glutes']},
        {label:'روز ۴', sub:'شانه و شکم', muscles:['shoulders','abs']} ]
 };
-/* ---- Warm-up / cool-down pools: general (based on gym/home access) + a couple of
-   muscle-specific moves for whichever muscle groups today's split actually trains. ---- */
-const WARMUP_GENERAL = {
-  gym:[ {name:'۵ دقیقه دوچرخه ثابت یا تردمیل سبک', meta:'کاردیوی سبک'}, {name:'چرخش شانه و مچ دست و پا', meta:'۲۰ تکرار هر طرف'} ],
-  home:[ {name:'جای پا (High Knees) یا طناب فرضی', meta:'۲-۳ دقیقه'}, {name:'چرخش شانه و مچ دست و پا', meta:'۲۰ تکرار هر طرف'} ]
-};
-const WARMUP_MUSCLE = {
-  chest:[{name:'چرخش بازو رو به جلو و عقب', meta:'۱۵ تکرار هر طرف'}],
-  back:[{name:'کشش دینامیک پشت (Cat-Cow)', meta:'۱۰ تکرار'}],
-  shoulders:[{name:'چرخش بازو با دایره‌ی بزرگ', meta:'۱۵ تکرار هر طرف'}],
-  biceps:[{name:'چرخش مچ و ساعد', meta:'۱۵ تکرار'}],
-  triceps:[{name:'کشش سبک پشت‌بازو بالای سر', meta:'۲۰ ثانیه هر طرف'}],
-  legs:[{name:'اسکات بدون وزنه', meta:'۱۵ تکرار'},{name:'لانج سبک در جا', meta:'۱۰ تکرار هر پا'}],
-  glutes:[{name:'پل باسن سبک', meta:'۱۵ تکرار'}],
-  abs:[{name:'چرخش لگن (Hip Circles)', meta:'۱۰ تکرار هر طرف'}]
-};
-const COOLDOWN_GENERAL = {
-  gym:[ {name:'پیاده‌روی آهسته روی تردمیل', meta:'۳ دقیقه'}, {name:'چند نفس عمیق و آروم', meta:'۵ نفس'} ],
-  home:[ {name:'پیاده‌روی آروم در جا', meta:'۲-۳ دقیقه'}, {name:'چند نفس عمیق و آروم', meta:'۵ نفس'} ]
-};
-const COOLDOWN_MUSCLE = {
-  chest:[{name:'کشش سینه روی دیوار یا قاب در', meta:'۳۰ ثانیه هر طرف'}],
-  back:[{name:'کشش پشت (Child\u2019s Pose)', meta:'۳۰ ثانیه'}],
-  shoulders:[{name:'کشش شانه روی سینه', meta:'۲۰ ثانیه هر طرف'}],
-  biceps:[{name:'کشش جلوبازو با دست صاف', meta:'۲۰ ثانیه هر طرف'}],
-  triceps:[{name:'کشش پشت‌بازو بالای سر', meta:'۲۰ ثانیه هر طرف'}],
-  legs:[{name:'کشش همسترینگ نشسته', meta:'۳۰ ثانیه هر پا'},{name:'کشش کوادریسپس ایستاده', meta:'۳۰ ثانیه هر پا'}],
-  glutes:[{name:'کشش کبوتر یا زانو به سینه', meta:'۳۰ ثانیه هر پا'}],
-  abs:[{name:'کشش کبرا', meta:'۲۰ ثانیه'}]
-};
-function renderWoPrepList(elId, muscles, generalPool, musclePool){
-  const items = [...(generalPool[woAccess]||[])];
-  muscles.forEach(m=> (musclePool[m]||[]).forEach(ex=> items.push(ex)));
-  const html = items.map(ex=>`<div class="exercise-card">
-    <div class="ex-icon-box" style="font-size:20px;">${elId==='woWarmupList' ? '🔥' : '🧊'}</div>
-    <div class="ex-info">
-      <div class="ex-name">${ex.name}</div>
-      <div class="ex-meta">${ex.meta}</div>
-    </div>
-  </div>`).join('');
-  document.getElementById(elId).innerHTML = html;
+/* ---- کاربر تو مرحله‌ی «چیدمان جلسه‌ها»ی آنبورد می‌تونه پیشنهاد پیش‌فرض بالا رو دستی
+   تغییر بده (مثلاً جلوبازو و پشت‌بازو رو تو یه روز بندازه). اگه چیدمان دستی ذخیره شده
+   باشه و طول‌ش با woSplit فعلی جور دربیاد، همه‌جای برنامه (پیل روزها، ساخت حرکت‌ها، خلاصه‌ی
+   پایان جلسه، پیام مربی) به‌جای SPLIT_TEMPLATES ثابت، از همین استفاده می‌کنن. ---- */
+function getActiveSplitTemplate(){
+  if(woCustomSplit && woCustomSplit.length === woSplit && woCustomSplit.every(d=> d.muscles && d.muscles.length)) return woCustomSplit;
+  return SPLIT_TEMPLATES[woSplit];
 }
 let woFocus = [];
 let woSplit = 3;
+/* ---- چیدمان دستیِ روزها که کاربر تو مرحله‌ی تایید آنبورد ساخته (یا null یعنی همون
+   پیشنهاد پیش‌فرض SPLIT_TEMPLATES دست‌نخورده مونده). شکلش دقیقاً مثل یه ورودی
+   SPLIT_TEMPLATES هست: [{label, sub, muscles:[]}, ...]. ---- */
+let woCustomSplit = null;
 let woAccess = 'home';
 let woLevel = 'intermediate';
 let woGoal = 'bulk';
 let woActiveDay = 0;
-let woObSelected = { level:'', goal:'', access:'', split:'', focus:[] };
+/* ---- تنظیمات جدید: چقدر وقت داره (woDuration به دقیقه) و چندتا حرکت می‌خواد (woExCount)،
+   به‌علاوه عضله‌های ضعیف/قوی خودش (woWeak/woStrong). این‌ها با woFocus (هدف زیبایی‌شناسی)
+   فرق دارن: عضله‌ی ضعیف یعنی «این عضله از بقیه عقبه، باید جبران بشه»، نه لزوماً هدف کاربره.
+   یه عضله نمی‌تونه هم‌زمان تو weak و strong باشه (mutual exclusive). ---- */
+let woDuration = 60;
+let woExCount = 'medium';
+let woWeak = [];
+let woStrong = [];
+/* ---- 30-day exercise rotation: یه برنامه‌ی ثابت بعد از ۳۰ روز جواب نمی‌ده، پس هر بار که
+   کاربر برنامه‌شو تازه می‌کنه (رنو سریع یا بازسازی کامل)، woCycleIndex یکی زیاد می‌شه و
+   woCycleStartedAt ریست می‌شه. این index به‌عنوان افستِ چرخشی روی استخر حرکت‌های هر عضله
+   استفاده می‌شه (rotatedPoolSlice)، یعنی لازم نیست همه‌ی حرکت‌ها عوض شن؛ فقط چیدمان
+   می‌چرخه و طبیعتاً یه ترکیب متفاوت از حرکت‌های همون استخر انتخاب می‌شه. ---- */
+let woCycleIndex = 0;
+let woCycleStartedAt = Date.now();
+let woObSelected = { level:'', goal:'', access:'', split:'', duration:'', exCount:'', focus:[], weak:[], strong:[] };
 const WO_LEVEL_LABELS = {beginner:'مبتدی', intermediate:'متوسط', advanced:'پیشرفته'};
 const WO_GOAL_LABELS = {bulk:'عضله‌سازی', cut:'چربی‌سوزی و فرم بدن', fit:'حفظ آمادگی عمومی'};
+/* ---- تعداد حرکت هر عضله در روز، بر اساس ترجیح woExCount: base=حالت عادی، focus=عضله‌ی
+   هدف/ضعیف (ست اضافه)، strong=عضله‌ی قوی (یه حرکت کمتر تا وقت برای نقطه‌ضعف بمونه). ---- */
+const EXCOUNT_LABELS = {low:'کم', medium:'متوسط', high:'زیاد'};
+const EXCOUNT_CONF = { low:{base:2,focus:3,strong:1}, medium:{base:3,focus:4,strong:2}, high:{base:4,focus:5,strong:3} };
+/* ---- مدت جلسه، ثانیه‌ی استراحت بین ست‌های حرکت اصلی رو تعیین می‌کنه؛ جلسه‌ی کوتاه‌تر یعنی
+   استراحت کوتاه‌تر و تمرین فشرده‌تر، جلسه‌ی بلندتر یعنی ریکاوری بیشتر بین ست‌ها. ---- */
+const WO_DURATION_REST = {30:25, 45:35, 60:40, 90:55};
+
+/* ==================== سوپرست / تری‌ست ====================
+   بعد از اینکه حرکتِ اولِ هر عضله (سنگین‌ترین/فرم‌محورترین حرکت اون عضله تو استخر
+   چرخشی) به‌صورت مجزا انجام شد، حرکت‌های فرعیِ باقی‌موندهٔ عضله‌های مختلفِ همون روز
+   می‌تونن به‌صورت زوجی (سوپرست، ۲ عضله) یا سه‌تایی (تری‌ست، ۳ عضله) پشتِ سرهم و
+   بدون استراحتِ واقعی ترکیب بشن — دقیقاً همون کاری که یه مربی برای فشرده‌کردنِ جلسه
+   و بالابردنِ فشارِ متابولیک انجام می‌ده. دو قاعده‌ی اصلی:
+
+   ۱) کِی فعال بشه: این آپشن روی برنامه‌ی اولِ کاربرِ مبتدی/متوسط خاموشه — چون قدمِ
+      اول یادگیریِ فرمِ درستِ هر حرکت با تمرکز کامله، نه فشردهسازی. از دوره‌ای که طبقِ
+      سطح واقعاً آماده باشه (woCycleIndex) روشن می‌شه. سطح پیشرفته چون از قبل با این
+      تکنیک آشناست، از همون برنامه‌ی اول (دوره‌ی ۰) فعاله.
+   ۲) چقدر تهاجمی گروه‌بندی بشه: هدفِ کاتینگ/چربی‌سوزی و جلسه‌ی کوتاه (۳۰-۴۵ دقیقه)
+      از تری‌ست (گروه‌های ۳تایی) سود می‌برن چون فشارِ متابولیکِ بیشتر + فشرده‌سازیِ زمان
+      دقیقاً هدفشونه؛ عضله‌سازیِ خالص (بالک) با سوپرستِ سبک‌ترِ ۲تایی بهتر جواب می‌ده
+      چون تمرکز و ریکاوریِ نسبی بینِ حرکت‌های مختلف برای حجمِ تمرینیِ باکیفیت مهم‌تره.
+      اندازه‌ی گروه فقط یه سقفه؛ الگوریتمِ چیدمان (buildWoSupersetGroups) خودش بر
+      اساسِ تعداد عضله‌های واقعیِ همون روز محدودش می‌کنه. ==================== */
+const WO_SUPERSET_INTRO_CYCLE = {beginner:2, intermediate:1, advanced:0};
+const WO_SUPERSET_TRANSITION_SEC = 12; // نه استراحتِ واقعی، فقط وقتِ جابه‌جاییِ بینِ حرکت‌های همون گروه
+const WO_GROUP_LABELS = {2:'سوپرست', 3:'تری‌ست'};
+function woSupersetsEnabled(){
+  const introAt = WO_SUPERSET_INTRO_CYCLE[woLevel];
+  return woCycleIndex >= (typeof introAt === 'number' ? introAt : 1);
+}
+function woSupersetGroupSize(){
+  if(woDuration <= 45) return 3;      // جلسه‌ی کوتاه: باید حجم رو تو زمانِ کم جا داد
+  if(woGoal === 'cut') return 3;      // چربی‌سوزی: فشارِ متابولیکِ بیشتر با تری‌ست
+  return 2;                            // بالک/فیت: سوپرستِ سبک‌تر، تمرکز روی کیفیتِ هر حرکت
+}
+/* perMuscleLists: به ترتیبِ day.muscles، هرکدوم آرایه‌ای از حرکت‌های فرعیِ همون عضله.
+   هر دور، از میانِ عضله‌هایی که هنوز حرکتِ فرعی دارن (با چرخشِ نقطه‌ی شروع برای توزیعِ
+   عادلانه‌ی زوج‌ها)، حداکثر maxSize تا رو برمی‌داره؛ اگه فقط ۱ عضله باقی مونده باشه
+   (یعنی جفت/سه‌تاییِ واقعی ممکن نیست)، بقیه‌ی حرکت‌هاش به‌صورت تکی (leftover) برمی‌گردن. */
+function buildWoSupersetGroups(perMuscleLists, maxSize){
+  const n = perMuscleLists.length;
+  const queues = perMuscleLists.map(l=> l.slice());
+  const groups = [];
+  let start = 0;
+  while(true){
+    const order = []; for(let k=0;k<n;k++) order.push((start+k)%n);
+    const available = order.filter(i=> queues[i].length>0);
+    if(available.length < 2) break;
+    const chosen = available.slice(0, maxSize);
+    groups.push(chosen.map(i=> queues[i].shift()));
+    start = (start+1)%n;
+  }
+  const leftovers = [];
+  queues.forEach(q=> leftovers.push(...q));
+  return { groups, leftovers };
+}
+
+/* ==================== دراپ‌ست ====================
+   بعضی حرکات فرعی (نه همه) به‌جای تموم‌شدن با یه استراحتِ عادی، با یه «دراپ‌ست» جمع
+   می‌شن: ستِ آخر رو تا نزدیکِ واماندگی می‌بری، فوراً (بدون استراحت) حدودِ ۲۰-۳۰٪ از
+   وزنه کم می‌کنی و بی‌درنگ ادامه می‌دی تا واماندگیِ دوباره. این یعنی استراحتِ عادیِ بعدِ
+   اون حرکت با یه ستِ اضافه‌ی سبک‌تر جایگزین می‌شه، نه اینکه یه حرکتِ کاملاً جدا باشه —
+   دقیقاً مثلِ سوپرست/تری‌ست، فقط رویِ یه حرکتِ تک به‌جایِ چند عضله.
+
+   سه قاعده‌ی اصلی:
+   ۱) فقط تو باشگاه معنا داره (woAccess==='gym') — چون به وزنه‌ی به‌سادگی قابل‌کم‌کردن
+      (دمبلِ سبک‌ترِ بغل‌دستی، پینِ دستگاه، سیم‌کش) نیاز داره؛ تو خونه معمولاً همچین
+      امکانی در دسترس نیست.
+   ۲) فقط حرکت‌های دمبل/دستگاه/سیم‌کش/کتل‌بل کاندیدن (woIsDropSetFriendly) — حرکت‌های
+      هالتر/بارفیکس/ددلیفت و حرکت‌های زمان‌محور یا بدنِ‌وزن (پلانک، شنا سوئدی) نه وزنه‌ی
+      به‌سادگی قابل‌تنظیم دارن و نه برای کم‌کردنِ سریع امنن؛ این حرکت‌ها هیچ‌وقت دراپ‌ست
+      نمی‌شن، حتی اگه نوبتشون برسه.
+   ۳) کِی فعال بشه: دراپ‌ست از سوپرست/تری‌ست خسته‌کننده‌تره، پس دیرتر از اون‌ها وارد
+      می‌شه، و حداکثر ۲ حرکت در روز (نه بیشتر) تا خستگیِ تجمعی زیاد نشه. حرکتی که
+      دراپ‌ست شد از استخرِ سوپرست/تری‌ست کنار گذاشته می‌شه — یه حرکت هم‌زمان هر دو
+      تکنیک رو نمی‌گیره. ==================== */
+const WO_DROPSET_INTRO_CYCLE = {beginner:3, intermediate:2, advanced:0};
+const WO_DROPSET_MAX_PER_DAY = 2;
+function woDropSetsEnabled(){
+  if(woAccess !== 'gym') return false;
+  const introAt = WO_DROPSET_INTRO_CYCLE[woLevel];
+  return woCycleIndex >= (typeof introAt === 'number' ? introAt : 2);
+}
+function woIsDropSetFriendly(ex){
+  if(/ثانیه|حداکثر/.test(ex.sets)) return false; // زمان‌محور یا تا واماندگی؛ وزنه‌ای برای کم‌کردن نداره
+  const n = ex.name;
+  if(/هالتر|بارفیکس|ددلیفت|دیپ روی میله|شنا سوئدی|سوپرمن|کوهنورد|پلانک/.test(n)) return false;
+  if(/دمبل|دستگاه|سیم‌کش|کتل‌بل|کراس‌اور|پک دک|کابل/.test(n)) return true;
+  return false; // پیش‌فرضِ محافظه‌کارانه: مطمئن نیستیم چه وسیله‌ایه، پس درگیرش نمی‌کنیم
+}
 
 /* ---- Free-plan personalization limits for the workout tab: فقط سطح «متوسط»، فقط برنامه‌ی
    «۳ روزه»، و بدون امکان انتخاب عضله‌ی فوکوس. کاربر پرمیوم/تو دوره‌ی آزمایشی همه چیو باز داره.
@@ -15970,11 +17076,37 @@ function applyWoPremiumLocksUI(){
       b.classList.toggle('seg-locked', b.dataset.val!=='3' && !isPremiumUser);
     });
   });
+  ['woOBDurationSeg','woDurationSeg'].forEach(id=>{
+    document.querySelectorAll('#'+id+' button').forEach(b=>{
+      b.classList.toggle('seg-locked', b.dataset.val!=='60' && !isPremiumUser);
+    });
+  });
+  ['woOBExCountSeg','woExCountSeg'].forEach(id=>{
+    document.querySelectorAll('#'+id+' button').forEach(b=>{
+      b.classList.toggle('seg-locked', b.dataset.val!=='medium' && !isPremiumUser);
+    });
+  });
   ['woOBFocusChips','woFocusChips'].forEach(id=>{
     const grid = document.getElementById(id);
     if(grid) grid.classList.toggle('chips-locked', !isPremiumUser);
   });
   ['woOBFocusHead','woFocusHead'].forEach(id=>{
+    const head = document.getElementById(id);
+    if(head) head.classList.toggle('feature-locked', !isPremiumUser);
+  });
+  ['woOBWeakChips','woWeakChips'].forEach(id=>{
+    const grid = document.getElementById(id);
+    if(grid) grid.classList.toggle('chips-locked', !isPremiumUser);
+  });
+  ['woOBWeakHead','woWeakHead'].forEach(id=>{
+    const head = document.getElementById(id);
+    if(head) head.classList.toggle('feature-locked', !isPremiumUser);
+  });
+  ['woOBStrongChips','woStrongChips'].forEach(id=>{
+    const grid = document.getElementById(id);
+    if(grid) grid.classList.toggle('chips-locked', !isPremiumUser);
+  });
+  ['woOBStrongHead','woStrongHead'].forEach(id=>{
     const head = document.getElementById(id);
     if(head) head.classList.toggle('feature-locked', !isPremiumUser);
   });
@@ -15994,13 +17126,14 @@ function woIconSvg(type){
     </g>
   </svg>`;
 }
-function woMusclesForFocus(){
+function woMusclesFromList(list){
   const set = new Set();
-  woFocus.forEach(f=> (FOCUS_TO_MUSCLES[f]||[]).forEach(m=> set.add(m)));
+  (list||[]).forEach(f=> (FOCUS_TO_MUSCLES[f]||[]).forEach(m=> set.add(m)));
   return set;
 }
+function woMusclesForFocus(){ return woMusclesFromList(woFocus); }
 function renderWoDayPills(){
-  const template = SPLIT_TEMPLATES[woSplit];
+  const template = getActiveSplitTemplate();
   if(woActiveDay >= template.length) woActiveDay = 0;
   document.getElementById('woDayPills').innerHTML = template.map((d,i)=>
     `<div class="wo-day-pill${i===woActiveDay?' active':''}" data-day="${i}">${d.label}<span class="wp-sub">${d.sub}</span></div>`
@@ -16009,35 +17142,158 @@ function renderWoDayPills(){
     pill.addEventListener('click', ()=>{ woActiveDay = parseInt(pill.dataset.day,10); renderWoDayPills(); renderWoExercises(); });
   });
 }
+// چرخش تعیین‌شونده روی استخر حرکت‌های یه عضله بر اساس شماره‌ی دوره (seed = woCycleIndex).
+// چون طول استخرها بین عضله‌های مختلف فرق می‌کنه (مثلاً پا ۱۳ تا، جلوبازو ۸ تا)، افزایش‌دادنِ
+// همین یه عدد باعث می‌شه هر عضله با ریتم خودش بچرخه و ترکیب حرکت‌ها بین دوره‌ها واقعاً عوض شه،
+// بدون نیاز به یه لیست جدا برای «کدوم حرکت‌ها قبلاً بوده».
+function rotatedPoolSlice(pool, count, seed){
+  if(!pool || !pool.length || count<=0) return [];
+  const n = pool.length;
+  const c = Math.min(count, n);
+  const offset = ((seed % n) + n) % n;
+  const out = [];
+  for(let i=0;i<c;i++) out.push(pool[(offset+i)%n]);
+  return out;
+}
+function renderWoCycleStatus(){
+  const infoEl = document.getElementById('woCycleInfo');
+  const banner = document.getElementById('woCycleBanner');
+  if(!infoEl || !banner) return;
+  const elapsed = daysSince(woCycleStartedAt);
+  if(elapsed >= 30){
+    infoEl.textContent = '';
+    banner.style.display = '';
+  } else {
+    infoEl.textContent = `روز ${toFa(elapsed+1)} از ۳۰ در این چیدمان تمرینی`;
+    banner.style.display = 'none';
+  }
+}
+function renewWorkoutCycle(){
+  woCycleIndex += 1;
+  woCycleStartedAt = Date.now();
+  saveWoPrefs();
+  renderWoExercises();
+  showToast('حرکت‌های برنامه‌ت تازه شد 🔄', 'success');
+}
+function woExerciseCardHtml(item, groupInfo){
+  const { ex, muscle, badge, isBoost, extra } = item;
+  const attrs = groupInfo
+    ? ` data-group="${groupInfo.id}" data-group-last="${groupInfo.last?1:0}" data-group-label="${groupInfo.label}"`
+    : '';
+  return `<div class="exercise-card${isBoost?' focus':''}"${attrs}>
+    <div class="ex-icon-box">${woIconSvg(ex.type)}</div>
+    <div class="ex-info">
+      <div class="ex-name">${ex.name}</div>
+      <div class="ex-meta">${MUSCLE_LABELS[muscle]} · ${ex.sets}</div>
+      ${badge ? `<span class="ex-focus-badge">${badge}${extra?' · ست اضافه':''}</span>` : ''}
+    </div>
+  </div>`;
+}
+function woGroupBlockHtml(items, groupNumber){
+  const kind = WO_GROUP_LABELS[items.length] || 'سوپرست';
+  const groupId = 'g' + groupNumber;
+  const label = kind + ' ' + toFa(groupNumber);
+  const musclesTxt = items.map(it=>MUSCLE_LABELS[it.muscle]).join(' + ');
+  const cardsHtml = items.map((it,i)=>{
+    const card = woExerciseCardHtml(it, { id:groupId, last:i===items.length-1, label });
+    const connector = i < items.length-1 ? `<div class="wo-superset-connector">بدون استراحت</div>` : '';
+    return card + connector;
+  }).join('');
+  return `<div class="wo-superset-group">
+    <div class="wo-superset-label"><span class="wsl-badge">${label}</span><span>${musclesTxt} · بدون استراحت بین حرکت‌ها</span></div>
+    ${cardsHtml}
+  </div>`;
+}
+// کارتِ دراپ‌ست: ظاهرش مثلِ یه exercise-card عادیه (بدون کلاسِ focus، تا رنگِ قرمزِ
+// دراپ‌ست با رنگِ بنفشِ عضله‌ی هدف قاطی نشه) به‌علاوه‌ی یه برچسب و یه توضیحِ کوتاهِ اجرا.
+function woDropSetCardHtml(item, dropNumber){
+  const { ex, muscle, badge, extra } = item;
+  const label = 'دراپ‌ست ' + toFa(dropNumber);
+  return `<div class="exercise-card dropset" data-dropset="1" data-drop-label="${label}">
+    <div class="ex-icon-box">${woIconSvg(ex.type)}</div>
+    <div class="ex-info">
+      <div class="ex-name">${ex.name}</div>
+      <div class="ex-meta">${MUSCLE_LABELS[muscle]} · ${ex.sets}</div>
+      ${badge ? `<span class="ex-focus-badge">${badge}${extra?' · ست اضافه':''}</span>` : ''}
+      <span class="wo-dropset-badge">🔻 ${label} · ست آخر رو کم‌کن</span>
+      <div class="wo-dropset-note">ست آخر رو تا نزدیکِ واماندگی ببر، فوراً حدود ۲۰-۳۰٪ وزنه کم کن و بدون استراحت ادامه بده تا واماندگیِ دوباره.</div>
+    </div>
+  </div>`;
+}
 function renderWoExercises(){
-  const template = SPLIT_TEMPLATES[woSplit];
+  const template = getActiveSplitTemplate();
   const day = template[woActiveDay];
   const focusMuscles = woMusclesForFocus();
+  const weakMuscles = woMusclesFromList(woWeak);
+  const strongMuscles = woMusclesFromList(woStrong);
   document.getElementById('woDayTitle').textContent =
     'عضله‌های امروز: ' + day.muscles.map(m=>MUSCLE_LABELS[m]).join('، ') +
-    ' · سطح ' + (WO_LEVEL_LABELS[woLevel]||'متوسط') + ' · هدف ' + (WO_GOAL_LABELS[woGoal]||'عضله‌سازی');
-  const baseCount = woLevel==='beginner' ? 2 : (woLevel==='advanced' ? 4 : 3);
-  const focusCount = woLevel==='advanced' ? 5 : 4;
-  let html = '';
+    ' · سطح ' + (WO_LEVEL_LABELS[woLevel]||'متوسط') + ' · هدف ' + (WO_GOAL_LABELS[woGoal]||'عضله‌سازی') +
+    ' · ' + toFa(woDuration) + ' دقیقه · ' + (EXCOUNT_LABELS[woExCount]||'متوسط') + ' حرکت';
+  const conf = EXCOUNT_CONF[woExCount] || EXCOUNT_CONF.medium;
+
+  // حرکتِ اولِ هر عضله (پیک استخرِ چرخشی، idx===0) همیشه مجزا می‌مونه — چون اون حرکتِ
+  // اصلی/سنگین‌ترِ همون عضله‌ست و به تمرکز و ریکاوریِ کاملِ خودش نیاز داره. حرکت‌های
+  // فرعیِ بعدی (idx>=1) کاندیدِ ترکیب‌شدن تو سوپرست/تری‌ست، یا تبدیل‌شدن به دراپ‌ستِ
+  // فینیشرِ همون عضله هستن (هر عضله حداکثر یکی، و این دو تکنیک هیچ‌وقت رو یه حرکتِ
+  // واحد قاطی نمی‌شن).
+  const primaries = [];
+  const accessoryByMuscle = [];
+  const dropCandidates = [];
+  const dropSetsAllowed = woDropSetsEnabled();
+  let dropCount = 0;
   day.muscles.forEach(muscle=>{
-    const isFocus = focusMuscles.has(muscle);
+    const isBoost = focusMuscles.has(muscle) || weakMuscles.has(muscle);
+    const isReduced = !isBoost && strongMuscles.has(muscle);
     const pool = (MUSCLE_EXERCISES[muscle] && MUSCLE_EXERCISES[muscle][woAccess]) || [];
-    const count = isFocus ? Math.min(pool.length, focusCount) : Math.min(pool.length, baseCount);
-    pool.slice(0, count).forEach((ex, idx)=>{
-      const extra = isFocus && idx >= baseCount;
-      html += `<div class="exercise-card${isFocus?' focus':''}">
-        <div class="ex-icon-box">${woIconSvg(ex.type)}</div>
-        <div class="ex-info">
-          <div class="ex-name">${ex.name}</div>
-          <div class="ex-meta">${MUSCLE_LABELS[muscle]} · ${ex.sets}</div>
-          ${isFocus ? `<span class="ex-focus-badge">🎯 عضله‌ی هدف${extra?' · ست اضافه':''}</span>` : ''}
-        </div>
-      </div>`;
+    const count = isBoost ? Math.min(pool.length, conf.focus) : (isReduced ? Math.min(pool.length, conf.strong) : Math.min(pool.length, conf.base));
+    let badge = '';
+    if(isBoost){
+      badge = weakMuscles.has(muscle) ? '💪 نقطه‌ضعف · تمرین بیشتر' : '🎯 عضله‌ی هدف';
+    } else if(isReduced){
+      badge = '✅ نقطه‌قوت · حجم استاندارد';
+    }
+    const accList = [];
+    rotatedPoolSlice(pool, count, woCycleIndex).forEach((ex, idx)=>{
+      const extra = isBoost && idx >= conf.base;
+      const item = { ex, muscle, badge, isBoost, extra };
+      if(idx === 0) primaries.push(item); else accList.push(item);
     });
+    // از انتهای لیستِ فرعیِ همون عضله (جایگاهِ طبیعیِ «فینیشر») دنبالِ اولین حرکتِ
+    // دراپ‌ست-پسند می‌گردیم؛ اگه پیدا شد، از استخرِ سوپرست/تری‌ست بیرونش می‌کشیم.
+    if(dropSetsAllowed && dropCount < WO_DROPSET_MAX_PER_DAY){
+      for(let i=accList.length-1; i>=0; i--){
+        if(woIsDropSetFriendly(accList[i].ex)){
+          dropCandidates.push(accList.splice(i,1)[0]);
+          dropCount++;
+          break;
+        }
+      }
+    }
+    accessoryByMuscle.push(accList);
   });
+
+  // سوپرست/تری‌ست فقط وقتی معنا داره که روز حداقل ۲ عضله داشته باشه (نمی‌شه یه عضله رو
+  // با خودش ترکیب کرد) و طبق سطح/دوره‌ی برنامه‌ی کاربر واقعاً وقتش رسیده باشه.
+  let groups = [], leftovers = [];
+  if(day.muscles.length >= 2 && woSupersetsEnabled()){
+    const built = buildWoSupersetGroups(accessoryByMuscle, woSupersetGroupSize());
+    groups = built.groups;
+    leftovers = built.leftovers;
+  } else {
+    accessoryByMuscle.forEach(list=> leftovers.push(...list));
+  }
+
+  let html = primaries.map(it=> woExerciseCardHtml(it)).join('');
+  groups.forEach((items, gi)=>{ html += woGroupBlockHtml(items, gi+1); });
+  html += leftovers.map(it=> woExerciseCardHtml(it)).join('');
+  if(dropCandidates.length){
+    html += `<div class="wo-dropset-section-label"><span class="wsl-badge">فینیشر</span><span>ست آخرِ این حرکت‌ها رو با وزنه‌ی سبک‌تر و بدون استراحت ادامه بده</span></div>`;
+    dropCandidates.forEach((it, i)=>{ html += woDropSetCardHtml(it, i+1); });
+  }
+
   document.getElementById('woExerciseList').innerHTML = html;
-  renderWoPrepList('woWarmupList', day.muscles, WARMUP_GENERAL, WARMUP_MUSCLE);
-  renderWoPrepList('woCooldownList', day.muscles, COOLDOWN_GENERAL, COOLDOWN_MUSCLE);
+  renderWoCycleStatus();
   updateWorkoutCoach();
 }
 
@@ -16061,28 +17317,40 @@ function woParseDuration(rawText){
   if(sets) return sets*40;
   return 30;
 }
-function woRestSecondsFor(item){ return item.phase === 'main' ? 40 : 12; }
+// اگه این حرکت وسطِ یه گروهِ سوپرست/تری‌ست باشه (noRestAfter)، استراحتِ واقعی نداره —
+// فقط یه وقفه‌ی کوتاهِ جابه‌جایی بینِ ایستگاه‌ها؛ استراحتِ کاملِ بعدِ دوره‌ی duration فقط
+// بعدِ آخرین حرکتِ گروه (یا حرکت‌های مجزا) اعمال می‌شه.
+function woRestSecondsFor(item){
+  if(item && item.noRestAfter) return WO_SUPERSET_TRANSITION_SEC;
+  return WO_DURATION_REST[woDuration] || 40;
+}
 function buildWoSessionQueue(){
   const queue = [];
-  [ {id:'woWarmupList', phase:'warmup'}, {id:'woExerciseList', phase:'main'}, {id:'woCooldownList', phase:'cooldown'} ].forEach(sec=>{
-    document.querySelectorAll('#'+sec.id+' .exercise-card').forEach(card=>{
-      const nameEl = card.querySelector('.ex-name'), metaEl = card.querySelector('.ex-meta');
-      if(!nameEl) return;
-      const name = nameEl.textContent, meta = metaEl ? metaEl.textContent : '';
-      queue.push({ phase:sec.phase, name, meta, workSec: woParseDuration(meta) });
-    });
+  document.querySelectorAll('#woExerciseList .exercise-card').forEach(card=>{
+    const nameEl = card.querySelector('.ex-name'), metaEl = card.querySelector('.ex-meta');
+    if(!nameEl) return;
+    const name = nameEl.textContent, meta = metaEl ? metaEl.textContent : '';
+    const group = card.dataset.group || null;
+    const groupLast = card.dataset.groupLast === '1';
+    const groupLabel = card.dataset.groupLabel || '';
+    const isDrop = card.dataset.dropset === '1';
+    const dropLabel = card.dataset.dropLabel || '';
+    queue.push({ phase:'main', name, meta, workSec: woParseDuration(meta), group, noRestAfter: !!(group && !groupLast), groupLabel, isDrop, dropLabel });
   });
   return queue;
 }
-let woSession = null; // {queue, idx, mode:'work'|'rest', secondsLeft, total, interval, startedAt}
+let woSession = null; // {queue, idx, mode:'work'|'rest', secondsElapsed, secondsLeft, total, awaitingConfirm, interval, startedAt}
 function woFormatSessionTime(totalSec){
   const m = Math.floor(totalSec/60), s = totalSec%60;
   return toFa(String(m).padStart(2,'0'))+':'+toFa(String(s).padStart(2,'0'));
 }
+/* ---- حرکت اصلی دیگه شمارش معکوس نداره: از صفر مثل یه کرنومتر شروع می‌شه و بالا می‌ره
+   تا کاربر خودش با دکمه بگه تموم شد. فقط استراحت‌ها شمارش معکوس دارن و به صفر که
+   می‌رسن، به‌جای رفتنِ خودکار به حرکت بعدی، منتظر تأیید کاربر می‌مونن (awaitingConfirm). ---- */
 function woStartSession(){
   const queue = buildWoSessionQueue();
   if(!queue.length){ showToast('حرکتی برای امروز پیدا نشد', 'error'); return; }
-  woSession = { queue, idx:0, mode:'work', secondsLeft:queue[0].workSec, total:queue[0].workSec, interval:null, startedAt:Date.now() };
+  woSession = { queue, idx:0, mode:'work', secondsElapsed:0, secondsLeft:0, total:0, awaitingConfirm:false, interval:null, startedAt:Date.now() };
   document.getElementById('woSessionOverlay').classList.add('show');
   woRenderSessionStep();
   woTickSession();
@@ -16090,61 +17358,118 @@ function woStartSession(){
 function woRenderSessionStep(){
   const s = woSession; if(!s) return;
   const item = s.queue[s.idx];
-  const phaseLabels = {warmup:'🔥 گرم کردن', main:'🏋️ حرکت اصلی', cooldown:'🧊 سرد کردن'};
   document.getElementById('woSessionProgress').textContent = toFa(s.idx+1) + ' از ' + toFa(s.queue.length);
   document.getElementById('woSessionOverlay').classList.toggle('resting', s.mode==='rest');
+  document.getElementById('woSessionOverlay').classList.toggle('rest-ready', s.mode==='rest' && s.awaitingConfirm);
   const nextItem = s.queue[s.idx+1];
   if(s.mode === 'work'){
-    document.getElementById('woSessionPhaseLabel').textContent = phaseLabels[item.phase];
+    document.getElementById('woSessionPhaseLabel').textContent = item.groupLabel
+      ? ('🔗 ' + item.groupLabel + ' · بدون استراحت')
+      : (item.isDrop ? ('🔻 ' + item.dropLabel + ' · تا واماندگی + دراپ') : '🏋️ حرکت اصلی');
     document.getElementById('woSessionExName').textContent = item.name;
-    document.getElementById('woSessionExMeta').textContent = item.meta;
+    document.getElementById('woSessionExMeta').textContent = item.isDrop
+      ? (item.meta + ' · ست آخر رو تا واماندگی ببر، بعد ⁓۲۰-۳۰٪ وزنه کم کن و بدون استراحت ادامه بده')
+      : item.meta;
     document.getElementById('woSessionNext').textContent = nextItem ? ('بعدی: ' + nextItem.name) : 'آخرین حرکت 🎉';
-    document.getElementById('woSessionSkipBtn').textContent = 'رد کردن حرکت ⏭';
-  } else {
-    document.getElementById('woSessionPhaseLabel').textContent = '😌 استراحت کوتاه';
+    document.getElementById('woSessionSkipBtn').textContent = 'پایان حرکت ✅';
+  } else if(s.awaitingConfirm){
+    // استراحت به صفر رسیده؛ منتظر تأیید کاربر برای ورود به حرکت بعدی می‌مونیم.
+    document.getElementById('woSessionPhaseLabel').textContent = '✅ استراحت تموم شد';
     document.getElementById('woSessionExName').textContent = '';
     document.getElementById('woSessionExMeta').textContent = nextItem ? ('بعدی: ' + nextItem.name) : '';
     document.getElementById('woSessionNext').textContent = '';
-    document.getElementById('woSessionSkipBtn').textContent = 'رد کردن استراحت ⏭';
+    document.getElementById('woSessionSkipBtn').textContent = 'شروع حرکت بعدی ▶';
+  } else {
+    // اگه این استراحت واقعی نیست (بینِ دو حرکتِ همون سوپرست/تری‌ست)، یه برچسبِ متفاوت
+    // نشون می‌دیم تا کاربر گیج نشه که چرا استراحتش این‌قدر کوتاهه.
+    const midGroup = !!item.noRestAfter;
+    document.getElementById('woSessionPhaseLabel').textContent = midGroup ? '🔁 بدون استراحت — برو حرکت بعدی' : '😌 استراحت کوتاه';
+    document.getElementById('woSessionExName').textContent = '';
+    document.getElementById('woSessionExMeta').textContent = nextItem ? ('بعدی: ' + nextItem.name) : '';
+    document.getElementById('woSessionNext').textContent = '';
+    document.getElementById('woSessionSkipBtn').textContent = midGroup ? 'رد کردن ⏭' : 'رد کردن استراحت ⏭';
   }
   woUpdateSessionTimeDisplay();
 }
 function woUpdateSessionTimeDisplay(){
   const s = woSession; if(!s) return;
-  document.getElementById('woSessionTime').textContent = woFormatSessionTime(Math.max(0,s.secondsLeft));
   const fill = document.getElementById('woSessionBarFill');
-  if(fill) fill.style.width = (100*Math.max(0,s.secondsLeft)/Math.max(1,s.total))+'%';
+  if(s.mode === 'work'){
+    // کرنومتر رو به بالا: هدفِ ثابتی برای نوارِ پیشرفت وجود نداره، پس نوار همیشه پر نشون داده می‌شه.
+    document.getElementById('woSessionTime').textContent = woFormatSessionTime(Math.max(0,s.secondsElapsed));
+    if(fill) fill.style.width = '100%';
+  } else {
+    document.getElementById('woSessionTime').textContent = woFormatSessionTime(Math.max(0,s.secondsLeft));
+    if(fill) fill.style.width = (100*Math.max(0,s.secondsLeft)/Math.max(1,s.total))+'%';
+  }
 }
 function woTickSession(){
   clearInterval(woSession.interval);
-  woSession.interval = setInterval(()=>{
-    if(!woSession) return;
-    woSession.secondsLeft--;
-    if(woSession.secondsLeft <= 0){ woAdvanceSession(); return; }
-    woUpdateSessionTimeDisplay();
-  }, 1000);
-}
-function woAdvanceSession(){
-  const s = woSession; if(!s) return;
-  if(navigator.vibrate){ try{ navigator.vibrate(s.mode==='work'?[80,50,80]:60); }catch(e){} }
+  const s = woSession;
   if(s.mode === 'work'){
-    const item = s.queue[s.idx];
-    const restSec = woRestSecondsFor(item);
-    const isLast = s.idx === s.queue.length - 1;
-    if(isLast || restSec<=0){ woEndSessionCore(true); return; }
-    s.mode = 'rest'; s.secondsLeft = restSec; s.total = restSec;
-    woRenderSessionStep(); woTickSession();
-  } else {
-    s.idx++;
-    if(s.idx >= s.queue.length){ woEndSessionCore(true); return; }
-    s.mode = 'work'; s.secondsLeft = s.queue[s.idx].workSec; s.total = s.secondsLeft;
-    woRenderSessionStep(); woTickSession();
+    s.interval = setInterval(()=>{
+      if(!woSession) return;
+      woSession.secondsElapsed = (woSession.secondsElapsed||0) + 1;
+      woUpdateSessionTimeDisplay();
+    }, 1000);
+  } else if(s.mode === 'rest' && !s.awaitingConfirm){
+    s.interval = setInterval(()=>{
+      if(!woSession) return;
+      woSession.secondsLeft--;
+      if(woSession.secondsLeft <= 0){
+        woSession.secondsLeft = 0;
+        clearInterval(woSession.interval);
+        woEnterRestConfirm();
+        return;
+      }
+      woUpdateSessionTimeDisplay();
+    }, 1000);
   }
+  // اگه mode==='rest' و awaitingConfirm بود، هیچ تایمری راه نمی‌افته؛ منتظر تپِ کاربر می‌مونیم.
+}
+// شمارش معکوسِ استراحت به صفر رسید: به‌جای پریدنِ خودکار به حرکت بعدی، صبر می‌کنیم
+// تا خودِ کاربر با دکمه تأیید کنه که آماده‌ی حرکت بعدیه.
+function woEnterRestConfirm(){
+  const s = woSession; if(!s) return;
+  s.awaitingConfirm = true;
+  if(navigator.vibrate){ try{ navigator.vibrate([80,50,80]); }catch(e){} }
+  woRenderSessionStep();
+}
+// کاربر حرکت رو تموم اعلام کرد (یا با تپِ دکمه، یا بعداً می‌تونیم خودکار هم صداش بزنیم) → می‌ریم تو استراحت.
+function woFinishWorkStep(){
+  const s = woSession; if(!s) return;
+  clearInterval(s.interval);
+  if(navigator.vibrate){ try{ navigator.vibrate([80,50,80]); }catch(e){} }
+  const item = s.queue[s.idx];
+  const restSec = woRestSecondsFor(item);
+  const isLast = s.idx === s.queue.length - 1;
+  if(isLast || restSec<=0){ woEndSessionCore(true); return; }
+  s.mode = 'rest'; s.secondsLeft = restSec; s.total = restSec; s.awaitingConfirm = false;
+  woRenderSessionStep(); woTickSession();
+}
+// کاربر تأیید کرد که آماده‌ی حرکت بعدیه → کرنومتر حرکت بعدی از صفر شروع می‌شه.
+function woBeginNextExercise(){
+  const s = woSession; if(!s) return;
+  if(navigator.vibrate){ try{ navigator.vibrate(60); }catch(e){} }
+  s.idx++;
+  if(s.idx >= s.queue.length){ woEndSessionCore(true); return; }
+  s.mode = 'work'; s.secondsElapsed = 0; s.awaitingConfirm = false;
+  woRenderSessionStep(); woTickSession();
 }
 function woSkipSessionStep(){
   if(!woSession) return;
-  clearInterval(woSession.interval);
-  woAdvanceSession();
+  const s = woSession;
+  if(s.mode === 'work'){
+    woFinishWorkStep();
+  } else if(s.awaitingConfirm){
+    woBeginNextExercise();
+  } else {
+    // «رد کردن استراحت»: شمارش معکوسِ باقی‌مونده رو رد می‌کنیم، ولی بازم از همون گیت
+    // تأیید عبور می‌کنیم تا حرکتِ بعدی هیچ‌وقت بدون یه تپِ آگاهانه شروع نشه.
+    clearInterval(s.interval);
+    s.secondsLeft = 0;
+    woEnterRestConfirm();
+  }
 }
 let woPendingEnd = null; // {minutes, dayLabel, exercisesDone, exercisesTotal} — waiting for quality rating
 function woEndSessionCore(completedNaturally){
@@ -16155,10 +17480,13 @@ function woEndSessionCore(completedNaturally){
   document.getElementById('woSessionConfirmRow').style.display = 'none';
   const minutes = Math.max(1, Math.round((Date.now()-s.startedAt)/60000));
   const doneCount = completedNaturally ? s.queue.length : (s.mode==='rest' ? s.idx+1 : s.idx);
-  const template = SPLIT_TEMPLATES[woSplit];
+  const template = getActiveSplitTemplate();
   const day = template[woActiveDay];
+  // فقط حرکت‌هایی که واقعاً تا آخر انجام شدن (نه گرم‌کردن/سردکردن) وارد محاسبه‌ی
+  // عضلات درگیر می‌شن — چون این چیزیه که واقعاً به ریکاوری نیاز داره.
+  const muscleEngagement = computeSessionMuscleEngagement(s.queue.slice(0, doneCount));
   woSession = null;
-  woPendingEnd = { minutes, dayLabel: day.label + ' - ' + day.sub, exercisesDone: doneCount, exercisesTotal: s.queue.length };
+  woPendingEnd = { minutes, dayLabel: day.label + ' - ' + day.sub, exercisesDone: doneCount, exercisesTotal: s.queue.length, muscleEngagement };
   document.querySelectorAll('#woFqStars .fq-star').forEach(b=> b.classList.remove('active'));
   document.getElementById('woQualityModal').classList.add('visible');
 }
@@ -16188,7 +17516,7 @@ function woFinalizeSession(quality){
   if(quality){ wh.qualitySum = (wh.qualitySum||0) + quality; wh.qualityCount = (wh.qualityCount||0) + 1; }
   if(!wh.history) wh.history = [];
   wh.history.push({ ts:Date.now(), minutes:pending.minutes, quality:quality||null, dayLabel:pending.dayLabel,
-    exercisesDone:pending.exercisesDone, exercisesTotal:pending.exercisesTotal });
+    exercisesDone:pending.exercisesDone, exercisesTotal:pending.exercisesTotal, muscleEngagement:pending.muscleEngagement||[] });
   if(wh.history.length > 60) wh.history = wh.history.slice(-60);
   saveData();
   showToast('تمرین امروز ثبت شد! آفرین 💪', 'success');
@@ -16222,6 +17550,359 @@ function woFormatDuration(totalMinutes){
   if(m<=0) return toFa(h)+' ساعت';
   return toFa(h)+' ساعت و '+toFa(m)+' دقیقه';
 }
+/* ---- Recovery sub-tab (نقشه‌ی عضلات + وضعیت ریکاوری) ----
+   آدرس عکس‌ها و ماسک‌ها: همون پوشه‌ی assets که bg-music.mp3 و فایل‌های narration توشن
+   (یعنی کنار index.html، پوشه‌ی assets/). این ۸ فایل رو دقیقاً با همین اسم‌ها اونجا بریز:
+   assets/recovery-male.png / assets/recovery-male-back.png /
+   assets/recovery-female.png / assets/recovery-female-back.png
+   assets/recovery-mask-front-male.png / assets/recovery-mask-back-male.png /
+   assets/recovery-mask-front-female.png / assets/recovery-mask-back-female.png
+   ماسک‌ها عکس‌های grayscale هم‌اندازه‌ی عکس اصلی‌ان که هر عضله توشون یه عدد ثابت (id) داره؛
+   خود کاربر هیچ‌وقت ماسک رو نمی‌بینه — فقط برای تشخیص دقیق محدوده‌ی هر عضله موقع رنگ‌آمیزی استفاده می‌شه.
+   نکته: قبلاً این مسیرها با اسلش مطلق (/recovery-male.png) نوشته شده بودن که یعنی از ریشه‌ی
+   سایت می‌خوندشون، نه از پوشه‌ی assets — که با محل واقعی آپلود فایل‌ها (همین پوشه‌ی assets، طبق
+   الگوی bg-music.mp3) جور درنمی‌اومد و ۴۰۴ می‌داد. به مسیر نسبی assets/ تغییرش دادم. */
+const RECOVERY_ASSETS = {
+  male:   { front:{img:'assets/recovery-male.png',        mask:'assets/recovery-mask-front-male.png'},
+            back: {img:'assets/recovery-male-back.png',   mask:'assets/recovery-mask-back-male.png'} },
+  female: { front:{img:'assets/recovery-female.png',      mask:'assets/recovery-mask-front-female.png'},
+            back: {img:'assets/recovery-female-back.png', mask:'assets/recovery-mask-back-female.png'} },
+};
+// id عددی هر عضله توی فایل‌های ماسک (کانال قرمز پیکسل = این عدد)
+const ZONE_IDS = {
+  chest_L:1, chest_R:2, delt_front_L:3, delt_front_R:4, traps_front_L:5, traps_front_R:6,
+  biceps_L:7, biceps_R:8, forearm_front_L:9, forearm_front_R:10,
+  abs_upper_L:11, abs_upper_R:12, abs_mid_L:13, abs_mid_R:14, abs_lower_L:15, abs_lower_R:16,
+  obliques_L:17, obliques_R:18, quad_L:19, quad_R:20,
+  traps_back:21, rear_delt_L:22, rear_delt_R:23, lats_L:24, lats_R:25, erectors:26,
+  triceps_L:27, triceps_R:28, forearm_back_L:29, forearm_back_R:30,
+  glute_L:31, glute_R:32, hamstring_L:33, hamstring_R:34, calf_L:35, calf_R:36,
+};
+const ZONE_ID_TO_NAME = Object.fromEntries(Object.entries(ZONE_IDS).map(([k,v])=>[v,k]));
+// اسم فارسیِ نمایشی هر ناحیه‌ی قابل‌لمس (برای خط انیمیت‌شده‌ی نام عضله)
+const ZONE_DISPLAY_LABEL = {
+  chest_L:'سینه (پکتورالیس ماژور)', chest_R:'سینه (پکتورالیس ماژور)',
+  delt_front_L:'دلتوئید (سر قدامی)', delt_front_R:'دلتوئید (سر قدامی)',
+  traps_front_L:'ذوزنقه‌ای (تراپیزیوس)', traps_front_R:'ذوزنقه‌ای (تراپیزیوس)',
+  biceps_L:'جلو بازو (دوسر بازویی)', biceps_R:'جلو بازو (دوسر بازویی)',
+  forearm_front_L:'ساعد (فلکسورها)', forearm_front_R:'ساعد (فلکسورها)',
+  abs_upper_L:'شکم بالایی', abs_upper_R:'شکم بالایی',
+  abs_mid_L:'شکم میانی', abs_mid_R:'شکم میانی',
+  abs_lower_L:'شکم پایینی', abs_lower_R:'شکم پایینی',
+  obliques_L:'مورب شکم', obliques_R:'مورب شکم',
+  quad_L:'چهارسر ران', quad_R:'چهارسر ران',
+  traps_back:'ذوزنقه‌ای (تراپیزیوس)',
+  rear_delt_L:'دلتوئید (سر خلفی)', rear_delt_R:'دلتوئید (سر خلفی)',
+  lats_L:'لت (پهن پشتی)', lats_R:'لت (پهن پشتی)',
+  erectors:'راست‌کننده‌های ستون فقرات',
+  triceps_L:'پشت بازو (سه‌سر)', triceps_R:'پشت بازو (سه‌سر)',
+  forearm_back_L:'ساعد (اکستنسورها)', forearm_back_R:'ساعد (اکستنسورها)',
+  glute_L:'سرینی بزرگ', glute_R:'سرینی بزرگ',
+  hamstring_L:'همسترینگ', hamstring_R:'همسترینگ',
+  calf_L:'دوقلوی ساق (گاستروکنمیوس)', calf_R:'دوقلوی ساق (گاستروکنمیوس)',
+};
+// هر کلید عضله‌ی EXERCISE_MUSCLE_MAP به کدوم ناحیه‌ی(های) قابل‌رنگ روی عکس مپ می‌شه
+const MUSCLE_ZONE_MAP = {
+  delt_front:['delt_front_L','delt_front_R'],
+  delt_mid:['delt_front_L','delt_front_R','rear_delt_L','rear_delt_R'],
+  delt_rear:['rear_delt_L','rear_delt_R'],
+  pec:['chest_L','chest_R'],
+  serratus:['obliques_L','obliques_R'],
+  intercostals:['obliques_L','obliques_R'],
+  biceps_br:['biceps_L','biceps_R'],
+  brachialis:['biceps_L','biceps_R'],
+  forearm_flex:['forearm_front_L','forearm_front_R','forearm_back_L','forearm_back_R'],
+  forearm_ext:['forearm_front_L','forearm_front_R','forearm_back_L','forearm_back_R'],
+  abs_upper:['abs_upper_L','abs_upper_R'],
+  abs_mid:['abs_mid_L','abs_mid_R'],
+  abs_lower:['abs_lower_L','abs_lower_R'],
+  obliq_ext:['obliques_L','obliques_R'],
+  obliq_int:['obliques_L','obliques_R'],
+  hip_flexors:['quad_L','quad_R'],
+  sartorius:['quad_L','quad_R'],
+  quad_rf:['quad_L','quad_R'],
+  quad_vl:['quad_L','quad_R'],
+  quad_vm:['quad_L','quad_R'],
+  tib_ant:[],
+  traps:['traps_front_L','traps_front_R','traps_back'],
+  rhomboids:['lats_L','lats_R'],
+  lats:['lats_L','lats_R'],
+  teres_major:['lats_L','lats_R'],
+  teres_minor:['rear_delt_L','rear_delt_R'],
+  infraspinatus:['rear_delt_L','rear_delt_R'],
+  subscap:['lats_L','lats_R'],
+  erectors:['erectors'],
+  triceps:['triceps_L','triceps_R'],
+  glute_max:['glute_L','glute_R'],
+  glute_med:['glute_L','glute_R'],
+  glute_min:['glute_L','glute_R'],
+  ham_bf:['hamstring_L','hamstring_R'],
+  ham_st:['hamstring_L','hamstring_R'],
+  ham_sm:['hamstring_L','hamstring_R'],
+  gastroc_med:['calf_L','calf_R'],
+  gastroc_lat:['calf_L','calf_R'],
+  soleus:['calf_L','calf_R'],
+};
+const RECOVERY_WINDOW_HOURS = 72;
+// برای هر عضله‌ای که اخیراً کار کرده، میزان «خستگی فعلی» رو حساب می‌کنه (۱۰۰=تازه تمرین‌شده، ۰=کامل ریکاوری).
+// افت خطیه: هر چی به ۷۲ ساعت نزدیک‌تر بشیم، عدد به سمت صفر می‌ره. اگه چند جلسه به یه عضله خورده
+// باشن، بیشترین خستگیِ فعلی (نه جمع‌شون) ملاک محاسبه‌ست.
+function computeMuscleRecoveryNow(){
+  const wh = storeData.woHistory;
+  const now = Date.now();
+  const fatigue = {};
+  ((wh && wh.history) || []).forEach(h=>{
+    const hoursAgo = (now - h.ts) / 3600000;
+    if(hoursAgo >= RECOVERY_WINDOW_HOURS || hoursAgo < 0) return;
+    const remain = 1 - (hoursAgo / RECOVERY_WINDOW_HOURS);
+    (h.muscleEngagement || []).forEach(m=>{
+      const val = m.score * remain;
+      if(!fatigue[m.muscle] || fatigue[m.muscle] < val) fatigue[m.muscle] = val;
+    });
+  });
+  return fatigue;
+}
+function computeZoneScores(fatigue){
+  const zoneScore = {};
+  Object.keys(fatigue).forEach(muscle=>{
+    const targets = MUSCLE_ZONE_MAP[muscle];
+    if(!targets) return;
+    targets.forEach(zone=>{
+      if(!zoneScore[zone] || zoneScore[zone] < fatigue[muscle]) zoneScore[zone] = fatigue[muscle];
+    });
+  });
+  return zoneScore;
+}
+
+const _recoveryImgCache = {};
+function recoveryLoadImg(url){
+  if(_recoveryImgCache[url]) return _recoveryImgCache[url];
+  const p = new Promise((resolve, reject)=>{
+    const im = new Image();
+    im.onload = ()=> resolve(im);
+    im.onerror = reject;
+    im.src = url;
+  });
+  _recoveryImgCache[url] = p;
+  return p;
+}
+const _recoveryMaskCache = {};
+async function recoveryGetMaskData(url){
+  if(_recoveryMaskCache[url]) return _recoveryMaskCache[url];
+  const im = await recoveryLoadImg(url);
+  const c = document.createElement('canvas');
+  c.width = im.naturalWidth; c.height = im.naturalHeight;
+  const cctx = c.getContext('2d');
+  cctx.drawImage(im, 0, 0);
+  const data = cctx.getImageData(0, 0, c.width, c.height).data;
+  const out = { data, w:c.width, h:c.height };
+  _recoveryMaskCache[url] = out;
+  return out;
+}
+// رنگ‌آمیزی واقعی: عکس خط‌کشی‌شده رو عادی می‌کشه، بعد یه لایه‌ی قرمزِ نیمه‌شفاف رو فقط
+// روی پیکسل‌های همون عضله (طبق ماسک) با حالت ترکیب multiply روش می‌کشه — چون سیاهی خط‌های
+// طرح تو حالت multiply همیشه سیاه می‌مونه، خط‌ها هیچ‌وقت رنگی/محو نمی‌شن و رنگ هیچ‌وقت از مرز
+// عضله بیرون نمی‌زنه (دقیقاً همون تکنیک رنگ‌آمیزی دیجیتال کتاب‌های نقاشی).
+async function renderRecoveryCanvas(){
+  const canvas = document.getElementById('recoveryCanvas');
+  if(!canvas) return;
+  const g = (storeData.profile && (storeData.profile.recoveryGender || storeData.profile.gender)) || '';
+  if(g !== 'male' && g !== 'female') return;
+  const view = (storeData.profile.recoveryView === 'back') ? 'back' : 'front';
+  const assets = RECOVERY_ASSETS[g][view];
+  let baseImg, maskInfo;
+  try{
+    [baseImg, maskInfo] = await Promise.all([recoveryLoadImg(assets.img), recoveryGetMaskData(assets.mask)]);
+  }catch(e){ return; } // فایل‌ها هنوز آپلود نشدن — بی‌خیال رندر، خطا نده
+  const w = baseImg.naturalWidth, h = baseImg.naturalHeight;
+  canvas.width = w; canvas.height = h;
+  const svg = document.getElementById('recoveryCalloutSvg');
+  if(svg) svg.setAttribute('viewBox', '0 0 '+w+' '+h);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(baseImg, 0, 0, w, h);
+
+  const fatigue = computeMuscleRecoveryNow();
+  const zoneScore = computeZoneScores(fatigue);
+  const activeZones = Object.keys(zoneScore);
+  if(activeZones.length && maskInfo.w === w && maskInfo.h === h){
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    const octx = off.getContext('2d');
+    const odata = octx.createImageData(w, h);
+    const md = maskInfo.data;
+    const od = odata.data;
+    const total = w * h;
+    for(let i = 0; i < total; i++){
+      const zid = md[i*4];
+      if(zid === 0) continue;
+      const zoneName = ZONE_ID_TO_NAME[zid];
+      const score = zoneScore[zoneName];
+      if(!score) continue;
+      const alpha = Math.max(0, Math.min(1, score/100)) * 0.9;
+      const p = i*4;
+      od[p] = 214; od[p+1] = 40; od[p+2] = 40;
+      od[p+3] = Math.round(alpha*255);
+    }
+    octx.putImageData(odata, 0, 0);
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.drawImage(off, 0, 0, w, h);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+function renderRecoverySummaryList(){
+  const wrap = document.getElementById('recoverySummaryList');
+  if(!wrap) return;
+  const fatigue = computeMuscleRecoveryNow();
+  const rows = Object.entries(fatigue)
+    .filter(([,v]) => v > 2)
+    .sort((a,b) => b[1]-a[1])
+    .slice(0, 8)
+    .map(([muscle, v])=>{
+      const pctRecovered = Math.max(0, Math.min(100, Math.round(100 - v)));
+      const label = RECOVERY_MUSCLE_LABELS[muscle] || muscle;
+      return `<div class="fsc-row"><span>${label}</span><span>${toFa(pctRecovered)}٪ ریکاوری</span></div>`;
+    }).join('');
+  wrap.innerHTML = rows || '<div class="wo-hist-empty" style="margin:0;">همه‌ی عضله‌ها کامل ریکاوری شدن ✅</div>';
+}
+let _recoveryAutoRefreshStarted = false;
+function recoveryStartAutoRefresh(){
+  if(_recoveryAutoRefreshStarted) return;
+  _recoveryAutoRefreshStarted = true;
+  setInterval(()=>{
+    const panel = document.querySelector('.sub-panel[data-sub="recovery"]');
+    if(panel && panel.classList.contains('active')) renderRecoveryTab();
+  }, 5*60*1000); // هر ۵ دقیقه، فقط وقتی این زیرتب باز باشه، رنگ‌ها رو با گذشت زمان به‌روز می‌کنه
+}
+
+function renderRecoveryTab(){
+  const askBox = document.getElementById('recoveryGenderAsk');
+  const imgWrap = document.getElementById('recoveryImgWrap');
+  const canvas = document.getElementById('recoveryCanvas');
+  if(!canvas) return;
+  const g = (storeData.profile && (storeData.profile.recoveryGender || storeData.profile.gender)) || '';
+  if(g === 'male' || g === 'female'){
+    if(askBox) askBox.style.display = 'none';
+    if(imgWrap) imgWrap.style.display = 'block';
+    setSegActive('recoveryGenderSeg', g);
+    setSegActive('recoveryViewSeg', (storeData.profile.recoveryView === 'back') ? 'back' : 'front');
+    renderRecoveryCanvas();
+    renderRecoverySummaryList();
+    recoveryStartAutoRefresh();
+    recoveryClearCallout();
+  } else {
+    if(askBox) askBox.style.display = 'block';
+    if(imgWrap) imgWrap.style.display = 'none';
+  }
+}
+
+/* ---- لمس روی عضله = خط انیمیت‌شده به سمت بیرون کشیده می‌شه و اسم همون عضله رو نشون می‌ده.
+   لمس دوباره‌ی همون عضله (یا لمس جای خالی) پاکش می‌کنه. تشخیص اینکه کدوم عضله لمس شده دقیقاً
+   از روی همون فایل ماسک (پیکسل‌به‌پیکسل) انجام می‌شه — یعنی خط همیشه از داخل مرز واقعی عضله
+   شروع می‌شه، نه یه حدسِ تقریبی. */
+let _recoveryLastZone = null;
+function recoveryClearCallout(){
+  const svg = document.getElementById('recoveryCalloutSvg');
+  if(svg) svg.innerHTML = '';
+  _recoveryLastZone = null;
+}
+async function recoveryHandleTap(evt){
+  const canvas = document.getElementById('recoveryCanvas');
+  const svg = document.getElementById('recoveryCalloutSvg');
+  if(!canvas || !svg || !canvas.width) return;
+  const rect = canvas.getBoundingClientRect();
+  if(!rect.width || !rect.height) return;
+  const clientX = (evt.touches && evt.touches[0]) ? evt.touches[0].clientX : evt.clientX;
+  const clientY = (evt.touches && evt.touches[0]) ? evt.touches[0].clientY : evt.clientY;
+  const px = Math.round((clientX - rect.left) / rect.width * canvas.width);
+  const py = Math.round((clientY - rect.top) / rect.height * canvas.height);
+  if(px < 0 || py < 0 || px >= canvas.width || py >= canvas.height) return;
+
+  const g = (storeData.profile && (storeData.profile.recoveryGender || storeData.profile.gender)) || '';
+  if(g !== 'male' && g !== 'female') return;
+  const view = (storeData.profile.recoveryView === 'back') ? 'back' : 'front';
+  const assets = RECOVERY_ASSETS[g][view];
+  let maskInfo;
+  try{ maskInfo = await recoveryGetMaskData(assets.mask); }catch(e){ return; }
+  if(maskInfo.w !== canvas.width || maskInfo.h !== canvas.height) return;
+  const zid = maskInfo.data[(py * maskInfo.w + px) * 4];
+  const zoneName = zid ? ZONE_ID_TO_NAME[zid] : null;
+  const label = zoneName && ZONE_DISPLAY_LABEL[zoneName];
+  if(!label || _recoveryLastZone === zoneName){ recoveryClearCallout(); return; }
+  recoveryDrawCallout(px, py, label, canvas.width);
+  _recoveryLastZone = zoneName;
+}
+function recoveryDrawCallout(px, py, label, canvasWidth){
+  const svg = document.getElementById('recoveryCalloutSvg');
+  if(!svg) return;
+  svg.innerHTML = '';
+  const ns = 'http://www.w3.org/2000/svg';
+  const scale = canvasWidth / 340; // واحدهای SVG رو با عرض نمایشیِ تقریبی تصویر (۳۴۰px) هم‌مقیاس می‌کنه
+  const strokeW = 2.6 * scale, fontSize = 15 * scale, dotR = 4 * scale;
+  const goLeft = px > canvasWidth * 0.5;
+  const dx = goLeft ? -70*scale : 70*scale;
+  const dy = (py < 90*scale) ? 55*scale : -55*scale; // نزدیک لبه‌ی بالا؟ خط رو به‌جای بالا می‌کشه پایین
+  const ex = px + dx, ey = py + dy;
+
+  const dot = document.createElementNS(ns,'circle');
+  dot.setAttribute('cx', px); dot.setAttribute('cy', py); dot.setAttribute('r', dotR);
+  dot.setAttribute('class','recovery-callout-dot');
+  svg.appendChild(dot);
+
+  const line = document.createElementNS(ns,'line');
+  line.setAttribute('x1', px); line.setAttribute('y1', py);
+  line.setAttribute('x2', ex); line.setAttribute('y2', ey);
+  line.setAttribute('class','recovery-callout-line');
+  line.setAttribute('stroke-width', strokeW);
+  const len = Math.hypot(ex-px, ey-py);
+  line.style.strokeDasharray = len;
+  line.style.strokeDashoffset = len;
+  svg.appendChild(line);
+  requestAnimationFrame(()=> requestAnimationFrame(()=>{ line.style.strokeDashoffset = 0; }));
+
+  const grp = document.createElementNS(ns,'g');
+  grp.setAttribute('class','recovery-callout-label-group');
+  const textW = Math.max(46*scale, label.length * fontSize * 0.62);
+  const textH = fontSize * 1.9;
+  const bgX = goLeft ? (ex - textW) : ex;
+  const bgY = ey - textH/2;
+  const bg = document.createElementNS(ns,'rect');
+  bg.setAttribute('x', bgX); bg.setAttribute('y', bgY);
+  bg.setAttribute('width', textW); bg.setAttribute('height', textH);
+  bg.setAttribute('rx', textH*0.28);
+  bg.setAttribute('class','recovery-callout-label-bg');
+  grp.appendChild(bg);
+  const text = document.createElementNS(ns,'text');
+  text.setAttribute('x', goLeft ? (bgX + textW - fontSize*0.5) : (bgX + fontSize*0.5));
+  text.setAttribute('y', ey + fontSize*0.32);
+  text.setAttribute('text-anchor', goLeft ? 'end' : 'start');
+  text.setAttribute('direction', 'rtl');
+  text.setAttribute('class','recovery-callout-label-text');
+  text.setAttribute('font-size', fontSize);
+  text.textContent = label;
+  grp.appendChild(text);
+  svg.appendChild(grp);
+  requestAnimationFrame(()=> requestAnimationFrame(()=> grp.classList.add('show')));
+}
+document.getElementById('recoveryImgStage')?.addEventListener('click', recoveryHandleTap);
+
+document.getElementById('recoveryGenderSeg')?.addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-val]');
+  if(!btn) return;
+  storeData.profile.recoveryGender = btn.dataset.val;
+  storeData.lastModified = new Date().toISOString();
+  window.storage.set('checklist:data', JSON.stringify(storeData)).catch(()=>{});
+  renderRecoveryTab();
+});
+document.getElementById('recoveryViewSeg')?.addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-val]');
+  if(!btn) return;
+  storeData.profile.recoveryView = btn.dataset.val;
+  storeData.lastModified = new Date().toISOString();
+  window.storage.set('checklist:data', JSON.stringify(storeData)).catch(()=>{});
+  renderRecoveryTab();
+});
+
 function renderWoHistory(){
   const wh = storeData.woHistory || {count:0, totalMinutes:0, qualitySum:0, qualityCount:0, history:[]};
   const totalCard = document.getElementById('woHistTotalCard');
@@ -16251,23 +17932,40 @@ function renderWoHistory(){
       <div class="fsc-row"><span>تاریخ</span><span>${dateStr} · ${timeStr}</span></div>
       <div class="fsc-row"><span>مدت زمان</span><span>${woFormatDuration(h.minutes||0)}</span></div>
       <div class="fsc-row"><span>حرکت‌های انجام‌شده</span><span>${toFa(h.exercisesDone||0)} از ${toFa(h.exercisesTotal||0)}</span></div>
+      ${woMuscleEngagementRowHtml(h.muscleEngagement)}
     </div>`;
   }).join('');
 }
+// نمایش موقتِ خروجی موتور تشخیصِ عضله (فقط متنی، برای اطمینان از دقتش) — رنگ‌کردن
+// نقشه‌ی بدن قدم بعدیه و اینجا دست نمی‌زنیم.
+function woMuscleEngagementRowHtml(engagement){
+  if(!engagement || !engagement.length) return '';
+  const top = engagement.slice(0, 5)
+    .map(e=> e.label + ' ' + toFa(e.score) + '٪')
+    .join('، ');
+  return `<div class="fsc-row" style="align-items:flex-start;"><span>عضلات درگیر</span><span style="flex:1;margin-inline-start:8px;">${top}</span></div>`;
+}
 
 function saveWoPrefs(){
-  storeData.workoutPrefs = { focus: woFocus.slice(), split: woSplit, access: woAccess, level: woLevel, goal: woGoal, onboarded: true };
+  storeData.workoutPrefs = { focus: woFocus.slice(), weak: woWeak.slice(), strong: woStrong.slice(), split: woSplit, access: woAccess, level: woLevel, goal: woGoal, duration: woDuration, exCount: woExCount, onboarded: true, cycleIndex: woCycleIndex, cycleStartedAt: woCycleStartedAt,
+    customSplit: woCustomSplit ? woCustomSplit.map(d=>({label:d.label, sub:d.sub, muscles:d.muscles.slice()})) : null };
   saveData();
 }
 function showWorkoutOnboarding(){
   document.getElementById('woOnboard').style.display = '';
   document.getElementById('woMainContent').style.display = 'none';
-  woObSelected = { level:'', goal:'', access:'', split:'', focus:[] };
+  document.getElementById('woOBFieldsStep').style.display = '';
+  document.getElementById('woOBSplitConfirmStep').style.display = 'none';
+  woObSelected = { level:'', goal:'', access:'', split:'', duration:'', exCount:'', focus:[], weak:[], strong:[] };
   setSegActive('woOBLevelSeg', '');
   setSegActive('woOBGoalSeg', '');
   setSegActive('woOBAccessSeg', '');
   setSegActive('woOBSplitSeg', '');
+  setSegActive('woOBDurationSeg', '');
+  setSegActive('woOBExCountSeg', '');
   setChipActive('woOBFocusChips', []);
+  setChipActive('woOBWeakChips', []);
+  setChipActive('woOBStrongChips', []);
   document.getElementById('woOBErr').style.display = 'none';
   applyWoPremiumLocksUI();
 }
@@ -16275,10 +17973,14 @@ function showWorkoutMain(){
   document.getElementById('woOnboard').style.display = 'none';
   document.getElementById('woMainContent').style.display = '';
   setChipActive('woFocusChips', woFocus);
+  setChipActive('woWeakChips', woWeak);
+  setChipActive('woStrongChips', woStrong);
   setSegActive('woSplitSeg', String(woSplit));
   setSegActive('woAccessSeg', woAccess);
   setSegActive('woLevelSeg', woLevel);
   setSegActive('woGoalSeg', woGoal);
+  setSegActive('woDurationSeg', String(woDuration));
+  setSegActive('woExCountSeg', woExCount);
   woActiveDay = 0;
   applyWoPremiumLocksUI();
   renderWoDayPills();
@@ -16294,10 +17996,22 @@ function initWorkoutTab(){
     // شدتِ برنامه‌ی «امروز». اگه بعداً پرمیوم بشه، همون انتخاب‌های قبلیش بدون تغییر برمی‌گردن.
     const isPremiumUser = !!(storeData.premium || (typeof isInTrial === 'function' && isInTrial()));
     woFocus = isPremiumUser ? (wp.focus || []) : [];
+    woWeak = isPremiumUser ? (wp.weak || []) : [];
+    woStrong = isPremiumUser ? (wp.strong || []) : [];
     woSplit = (isPremiumUser || wp.split === 3) ? (wp.split || 3) : 3;
+    // چیدمان دستی فقط وقتی معتبره که طولش با تعداد روز فعلی (بعد از کلمپ رایگان/پرمیوم) جور باشه؛
+    // وگرنه بی‌صدا به پیشنهاد پیش‌فرض همون split برمی‌گردیم (getActiveSplitTemplate خودش این چک رو هم داره).
+    woCustomSplit = (wp.customSplit && wp.customSplit.length === woSplit)
+      ? wp.customSplit.map(d=>({label:d.label, sub:d.sub, muscles:(d.muscles||[]).slice()}))
+      : null;
     woAccess = wp.access || (storeData.profile.exerciseAccess==='gym' ? 'gym' : 'home');
     woLevel = (isPremiumUser || wp.level === 'intermediate') ? (wp.level || 'intermediate') : 'intermediate';
     woGoal = wp.goal || 'bulk';
+    woDuration = (isPremiumUser || wp.duration === 60) ? (wp.duration || 60) : 60;
+    woExCount = (isPremiumUser || wp.exCount === 'medium') ? (wp.exCount || 'medium') : 'medium';
+    woCycleIndex = typeof wp.cycleIndex === 'number' ? wp.cycleIndex : 0;
+    woCycleStartedAt = wp.cycleStartedAt || Date.now();
+    if(!wp.cycleStartedAt){ wp.cycleIndex = woCycleIndex; wp.cycleStartedAt = woCycleStartedAt; saveData(); }
     showWorkoutMain();
   } else {
     woAccess = storeData.profile.exerciseAccess==='gym' ? 'gym' : 'home';
@@ -16331,18 +18045,144 @@ document.getElementById('woOBFocusChips').addEventListener('click', (e)=>{
   else { if(woObSelected.focus.length>=2) woObSelected.focus.shift(); woObSelected.focus.push(v); }
   setChipActive('woOBFocusChips', woObSelected.focus);
 });
+document.getElementById('woOBDurationSeg').querySelectorAll('button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    if(btn.dataset.val!=='60' && !requirePremium()) return;
+    woObSelected.duration = btn.dataset.val; setSegActive('woOBDurationSeg', woObSelected.duration);
+  });
+});
+document.getElementById('woOBExCountSeg').querySelectorAll('button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    if(btn.dataset.val!=='medium' && !requirePremium()) return;
+    woObSelected.exCount = btn.dataset.val; setSegActive('woOBExCountSeg', woObSelected.exCount);
+  });
+});
+document.getElementById('woOBWeakChips').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  if(!requirePremium()) return;
+  const v = btn.dataset.val;
+  const idx = woObSelected.weak.indexOf(v);
+  if(idx>=0) woObSelected.weak.splice(idx,1);
+  else {
+    if(woObSelected.weak.length>=3) woObSelected.weak.shift();
+    woObSelected.weak.push(v);
+    const si = woObSelected.strong.indexOf(v); if(si>=0){ woObSelected.strong.splice(si,1); setChipActive('woOBStrongChips', woObSelected.strong); }
+  }
+  setChipActive('woOBWeakChips', woObSelected.weak);
+});
+document.getElementById('woOBStrongChips').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  if(!requirePremium()) return;
+  const v = btn.dataset.val;
+  const idx = woObSelected.strong.indexOf(v);
+  if(idx>=0) woObSelected.strong.splice(idx,1);
+  else {
+    if(woObSelected.strong.length>=3) woObSelected.strong.shift();
+    woObSelected.strong.push(v);
+    const wi = woObSelected.weak.indexOf(v); if(wi>=0){ woObSelected.weak.splice(wi,1); setChipActive('woOBWeakChips', woObSelected.weak); }
+  }
+  setChipActive('woOBStrongChips', woObSelected.strong);
+});
 document.getElementById('woOBSubmitBtn').addEventListener('click', ()=>{
-  if(!woObSelected.level || !woObSelected.goal || !woObSelected.access || !woObSelected.split){
+  if(!woObSelected.level || !woObSelected.goal || !woObSelected.access || !woObSelected.split || !woObSelected.duration || !woObSelected.exCount){
     document.getElementById('woOBErr').style.display = 'block';
     return;
   }
   document.getElementById('woOBErr').style.display = 'none';
+  // قبل از ساخت نهایی برنامه، یه مرحله‌ی «تایید چیدمان جلسه‌ها» نشون می‌دیم: طبق split
+  // انتخابی، پیشنهاد می‌دیم کدوم عضله‌ها روز اول/دوم/... تمرین بشن، و کاربر می‌تونه
+  // همینو تایید کنه یا خودش عضله‌ها رو بین روزها جابه‌جا کنه.
+  document.getElementById('woOBFieldsStep').style.display = 'none';
+  document.getElementById('woOBSplitConfirmStep').style.display = '';
+  renderWoSplitConfirmStep();
+  window.scrollTo(0, 0);
+});
+/* ==================== مرحله‌ی تایید چیدمان جلسه‌ها ====================
+   این بخش هم توی آنبورد اول و هم توی «بازسازی برنامه از اول» (که woRedoOnboardBtn
+   دقیقاً همین ویزارد رو دوباره باز می‌کنه) اجرا می‌شه — یعنی وقتی کاربر بعد از یک ماه
+   برنامه‌شو از نو می‌سازه، دقیقاً همین مرحله‌ی پیشنهاد و تایید چیدمان دوباره نشونش داده می‌شه. */
+const WO_SPLIT_MUSCLE_ORDER = ['chest','back','shoulders','biceps','triceps','legs','glutes','abs'];
+function cloneSuggestedSplit(n){
+  return (SPLIT_TEMPLATES[n]||[]).map(d=>({label:d.label, sub:d.sub, muscles:d.muscles.slice()}));
+}
+function buildSplitDayLabel(muscles){
+  return muscles.map(m=> MUSCLE_LABELS[m]||m).join(' و ');
+}
+let woSplitAssign = {};   // muscle -> dayIndex, حالتِ درحالِ‌ویرایشِ این مرحله
+let woSplitDayLabels = [];
+function renderWoSplitConfirmStep(){
+  const n = parseInt(woObSelected.split, 10);
+  const suggestion = cloneSuggestedSplit(n);
+  woSplitDayLabels = suggestion.map(d=>d.label);
+  // اگه کاربر قبلاً یه چیدمان دستی با همین تعداد روز داشته (مثلاً داره برنامه‌شو بعد از
+  // یک ماه بازسازی می‌کنه)، همونو به‌عنوان نقطه‌ی شروع می‌ذاریم؛ وگرنه از پیشنهاد پیش‌فرض.
+  const prevSaved = storeData.workoutPrefs && storeData.workoutPrefs.customSplit;
+  const source = (prevSaved && prevSaved.length === n) ? prevSaved : suggestion;
+  woSplitAssign = {};
+  source.forEach((day,i)=> (day.muscles||[]).forEach(m=>{ woSplitAssign[m] = i; }));
+  suggestion.forEach((day,i)=> day.muscles.forEach(m=>{ if(!(m in woSplitAssign)) woSplitAssign[m] = i; }));
+  document.getElementById('woOBSplitConfirmIntro').textContent =
+    'طبق جواب‌هایی که دادی (برنامه‌ی ' + toFa(n) + ' روزه، سطح ' + (WO_LEVEL_LABELS[woObSelected.level]||'') + ')، این چیدمان رو پیشنهاد می‌دیم:';
+  document.getElementById('woOBSplitConfirmErr').style.display = 'none';
+  paintWoSplitConfirm();
+}
+function paintWoSplitConfirm(){
+  const n = woSplitDayLabels.length;
+  const dayMuscles = Array.from({length:n}, ()=>[]);
+  WO_SPLIT_MUSCLE_ORDER.forEach(m=>{
+    const d = woSplitAssign[m];
+    if(typeof d === 'number' && dayMuscles[d]) dayMuscles[d].push(m);
+  });
+  document.getElementById('woOBSplitSummary').innerHTML = woSplitDayLabels.map((label,i)=>
+    `<div class="split-confirm-day"><div class="split-confirm-day-title">${label}</div><div class="split-confirm-day-sub">${dayMuscles[i].length ? dayMuscles[i].map(m=>MUSCLE_LABELS[m]).join('، ') : 'هنوز عضله‌ای نداره — حداقل یکی رو بنداز اینجا'}</div></div>`
+  ).join('');
+  document.getElementById('woOBSplitRows').innerHTML = WO_SPLIT_MUSCLE_ORDER.map(m=>{
+    const dayBtns = woSplitDayLabels.map((label,i)=>
+      `<button type="button" class="split-day-btn${woSplitAssign[m]===i?' active':''}" data-muscle="${m}" data-day="${i}">${toFa(i+1)}</button>`
+    ).join('');
+    return `<div class="split-muscle-row"><span class="split-muscle-name">${MUSCLE_LABELS[m]}</span><div class="split-day-btns">${dayBtns}</div></div>`;
+  }).join('');
+}
+document.getElementById('woOBSplitRows').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.split-day-btn'); if(!btn) return;
+  woSplitAssign[btn.dataset.muscle] = parseInt(btn.dataset.day, 10);
+  document.getElementById('woOBSplitConfirmErr').style.display = 'none';
+  paintWoSplitConfirm();
+});
+document.getElementById('woOBSplitBackBtn').addEventListener('click', ()=>{
+  document.getElementById('woOBSplitConfirmStep').style.display = 'none';
+  document.getElementById('woOBFieldsStep').style.display = '';
+  window.scrollTo(0, 0);
+});
+document.getElementById('woOBSplitConfirmBtn').addEventListener('click', ()=>{
+  const n = woSplitDayLabels.length;
+  const dayMuscles = Array.from({length:n}, ()=>[]);
+  WO_SPLIT_MUSCLE_ORDER.forEach(m=>{
+    const d = woSplitAssign[m];
+    if(typeof d === 'number' && dayMuscles[d]) dayMuscles[d].push(m);
+  });
+  if(dayMuscles.some(list=> !list.length)){
+    document.getElementById('woOBSplitConfirmErr').style.display = 'block';
+    return;
+  }
+  const suggestion = cloneSuggestedSplit(n);
+  woCustomSplit = suggestion.map((d,i)=> ({ label: d.label, sub: buildSplitDayLabel(dayMuscles[i]), muscles: dayMuscles[i] }));
+
   woLevel = woObSelected.level;
   woGoal = woObSelected.goal;
   woAccess = woObSelected.access;
-  woSplit = parseInt(woObSelected.split, 10);
+  woSplit = n;
+  woDuration = parseInt(woObSelected.duration, 10);
+  woExCount = woObSelected.exCount;
   woFocus = woObSelected.focus.slice();
+  woWeak = woObSelected.weak.slice();
+  woStrong = woObSelected.strong.slice();
+  const prevWp = storeData.workoutPrefs;
+  woCycleIndex = (prevWp && typeof prevWp.cycleIndex === 'number') ? prevWp.cycleIndex + 1 : 0;
+  woCycleStartedAt = Date.now();
   saveWoPrefs();
+  document.getElementById('woOBSplitConfirmStep').style.display = 'none';
+  document.getElementById('woOBFieldsStep').style.display = '';
   showWorkoutMain();
   showToast('برنامه‌ی تمرینیت آماده شد 💪', 'success');
 });
@@ -16393,8 +18233,59 @@ document.getElementById('woGoalSeg').querySelectorAll('button').forEach(btn=>{
     renderWoExercises();
   });
 });
+document.getElementById('woDurationSeg').querySelectorAll('button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    if(btn.dataset.val!=='60' && !requirePremium()) return;
+    woDuration = parseInt(btn.dataset.val,10);
+    setSegActive('woDurationSeg', String(woDuration));
+    saveWoPrefs();
+    renderWoExercises();
+  });
+});
+document.getElementById('woExCountSeg').querySelectorAll('button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    if(btn.dataset.val!=='medium' && !requirePremium()) return;
+    woExCount = btn.dataset.val;
+    setSegActive('woExCountSeg', woExCount);
+    saveWoPrefs();
+    renderWoExercises();
+  });
+});
+document.getElementById('woWeakChips').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  if(!requirePremium()) return;
+  const v = btn.dataset.val;
+  const idx = woWeak.indexOf(v);
+  if(idx>=0) woWeak.splice(idx,1);
+  else {
+    if(woWeak.length>=3) woWeak.shift();
+    woWeak.push(v);
+    const si = woStrong.indexOf(v); if(si>=0){ woStrong.splice(si,1); setChipActive('woStrongChips', woStrong); }
+  }
+  setChipActive('woWeakChips', woWeak);
+  saveWoPrefs();
+  renderWoExercises();
+});
+document.getElementById('woStrongChips').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  if(!requirePremium()) return;
+  const v = btn.dataset.val;
+  const idx = woStrong.indexOf(v);
+  if(idx>=0) woStrong.splice(idx,1);
+  else {
+    if(woStrong.length>=3) woStrong.shift();
+    woStrong.push(v);
+    const wi = woWeak.indexOf(v); if(wi>=0){ woWeak.splice(wi,1); setChipActive('woWeakChips', woWeak); }
+  }
+  setChipActive('woStrongChips', woStrong);
+  saveWoPrefs();
+  renderWoExercises();
+});
 document.getElementById('woRedoOnboardBtn').addEventListener('click', ()=>{
   showWorkoutOnboarding();
+});
+document.getElementById('woRenewCycleBtn').addEventListener('click', ()=>{
+  renewWorkoutCycle();
 });
 
 /* ==================== Onboarding wizard controller ==================== */
@@ -16630,9 +18521,17 @@ function openOnboarding(editMode){
     document.getElementById('obHealthTagOtherWrap').style.display = 'none';
   }
   document.getElementById('onboardOverlay').classList.add('show');
+  // دروازه‌ی «خودکار/دستی/بدون برنامه» فقط دفعه‌ی اول (نه وقتی از تنظیمات برای
+  // ویرایش پروفایل باز می‌شه — اونجا کاربر از قبل حالتشو انتخاب کرده).
+  document.getElementById('onboardOverlay').classList.toggle('mode-gate', !editMode);
   showObStep(0);
   maybeSuggestIntroNarration();
 }
+document.getElementById('obModeAutoBtn').addEventListener('click', ()=>{
+  document.getElementById('onboardOverlay').classList.remove('mode-gate');
+});
+document.getElementById('obModeManualBtn').addEventListener('click', enterManualProgramSetup);
+document.getElementById('obModeNoneBtn').addEventListener('click', enterNoProgramMode);
 function finishOnboarding(){
   const firstName = document.getElementById('obFirstName').value.trim() || 'دوست من';
   const lastName = document.getElementById('obLastName').value.trim();
@@ -16676,7 +18575,7 @@ function finishOnboarding(){
     commitmentReward: obSelected.commitmentReward, commitmentRewardOther: rewardOther,
     commitmentPunishment: obSelected.commitmentPunishment, commitmentPunishOther: punishOther,
     health,
-    onboardingComplete: true
+    onboardingComplete: true, noProgramMode: false, manualProgramMode: false
   });
   storeData.whyText = whyText;
   if(contactName) storeData.supportContact = { name: contactName, phone: contactPhone };
@@ -16739,8 +18638,98 @@ function skipOnboarding(){
   showToast('باشه، فعلاً با برنامه‌ی عمومی شروع کن — هر وقت خواستی از منو تکمیلش کن', 'info');
 }
 document.getElementById('obSkipBtn').addEventListener('click', skipOnboarding);
+
+/* ---- «حالت بدون برنامه»: برای کسایی که اصلاً چک‌لیست/برنامه‌ی روزانه نمی‌خوان و فقط
+   دنبال روزشمار، یادداشت روزانه و بقیه‌ی امکانات اپن (تمرین، مدیتیشن، فن بیان، مشاور،
+   کتابخانه و...). خودِ روزشمار (streakLiveCard) کاملاً مستقل از این حالته — بر پایه‌ی
+   storeData.startTimestamp کار می‌کنه، نه روی چک‌لیست — پس هیچ تغییری توش نمی‌افته.
+   فقط زیرتب‌های چک‌لیست/برنامه‌های من/برنامه فردا و بخش‌های وابسته‌ی «سبک برنامه» و
+   «روز خاص» تو تب امروز مخفی می‌شن (با کلاس no-program-mode روی body، تو CSS).
+   کاملاً برگشت‌پذیره — از تنظیمات یا با تکمیل کامل ویزارد شخصی‌سازی خاموش می‌شه. */
+function enterNoProgramMode(){
+  if(obEditMode){
+    // از تنظیمات («شخصی‌سازی برنامه» / ویرایش پروفایل) باز شده — فقط حالت رو روشن کن،
+    // بدون دست‌کاری بقیه‌ی پروفایلی که قبلاً ثبت شده.
+    storeData.profile.noProgramMode = true;
+    storeData.profile.manualProgramMode = false;
+    saveData();
+    document.getElementById('onboardOverlay').classList.remove('show');
+    applyNoProgramModeUI();
+    applyManualProgramModeUI();
+    render();
+    showToast('باشه، از الان فقط روزشمار و بقیه‌ی امکانات رو می‌بینی 🎯', 'info');
+    return;
+  }
+  // اولین بار (بدون اکانت/پروفایل قبلی): بذار وارد اپ بشه، بدون هیچ چک‌لیستی.
+  storeData.profile = Object.assign(defaultProfile(), storeData.profile, { onboardingSkipped:true, noProgramMode:true, manualProgramMode:false });
+  saveData();
+  document.getElementById('onboardOverlay').classList.remove('show');
+  currentPhase = getPhase(pacedProgramDay());
+  entry.total = totalToday();
+  applyNoProgramModeUI();
+  applyManualProgramModeUI();
+  render();
+  updatePersonalizeHints();
+  showToast('باشه! فقط روزشمار، یادداشت روزانه و بقیه‌ی امکانات رو می‌بینی — هر وقت خواستی از تنظیمات برنامه رو فعال کن', 'info');
+}
+document.getElementById('obNoProgramBtn').addEventListener('click', enterNoProgramMode);
+function applyNoProgramModeUI(){
+  const on = !!(storeData.profile && storeData.profile.noProgramMode);
+  document.body.classList.toggle('no-program-mode', on);
+  const label = document.getElementById('tabLabelToday');
+  if(label) label.textContent = on ? 'روزشمار' : (storeData.profile && storeData.profile.manualProgramMode ? 'برنامه‌ی من' : 'برنامه');
+  if(on){
+    const todayPanel = document.getElementById('tab-today');
+    if(todayPanel){
+      const seg = todayPanel.querySelector('.subseg');
+      if(seg) seg.querySelectorAll('button[data-sub]').forEach(b=> b.classList.toggle('active', b.dataset.sub==='overview'));
+      todayPanel.querySelectorAll('.sub-panel').forEach(p=> p.classList.toggle('active', p.dataset.sub==='overview'));
+    }
+  }
+  const toggle = document.getElementById('noProgramModeToggle');
+  if(toggle) toggle.checked = on;
+}
+
+/* ---- «برنامه‌ی دستی»: کاربر به‌جای برنامه‌ی خودکارِ فازبندی‌شده، خودش با ابزار
+   «ساخت برنامه» (زیرتب جدید تو تب امروز) برای چند روز جلوتر do/avoid می‌نویسه.
+   getDoItems/getAvoidItems (بالای همین فایل) وقتی این حالت روشنه، دیگه سراغ استخر
+   خودکار نمی‌رن — فقط customItems (کارهای همیشگی) + entry.extraDoItems/avoidItems
+   (کارهای مخصوص همون روز، از ابزار چندروزه) رو برمی‌گردونن. بقیه‌ی امتیازدهی/استریک/
+   XP/بج‌ها دست‌نخورده از همون دو تابع می‌خونن، پس چیزی جز منبعِ آیتم‌ها عوض نمی‌شه. */
+function enterManualProgramSetup(){
+  if(obEditMode){
+    storeData.profile.manualProgramMode = true;
+    storeData.profile.noProgramMode = false;
+    saveData();
+    document.getElementById('onboardOverlay').classList.remove('show');
+    applyNoProgramModeUI();
+    applyManualProgramModeUI();
+    render();
+    openManualPlanBuilder();
+    showToast('باشه! حالا خودت برنامه‌ی روزهاتو بچین 📝', 'info');
+    return;
+  }
+  // اولین بار: بدون هیچ سوالی وارد اپ بشه — سریع‌ترین راه ممکن برای رسیدن به ابزار.
+  storeData.profile = Object.assign(defaultProfile(), storeData.profile, { onboardingSkipped:true, manualProgramMode:true, noProgramMode:false });
+  saveData();
+  document.getElementById('onboardOverlay').classList.remove('show');
+  currentPhase = getPhase(pacedProgramDay());
+  entry.total = totalToday();
+  applyNoProgramModeUI();
+  applyManualProgramModeUI();
+  render();
+  updatePersonalizeHints();
+  openManualPlanBuilder();
+  showToast('خودت برنامه‌تو بچین — هر چی برای امروز اضافه کنی همین الان جزو چک‌لیستته 📝', 'info');
+}
+function applyManualProgramModeUI(){
+  const on = !!(storeData.profile && storeData.profile.manualProgramMode);
+  document.body.classList.toggle('manual-program-mode', on);
+  const toggle = document.getElementById('manualProgramModeToggle');
+  if(toggle) toggle.checked = on;
+}
 function updatePersonalizeHints(){
-  const done = !!(storeData.profile && storeData.profile.onboardingComplete);
+  const done = !!(storeData.profile && (storeData.profile.onboardingComplete || storeData.profile.noProgramMode || storeData.profile.manualProgramMode));
   document.querySelectorAll('#personalizeHintBanner, #personalizeHintBanner2').forEach(el=>{
     if(!el) return;
     el.style.display = done ? 'none' : 'flex';
@@ -17015,7 +19004,13 @@ function handleAppForegroundChange(isActive){
   lastAppForegroundState = isActive;
   if(isActive){
     try{ sb.auth.startAutoRefresh(); }catch(e){}
-    sb.auth.getSession().then(({data})=> handlePublicChatSession(data.session)).catch(()=>{});
+    // اگه اینجا هم سشن null برگرده (و خودمون عمداً signOut نزده باشیم)، همون مسیر
+    // «چندبار دوباره چک کن قبل از باور کردن» رو طی می‌کنیم، نه خروج فوری —
+    // دقیقاً همون دلیلی که initChatAuth's onAuthStateChange این کار رو می‌کنه.
+    sb.auth.getSession().then(({data})=>{
+      if(!data.session && !intentionalSignOut) confirmRealSignOut();
+      else handlePublicChatSession(data.session);
+    }).catch(()=>{});
   } else {
     try{ sb.auth.stopAutoRefresh(); }catch(e){}
   }
@@ -17270,7 +19265,24 @@ const PREMIUM_SKU_BY_DISCOUNT = { 0: 'premium', 20: 'premium_20off', 30: 'premiu
 function currentPremiumSku(){
   return PREMIUM_SKU_BY_DISCOUNT[myDiscount.percent] || 'premium';
 }
-function openPremiumPage(){
+async function openPremiumPage(){
+  // ابتدا profile رو از سرور refresh کنیم تا مطمئن شویم premium status صحیح است
+  // این جلوگیری می‌کند از اینکه کاربر پرمیوم دکمهٔ خرید ببیند
+  try{
+    if(publicChatUser && publicChatUser.id){
+      const res = await sb.from('profiles').select('premium_until, referral_code, discount_percent, discount_code, wheel_spun').eq('id', publicChatUser.id).single();
+      if(res.data){
+        myProfileCache = res.data;
+        // premium status رو دقیق بر اساس سرور update کنیم
+        storeData.premium = isAppOwner || !!(res.data.premium_until && new Date(res.data.premium_until) > new Date());
+        saveData();
+      }
+    }
+  }catch(err){
+    console.warn('Failed to refresh premium status before opening premium page:', err);
+    // اگه fetch fail شد، حداقل UI رو بر اساس آخرین storeData refresh کنیم
+  }
+  
   let discBadge = document.getElementById('premiumDiscountBadge');
   if(!discBadge){
     discBadge = document.createElement('div');
@@ -17290,6 +19302,7 @@ function openPremiumPage(){
     discBadge.onclick = ()=>{ enterSubPage('invite'); };
   }
   renderPremiumPurchaseUI();
+  applyPremiumLocksUI(); // اطمینان دهیم که قفل‌ها به‌روز شوند
   loadLifetimeRemaining();
   enterSubPage('premium');
 }
@@ -17437,7 +19450,7 @@ document.getElementById('premiumCheckBtn').addEventListener('click', async ()=>{
 
 document.getElementById('aiGatePremiumBtn').addEventListener('click', ()=>{
   hideAIGate();
-  openPremiumPage();
+  openPremiumPage().catch(err=>console.error('Error opening premium page:', err));
 });
 document.getElementById('aiGateCloseBtn').addEventListener('click', ()=>{
   hideAIGate();
