@@ -9043,6 +9043,7 @@ document.querySelectorAll('.subseg').forEach(seg=>{
       seg.querySelectorAll('button[data-sub]').forEach(b=>b.classList.remove('active'));
       panel.querySelectorAll('.sub-panel').forEach(p=>p.classList.remove('active'));
       btn.classList.add('active');
+      btn.scrollIntoView({behavior:'smooth', block:'nearest', inline:'nearest'});
       const target = panel.querySelector('.sub-panel[data-sub="'+btn.dataset.sub+'"]');
       if(target) target.classList.add('active');
       if(panel.id === 'tab-today' && btn.dataset.sub === 'program') maybeSuggestTodayNarration();

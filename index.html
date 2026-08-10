@@ -2337,10 +2337,12 @@
     border-radius:9px;cursor:pointer;font-weight:700;}
   .seg button.active{background:var(--accent);color:var(--accent-text);}
   .subseg{display:flex;background:var(--card-2);border:1px solid var(--line);border-radius:14px;
-    padding:4px;gap:4px;margin-bottom:14px;}
-  .subseg button{flex:1;border:none;background:none;font-family:inherit;font-size:12.5px;color:var(--muted);
-    padding:10px 8px;border-radius:11px;cursor:pointer;font-weight:800;display:flex;align-items:center;
-    justify-content:center;gap:6px;}
+    padding:4px;gap:4px;margin-bottom:14px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;
+    scrollbar-width:none;-ms-overflow-style:none;}
+  .subseg::-webkit-scrollbar{display:none;height:0;}
+  .subseg button{flex:0 0 auto;border:none;background:none;font-family:inherit;font-size:12.5px;color:var(--muted);
+    padding:10px 12px;border-radius:11px;cursor:pointer;font-weight:800;display:flex;align-items:center;
+    justify-content:center;gap:6px;white-space:nowrap;scroll-snap-align:start;}
   .subseg button.active{background:var(--accent);color:var(--accent-text);box-shadow:0 3px 10px rgba(255,154,61,.35);}
   .subseg button .subic{display:flex;align-items:center;justify-content:center;flex-shrink:0;}
   .subseg button .subic svg{width:15px;height:15px;display:block;}
