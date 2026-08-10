@@ -1705,7 +1705,7 @@ function defaultStoreData(){
     lbPrivacy:{age:false, habit:false, programLen:false, titles:false}, lbLastRank:null,
     reportSentDates:{}, aiFeatureUseCount:{}, xpPenaltyStartDate:null,
     riskNudge:{dismissedKey:null, lastNotifLevel:null},
-    tagAffinity:{} };
+    tagAffinity:{}, dailyUsageMinutes:{}, dailyFeatureLog:{} };
 }
 let storeData = defaultStoreData();
 let today = todayKey();
@@ -1890,11 +1890,29 @@ async function authHeaders(){
    خودِ سرور 402 بگیره) آخرش به همون مقصد ختم می‌شه. برای بقیه‌ی خطاها (400/401/500 و ...)
    فقط همون توست قبلی نشون داده می‌شه، چون ربطی به پرمیوم ندارن. */
 function handleAiWorkerError(response, data){
-  const msg = (data && data.error) || 'مشکلی پیش اومد، دوباره امتحان کن';
+  let msg = (data && data.error) || 'مشکلی پیش اومد، دوباره امتحان کن';
+  // پیام خامِ سرور گاهی به‌جای یه توضیح قابل‌فهم، مستقیم اسم سرویسِ زیرساختی (Groq) رو
+  // نشون می‌ده — که کاربر نه معنیش رو می‌فهمه نه به کارش میاد؛ جایگزینِ عمومی می‌شه.
+  if(/groq/i.test(msg)) msg = 'خطای نامشخص';
   showToast(msg, 'error');
   if(response.status === 402){
     setTimeout(()=>{ if(typeof openPremiumPage === 'function') { openPremiumPage().catch(err=>console.error('Error opening premium page:', err)); } }, 700);
   }
+}
+/* وقتیcatch یه fetch رو می‌گیره، دو تا حالتِ کاملاً متفاوته: یا خودِ درخواست هیچ‌وقت به
+   سرور نرسیده (شبکه/DNS/فیلترینگ — دقیقاً همون چیزی که بدونِ فیلترشکن سراغِ کاربرهای
+   ایرانی میاد، چون Cloudflare Workers/Groq از ایران فیلتره)، یا درخواست رفت و برگشت ولی
+   جواب/پردازششیده معتبر نبود (JSON خراب، خطای منطقی و...). قبلاً هر دو حالت با یه پیامِ
+   یکسان و گمراه‌کننده مثل «پاسخ نامعتبر بود» نشون داده می‌شد؛ این تابع تشخیص می‌ده کدوم
+   حالته و برای حالتِ شبکه یه پیامِ دقیق و کاربردی (روشن‌کردنِ VPN) برمی‌گردونه، وگرنه
+   همون پیامِ fallback مخصوصِ خودِ اون قابلیت رو حفظ می‌کنه. */
+function aiCatchErrorMessage(err, fallback){
+  const msg = (err && err.message) || '';
+  const isNetworkErr = (typeof TypeError !== 'undefined' && err instanceof TypeError)
+    || /failed to fetch|network|load failed|internet|dns/i.test(msg);
+  return isNetworkErr
+    ? 'اتصال به سرویس هوش مصنوعی برقرار نشد؛ به‌نظر می‌رسه این بخش بدون فیلترشکن در دسترس نیست — VPN رو روشن کن و دوباره امتحان کن'
+    : (fallback || 'مشکلی پیش اومد، دوباره امتحان کن');
 }
 const AI_FEATURE_LABELS = { nightReview:'تحلیل شب', weeklyReview:'گزارش هفتگی', letter:'نامه‌ی آینده', libDeep:'کتابخونه‌ی عمیق', libWeekly:'مقاله‌ی هفته', lifeAnalyzer:'دفترچه هوشمند زندگی' };
 const LJ_REQUIRED_DAYS = 90;
@@ -2764,7 +2782,7 @@ ${weightLine}هدف تقریبی کالری/پروتئین امروز بر اس�
     showToast('تحلیل امشب آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('پاسخ نامعتبر بود، دوباره امتحان کن', 'error');
+    showToast(aiCatchErrorMessage(err, 'پاسخ نامعتبر بود، دوباره امتحان کن'), 'error');
   }finally{
     btn.disabled = false;
     btn.textContent = entry.nightReview ? '🔄 دوباره تحلیل کن' : '✅ تایید و تحلیل امشب';
@@ -2939,6 +2957,18 @@ function computeMeditationStreak(){
   }
   return streak;
 }
+// ---- لاگ روزانه‌ی «چه آپشن‌هایی امروز استفاده شد» (برای تب تاریخچه‌ی برنامه) ----
+// یه شمارنده‌ی ساده به‌ازای هر روز و هر کلید فیچر نگه می‌داره. فقط برای فیچرهایی که قبلاً
+// جای دیگه‌ای به‌صورت روزمند/تاریخ‌دار ثبت نمی‌شدن (مدیتیشن فقط true/false داره، بازی‌های
+// مغزی و فن بیان اصلاً تاریخ ثبت نمی‌کردن) — تمرین و حالت‌های تمرکز خودشون از قبل تاریخ‌دار
+// ثبت می‌شن (woHistory / focusSessions) و مستقیم از همونا خونده می‌شن، نه از اینجا.
+function logDailyFeatureUse(key){
+  if(!storeData.dailyFeatureLog) storeData.dailyFeatureLog = {};
+  const k = todayKey();
+  if(!storeData.dailyFeatureLog[k]) storeData.dailyFeatureLog[k] = {};
+  storeData.dailyFeatureLog[k][key] = (storeData.dailyFeatureLog[k][key]||0) + 1;
+  saveData();
+}
 function logMeditationCompletion(){
   if(!storeData.meditationLog) storeData.meditationLog = {};
   const d = new Date();
@@ -2949,6 +2979,7 @@ function logMeditationCompletion(){
     if(s > (storeData.maxMeditationStreak||0)) storeData.maxMeditationStreak = s;
     saveData();
   }
+  try{ logDailyFeatureUse('meditation'); }catch(e){}
   try{ renderBadges(); }catch(err){}
 }
 /* ================= Header "catches fire" with the streak =================
@@ -4304,6 +4335,15 @@ function renderList(containerId, items, stateObj, avoid){
 
 let saveTimeout=null;
 function saveData(){
+  // چون getDoItems/getAvoidItems بر اساس فاز و روزِ برنامه‌یِ «امروز» محاسبه می‌شن، برای
+  // یه روزِ گذشته دیگه قابل‌اعتماد نیستن (ممکنه فاز عوض شده باشه). برای همین همین‌جا،
+  // هر بار که داده‌ی امروز ذخیره می‌شه، یه عکس‌فوری از متن دقیق کارها + وضعیت انجام‌شون
+  // داخل خودِ entry ذخیره می‌کنیم؛ این‌جوری تب «تاریخچه» می‌تونه برای هر روزی که از این به
+  // بعد ثبت بشه، اسم دقیق کارها رو نشون بده، نه فقط یه عدد خام.
+  try{
+    entry.doItemsSnapshot = getDoItems().map((label,i)=>({label, done: !!entry.done[i]}));
+    entry.avoidItemsSnapshot = getAvoidItems().map((label,i)=>({label, done: !!entry.avoidDone[i]}));
+  }catch(e){}
   storeData.entries[today]=entry;
   storeData.lastModified = new Date().toISOString();
   clearTimeout(saveTimeout);
@@ -5593,7 +5633,7 @@ ${prevSummary ? 'جمع‌بندی هفته‌ی قبل این بود: "'+prevSu
     showToast('گزارش هفتگی آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('پاسخ نامعتبر بود، دوباره امتحان کن', 'error');
+    showToast(aiCatchErrorMessage(err, 'پاسخ نامعتبر بود، دوباره امتحان کن'), 'error');
   }finally{
     btn.disabled=false;
     btn.textContent = storeData.weeklyReview ? '🔄 دوباره تحلیل کن' : 'تحلیل هفته اخیر';
@@ -5665,7 +5705,7 @@ ${prevSummary ? 'جمع‌بندی هفته‌ی قبل این بود: "'+prevSu
     showToast('جمع‌بندی درس‌های هفته آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('پاسخ نامعتبر بود، دوباره امتحان کن', 'error');
+    showToast(aiCatchErrorMessage(err, 'پاسخ نامعتبر بود، دوباره امتحان کن'), 'error');
   }finally{
     btn.disabled=false;
     btn.textContent = storeData.lessonsReview ? '🔄 دوباره جمع‌بندی کن' : 'جمع‌بندی درس‌های این هفته';
@@ -5727,7 +5767,7 @@ ${prevSummary ? 'جمع‌بندی ماه قبل این بود: "'+prevSummary+'
     showToast('گزارش ماهانه آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('پاسخ نامعتبر بود، دوباره امتحان کن', 'error');
+    showToast(aiCatchErrorMessage(err, 'پاسخ نامعتبر بود، دوباره امتحان کن'), 'error');
   }finally{
     btn.disabled=false;
     btn.textContent = storeData.monthlyReview ? '🔄 دوباره تحلیل کن' : 'تحلیل ماه اخیر';
@@ -5788,7 +5828,7 @@ async function generateLetter(){
     showToast('نامه‌ات آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('مشکلی پیش اومد، دوباره امتحان کن', 'error');
+    showToast(aiCatchErrorMessage(err, 'مشکلی پیش اومد، دوباره امتحان کن'), 'error');
   }finally{
     btn.disabled=false;
     btn.textContent = storeData.futureLetter ? '🔄 دوباره بنویس' : 'بنویس نامه‌ی من';
@@ -5883,7 +5923,7 @@ ${daysText}
     showToast('الگوهای زندگیت آماده شد ✨', 'success');
   }catch(err){
     console.error(err);
-    showToast('پاسخ نامعتبر بود، دوباره امتحان کن', 'error');
+    showToast(aiCatchErrorMessage(err, 'پاسخ نامعتبر بود، دوباره امتحان کن'), 'error');
   }finally{
     btn.disabled = false;
     btn.textContent = storeData.lifeAnalyzerReport ? '🔄 دوباره تحلیل کن' : '🔍 کشف الگوهای زندگیت';
@@ -5919,9 +5959,9 @@ function renderLifeAnalyzerResult(){
    کتابخونه، مدیتیشن، فن بیان، مشاور شخصی، پیشرفت، تنظیمات و...) بدون اکانت و کاملاً آزاده. ================= */
 const AUTH_GATE_TAB_LABELS = {
   chat:'چت', leaderboard:'لیدربورد', buddy:'هم‌مسیر', profile:'پروفایل',
-  invite:'دعوت از دوستان', goals:'اهداف من'
+  invite:'دعوت از دوستان', goals:'اهداف من', hokm:'بازی‌ها'
 };
-const PUBLIC_AUTH_TABS = { chat:1, leaderboard:1, buddy:1, profile:1, invite:1, goals:1 };
+const PUBLIC_AUTH_TABS = { chat:1, leaderboard:1, buddy:1, profile:1, invite:1, goals:1, hokm:1 };
 let pendingAuthTab = null;
 function isLoggedIn(){ return !!publicChatUser; }
 function tabNeedsAuth(tabId){ return !!PUBLIC_AUTH_TABS[tabId] && !isLoggedIn(); }
@@ -7581,6 +7621,7 @@ if(impromptuStartBtn){
         timerEl.textContent = '✅ آفرین، تموم شد!';
         impromptuStartBtn.disabled = false;
         impromptuStartBtn.textContent = '▶️ شروع ۶۰ ثانیه';
+        try{ logDailyFeatureUse('speech_impromptu'); }catch(e){}
       } else {
         render();
       }
@@ -7648,6 +7689,7 @@ if(storyStartBtn){
         timerEl.textContent = '✅ آفرین، داستانت تموم شد!';
         storyStartBtn.disabled = false;
         storyStartBtn.textContent = '▶️ شروع داستان';
+        try{ logDailyFeatureUse('speech_story'); }catch(e){}
       } else {
         render();
       }
@@ -8086,6 +8128,7 @@ function brainFinishMathRound(){
   const isNewBest = brainMathScore > prevBest;
   if(isNewBest) stats.bestByLevel[brainMathLevel] = brainMathScore;
   stats.rounds = (stats.rounds||0) + 1;
+  try{ logDailyFeatureUse('brain_math'); }catch(e){}
   saveData();
   renderXP();
   document.getElementById('brainMathBest').textContent = faDigits(stats.bestByLevel[brainMathLevel]);
@@ -8272,6 +8315,7 @@ function brainFinishStroopRound(){
   const isNewBest = brainStroopScore > prevBest;
   if(isNewBest) stats.bestByLevel[brainStroopLevel] = brainStroopScore;
   stats.rounds = (stats.rounds||0) + 1;
+  try{ logDailyFeatureUse('brain_stroop'); }catch(e){}
   saveData();
   renderXP();
   document.getElementById('brainStroopBest').textContent = faDigits(stats.bestByLevel[brainStroopLevel]);
@@ -8460,6 +8504,7 @@ function brainSeqFinishRound(){
   const isNewBest = finalLevel > prevBest;
   if(isNewBest) stats.bestByLevel[brainSeqLevel] = finalLevel;
   stats.rounds = (stats.rounds||0) + 1;
+  try{ logDailyFeatureUse('brain_sequence'); }catch(e){}
   saveData();
   renderXP();
   document.getElementById('brainSeqBest').textContent = faDigits(stats.bestByLevel[brainSeqLevel]);
@@ -8659,6 +8704,7 @@ function brainFinishNbackRound(){
   const isNewBest = brainNbackScore > prevBest;
   if(isNewBest) stats.bestByLevel[brainNbackN] = brainNbackScore;
   stats.rounds = (stats.rounds||0) + 1;
+  try{ logDailyFeatureUse('brain_nback'); }catch(e){}
   saveData();
   renderXP();
   document.getElementById('brainNbackBest').textContent = faDigits(stats.bestByLevel[brainNbackN]);
@@ -8824,6 +8870,7 @@ function brainFinishOddRound(){
   const isNewBest = brainOddScore > prevBest;
   if(isNewBest) stats.bestByLevel[brainOddLevel] = brainOddScore;
   stats.rounds = (stats.rounds||0) + 1;
+  try{ logDailyFeatureUse('brain_odd'); }catch(e){}
   saveData();
   renderXP();
   document.getElementById('brainOddBest').textContent = faDigits(stats.bestByLevel[brainOddLevel]);
@@ -9001,6 +9048,7 @@ document.querySelectorAll('.subseg').forEach(seg=>{
       if(panel.id === 'tab-today' && btn.dataset.sub === 'program') maybeSuggestTodayNarration();
       if(panel.id === 'tab-today' && btn.dataset.sub === 'tomorrow') renderTomorrowTab();
       if(panel.id === 'tab-today' && btn.dataset.sub === 'manualbuild') renderManualPlanTab();
+      if(panel.id === 'tab-today' && btn.dataset.sub === 'history') renderProgramHistory();
       if(panel.id === 'tab-workout' && btn.dataset.sub === 'history') renderWoHistory();
       if(panel.id === 'tab-workout' && btn.dataset.sub === 'recovery') renderRecoveryTab();
       if(panel.id === 'tab-meditation'){
@@ -9319,6 +9367,10 @@ function showPublicTabInner(tabId){
   if(tabId === 'profile' && typeof renderProfileTab === 'function') renderProfileTab();
   if(tabId === 'buddy' && typeof loadBuddyTab === 'function') loadBuddyTab();
   if(tabId === 'sos' && typeof loadSosTab === 'function') loadSosTab();
+  if(tabId === 'hokm'){
+    if(typeof hkLoadLobby === 'function') hkLoadLobby();
+    if(typeof efLoadLobby === 'function') efLoadLobby();
+  }
   assertModeSeparation();
 }
 function showPublicTab(tabId){
@@ -9346,6 +9398,25 @@ document.querySelectorAll('.pub-subnav-btn').forEach(btn=>{
     showPublicTabInner(tabId);
   });
 });
+/* ===================== GAMES HUB — انتخاب‌گرِ بازی داخلِ تبِ «بازی‌ها» (قبلاً «حکم») =====================
+   فقط نمایش/عدم‌نمایشِ دو پنلِ gamesHokmPanel و gamesEfPanel؛ هیچ منطقِ hk، RPC، یا DOM دست‌نخورده
+   لمس نشده. */
+(function(){
+  const selBar = document.getElementById('gamesSelectBar');
+  if(!selBar) return;
+  const cards = { hokm: document.getElementById('gamesSelectHokm'), esmfamil: document.getElementById('gamesSelectEf') };
+  const panels = { hokm: document.getElementById('gamesHokmPanel'), esmfamil: document.getElementById('gamesEfPanel') };
+  function showGame(game){
+    Object.keys(cards).forEach(function(key){
+      if(cards[key]) cards[key].classList.toggle('active', key === game);
+      if(panels[key]) panels[key].style.display = (key === game) ? '' : 'none';
+    });
+  }
+  selBar.querySelectorAll('.games-select-card').forEach(function(card){
+    card.addEventListener('click', function(){ showGame(card.dataset.game); });
+  });
+})();
+
 document.getElementById('modeFocusBtn').addEventListener('click', ()=>{
   const tabId = 'focusmode';
   if(currentAppMode === 'private' && lastMainTab === tabId && !document.body.classList.contains('subpage-open')) return;
@@ -10929,7 +11000,7 @@ document.getElementById('libDeepBtn').addEventListener('click', async ()=>{
     showToast('آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('مشکلی پیش اومد، دوباره امتحان کن', 'error');
+    showToast(aiCatchErrorMessage(err, 'مشکلی پیش اومد، دوباره امتحان کن'), 'error');
   }finally{
     btn.disabled = false;
     btn.textContent = storeData.libraryDeepDive[currentPhase.key] ? '🔄 دوباره بنویس' : 'بنویس برام';
@@ -11104,7 +11175,7 @@ document.getElementById('libWeeklyBtn').addEventListener('click', async ()=>{
     showToast('آماده شد', 'success');
   }catch(err){
     console.error(err);
-    showToast('مشکلی پیش اومد، دوباره امتحان کن', 'error');
+    showToast(aiCatchErrorMessage(err, 'مشکلی پیش اومد، دوباره امتحان کن'), 'error');
   }finally{
     btn.disabled = false;
     if(btn.textContent === 'در حال نوشتن...'){
@@ -11802,6 +11873,19 @@ let mySuspensionStage = 0;          // how many times this account has been susp
 // muted_until passes. Set by the owner for any custom duration (see muteChatUser below) and
 // enforced for real by a Supabase RLS policy on `messages` INSERT, same caveat as suspension.
 let myMutedUntil = null;            // Date|null
+// Global (not per-user) public-chat controls the owner toggles from the chat header:
+// locked = whole group closed to everyone but the owner; cooldown_seconds = minimum gap
+// between two messages from the same non-owner sender ("slow mode"), 0 = off. Both live in
+// a single row of the `chat_settings` table and sync to every open client in realtime (see
+// loadChatSettings). This client state only drives the UI — real enforcement that a modified
+// client can't bypass is the enforce_chat_lock / enforce_chat_cooldown triggers on `messages`
+// INSERT, and set_chat_settings() only accepting changes from OWNER_EMAIL — see
+// chat-lock-cooldown-supabase-schema.sql shipped alongside this file.
+let chatSettings = { locked: false, cooldown_seconds: 0 };
+let chatSettingsChannel = null;
+// Client-side timestamp (ms): when THIS device is allowed to send its next message. Only
+// drives the send-button/placeholder countdown right after sending — see updateChatCooldownUI.
+let chatCooldownUntil = 0;
 function chatConfigured(){
   return SUPABASE_URL.indexOf('PASTE_') !== 0 && SUPABASE_ANON_KEY.indexOf('PASTE_') !== 0 && window.supabase;
 }
@@ -12017,6 +12101,8 @@ async function handlePublicChatSession(session){
     isChatAdmin = isAppOwner || !!(profile && profile.is_admin);
     const chatAdminManageBtn = document.getElementById('chatAdminManageBtn');
     if(chatAdminManageBtn) chatAdminManageBtn.style.display = isAppOwner ? 'inline-flex' : 'none';
+    { const _lb = document.getElementById('chatLockBtn'); if(_lb) _lb.style.display = isAppOwner ? 'inline-flex' : 'none'; }
+    { const _cb = document.getElementById('chatCooldownBtn'); if(_cb) _cb.style.display = isAppOwner ? 'inline-flex' : 'none'; }
     // Suspension is read fresh from the server on every session load, so a lifted/expired
     // suspension (or a fresh one applied on another device) is always picked up on login.
     mySuspendedUntil = (profile && profile.suspended_until) ? new Date(profile.suspended_until) : null;
@@ -12078,6 +12164,8 @@ async function handlePublicChatSession(session){
     isAppOwner = false;
     isChatAdmin = false;
     { const _b = document.getElementById('chatAdminManageBtn'); if(_b) _b.style.display = 'none'; }
+    { const _lb = document.getElementById('chatLockBtn'); if(_lb) _lb.style.display = 'none'; }
+    { const _cb = document.getElementById('chatCooldownBtn'); if(_cb) _cb.style.display = 'none'; }
     mySuspendedUntil = null;
     mySuspendedPermanently = false;
     mySuspensionStage = 0;
@@ -12910,6 +12998,12 @@ async function loadLeaderboard(force){
     return;
   }
   const LB_COLS = 'id,username,day_count,gender,age_range,habit_icon,program_length,identity_titles,avatar_url';
+  // کسایی که با فیچر «بن دائم» (banChatUserForever) مسدود شدن، فقط از چت/مشاور شخصی بسته
+  // نمی‌شن — از لیدربورد (هم رتبه‌بندی، هم شمارنده‌های بالای صفحه) هم کاملاً حذف می‌شن. این
+  // شرط یه‌بار تعریف می‌شه و رو‌ی همه‌ی کوئری‌های زیر تکرار می‌شه؛ چون suspended_permanently
+  // برای کاربرهای قدیمی‌تر ممکنه null باشه (نه false)، هر دو حالت رو نگه می‌داریم و فقط true
+  // رو حذف می‌کنیم.
+  const LB_NOT_BANNED = 'suspended_permanently.eq.false,suspended_permanently.is.null';
   try{
     const activeSince = lbActiveSinceIso();
     // این سه کار به نتیجه‌ی هم نیازی ندارن (sync، بارگذاری روابط هم‌مسیر، و کوئری‌های
@@ -12920,10 +13014,10 @@ async function loadLeaderboard(force){
     const [, , { count: totalUsers }, { count: femaleCount }, { count: maleCount }, { data: topUsers, error: topErr }] = await Promise.all([
       syncMyLeaderboardData(),
       buddyRelationsPromise,
-      sb.from('profiles').select('id', { count: 'exact', head: true }).gte('last_active_at', activeSince),
-      sb.from('profiles').select('id', { count: 'exact', head: true }).eq('gender','female').gte('last_active_at', activeSince),
-      sb.from('profiles').select('id', { count: 'exact', head: true }).eq('gender','male').gte('last_active_at', activeSince),
-      sb.from('profiles').select(LB_COLS).gte('last_active_at', activeSince).order('day_count', { ascending:false }).order('username', { ascending:true }).limit(50)
+      sb.from('profiles').select('id', { count: 'exact', head: true }).gte('last_active_at', activeSince).or(LB_NOT_BANNED),
+      sb.from('profiles').select('id', { count: 'exact', head: true }).eq('gender','female').gte('last_active_at', activeSince).or(LB_NOT_BANNED),
+      sb.from('profiles').select('id', { count: 'exact', head: true }).eq('gender','male').gte('last_active_at', activeSince).or(LB_NOT_BANNED),
+      sb.from('profiles').select(LB_COLS).gte('last_active_at', activeSince).or(LB_NOT_BANNED).order('day_count', { ascending:false }).order('username', { ascending:true }).limit(50)
     ]);
     if(topErr) throw topErr;
 
@@ -12986,11 +13080,11 @@ async function loadLeaderboard(force){
         const myDay = liveElapsedDays();
         const NEI = 15;
         const [{ data: above }, { data: below }, { count: betterCount }] = await Promise.all([
-          sb.from('profiles').select(LB_COLS).gte('day_count', myDay).neq('id', publicChatUser.id).gte('last_active_at', activeSince)
+          sb.from('profiles').select(LB_COLS).gte('day_count', myDay).neq('id', publicChatUser.id).gte('last_active_at', activeSince).or(LB_NOT_BANNED)
             .order('day_count', { ascending:true }).limit(NEI),
-          sb.from('profiles').select(LB_COLS).lte('day_count', myDay).neq('id', publicChatUser.id).gte('last_active_at', activeSince)
+          sb.from('profiles').select(LB_COLS).lte('day_count', myDay).neq('id', publicChatUser.id).gte('last_active_at', activeSince).or(LB_NOT_BANNED)
             .order('day_count', { ascending:false }).limit(NEI),
-          sb.from('profiles').select('id', { count:'exact', head:true }).gt('day_count', myDay).gte('last_active_at', activeSince)
+          sb.from('profiles').select('id', { count:'exact', head:true }).gt('day_count', myDay).gte('last_active_at', activeSince).or(LB_NOT_BANNED)
         ]);
         myRank = (betterCount||0) + 1;
         const me = Object.assign({ id: publicChatUser.id, username: publicChatUsername }, lbMyPublicFields());
@@ -13657,7 +13751,8 @@ const CHAT_ICONS = {
   pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.5h6l.7 4.8 3 2v2H5.3v-2l3-2z"/><path d="M12 13.3V20"/></svg>',
   mute: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9v3.5a3 3 0 0 0 5.1 2.1"/><path d="M13.5 4.3A3 3 0 0 1 15 7v3.2"/><path d="M4 4l16 16"/><path d="M5.5 11a6.5 6.5 0 0 0 9.4 5.8"/><path d="M12 17.5V21M9 21h6"/></svg>',
   flag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5v17"/><path d="M6 4.5h10l-2.3 3.3 2.3 3.2H6"/></svg>',
-  hourglass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5h11M6.5 20.5h11"/><path d="M7.5 3.5v3.3a4.5 4.5 0 0 0 2 3.7l1.5 1-1.5 1a4.5 4.5 0 0 0-2 3.7v3.3M16.5 3.5v3.3a4.5 4.5 0 0 1-2 3.7l-1.5 1 1.5 1a4.5 4.5 0 0 1 2 3.7v3.3"/></svg>'
+  hourglass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5h11M6.5 20.5h11"/><path d="M7.5 3.5v3.3a4.5 4.5 0 0 0 2 3.7l1.5 1-1.5 1a4.5 4.5 0 0 0-2 3.7v3.3M16.5 3.5v3.3a4.5 4.5 0 0 1-2 3.7l-1.5 1 1.5 1a4.5 4.5 0 0 1 2 3.7v3.3"/></svg>',
+  ban: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.3"/><path d="M6.4 6.4l11.2 11.2"/></svg>'
 };
 function ci(name){ return `<span class="ci">${CHAT_ICONS[name] || ''}</span>`; }
 // Shared content-parsing for a chat message row — used both for the initial render
@@ -14922,6 +15017,7 @@ async function loadPublicChatMessages(){
     }
     loadGroupStreakBanner();
     loadChatPinned();
+    loadChatSettings();
     subscribeChatReactions();
     if(!publicChatChannel){
       publicChatChannel = sb.channel('public:messages')
@@ -15266,6 +15362,7 @@ function openChatMsgMenu(el){
     if(isAppOwner){
       html += `<button type="button" class="cm-menu-danger" data-act="mute">${ci('mute')} سکوت ${escapeHtml(username)}</button>`;
       html += `<button type="button" class="cm-menu-danger" data-act="suspend">${ci('hourglass')} تعلیق ${escapeHtml(username)}</button>`;
+      html += `<button type="button" class="cm-menu-danger" data-act="ban">${ci('ban')} بن دائم ${escapeHtml(username)}</button>`;
     }
   } else {
     html += `<button type="button" data-act="report">${ci('flag')} گزارش پیام</button>`;
@@ -15305,6 +15402,7 @@ if(cmActionMenu) cmActionMenu.addEventListener('click', e=>{
   else if(btn.dataset.act === 'block') blockChatUser(userId, username);
   else if(btn.dataset.act === 'suspend') suspendChatUser(userId, username);
   else if(btn.dataset.act === 'mute') muteChatUser(userId, username);
+  else if(btn.dataset.act === 'ban') banChatUserForever(userId, username);
   closeChatMsgMenu();
 });
 
@@ -15458,24 +15556,34 @@ function isReportModeActive(){
   const h = new Date().getHours();
   return h >= REPORT_MODE_START_HOUR && h < REPORT_MODE_END_HOUR;
 }
+function isChatLockedForMe(){
+  // Owner is always exempt — same convention as the report-mode window above
+  // (reportRestricted = active && !isAppOwner): the owner can still post while
+  // the group is "closed", e.g. to announce why or when it'll reopen.
+  return !!(chatSettings.locked && !isAppOwner);
+}
 function updateChatModeUI(){
   const panel = document.getElementById('chatPanelSection');
   const banner = document.getElementById('chatReportModeBanner');
   const muteBanner = document.getElementById('chatMuteBanner');
+  const lockBanner = document.getElementById('chatLockBanner');
   const input = document.getElementById('chatInput');
   const sendBtn = document.getElementById('chatSendBtn');
   const attachBtn = document.getElementById('chatAttachBtn');
   const active = isReportModeActive();
   const muted = isCurrentlyMuted(); // sees the whole chat fine — only the composer locks
+  const locked = isChatLockedForMe();
   if(panel) panel.classList.toggle('report-mode-active', active);
   const reportRestricted = active && !isAppOwner;
-  const restricted = reportRestricted || muted;
+  const restricted = reportRestricted || muted || locked;
   if(input){
     input.disabled = restricted;
-    input.placeholder = muted ? 'فعلاً ساکتی، نمی‌تونی پیام بفرستی...' : (reportRestricted ? 'الان فقط گزارش کار قابل ارساله...' : 'پیامتو بنویس...');
+    input.placeholder = muted ? 'فعلاً ساکتی، نمی‌تونی پیام بفرستی...'
+      : locked ? 'چت عمومی فعلاً توسط مالک بسته شده...'
+      : (reportRestricted ? 'الان فقط گزارش کار قابل ارساله...' : 'پیامتو بنویس...');
   }
   if(sendBtn) sendBtn.disabled = restricted;
-  if(attachBtn) attachBtn.disabled = muted;
+  if(attachBtn) attachBtn.disabled = muted || locked;
   if(banner){
     if(active){
       banner.textContent = isAppOwner
@@ -15494,9 +15602,135 @@ function updateChatModeUI(){
       muteBanner.classList.remove('show');
     }
   }
+  if(lockBanner){
+    if(locked){
+      lockBanner.textContent = '🔒 چت عمومی الان توسط مالک بسته‌ست — پیام‌های قبلی رو می‌تونی بخونی، ولی فرستادن پیام/مدیا/گزارش موقتاً غیرفعاله.';
+      lockBanner.classList.add('show');
+    } else {
+      lockBanner.classList.remove('show');
+    }
+  }
+  const lockBtn = document.getElementById('chatLockBtn');
+  if(lockBtn){
+    const lbl = document.getElementById('chatLockBtnLabel');
+    if(lbl) lbl.textContent = chatSettings.locked ? 'باز کردن چت' : 'بستن چت';
+    lockBtn.title = chatSettings.locked ? 'باز کردن چت عمومی' : 'بستن چت عمومی';
+    lockBtn.classList.toggle('chat-pill-btn-danger', chatSettings.locked);
+  }
+  const cooldownBtn = document.getElementById('chatCooldownBtn');
+  if(cooldownBtn){
+    cooldownBtn.title = chatSettings.cooldown_seconds > 0
+      ? `کول‌داون فعلی: هر ${toFa(chatSettings.cooldown_seconds)} ثانیه یه پیام (برای تغییر بزن)`
+      : 'تنظیم کول‌داون بین پیام‌ها';
+  }
   updateReportBtnState();
+  updateChatCooldownUI(); // in case a lock/mute/report-mode change just now should override a stale countdown
 }
 setInterval(updateChatModeUI, 30000);
+
+/* ================= Chat lock ("close/open the group") + slow-mode cooldown =================
+   Read the shared row from `chat_settings` (id=1) and keep it in sync in realtime, so every
+   open client reacts instantly when the owner flips the lock or changes the cooldown — same
+   pattern as chatPinnedChannel above. If chat-lock-cooldown-supabase-schema.sql hasn't been
+   run on this Supabase project yet, the select/RPC calls below just fail quietly and the chat
+   behaves exactly like before (no lock, no cooldown) — same graceful-fallback style used for
+   the other optional chat schema pieces (admin badges, media, weekly purge) elsewhere in this
+   file. ============================================================================== */
+async function loadChatSettings(){
+  if(!sb) return;
+  try{
+    const { data, error } = await sb.from('chat_settings').select('locked,cooldown_seconds').eq('id', 1).maybeSingle();
+    if(!error && data){
+      chatSettings.locked = !!data.locked;
+      chatSettings.cooldown_seconds = Number(data.cooldown_seconds) || 0;
+    }
+  }catch(err){ console.error('chat settings load error', err); }
+  updateChatModeUI();
+  if(!chatSettingsChannel){
+    chatSettingsChannel = sb.channel('public:chat_settings')
+      .on('postgres_changes', {event:'UPDATE', schema:'public', table:'chat_settings'}, payload=>{
+        chatSettings.locked = !!payload.new.locked;
+        chatSettings.cooldown_seconds = Number(payload.new.cooldown_seconds) || 0;
+        updateChatModeUI();
+      }).subscribe();
+  }
+}
+/* ---- Owner-only: flip the whole public chat open/closed ---- */
+async function toggleChatLock(){
+  if(!sb || !isAppOwner) return;
+  const next = !chatSettings.locked;
+  if(!confirm(next
+    ? 'چت عمومی برای همه (به‌جز خودت) بسته بشه؟ همه می‌تونن پیام‌های قبلی رو بخونن ولی نمی‌تونن پیام/مدیا/گزارش جدید بفرستن.'
+    : 'چت عمومی دوباره برای همه باز بشه؟')) return;
+  try{
+    const { error } = await sb.rpc('set_chat_settings', { p_locked: next, p_cooldown_seconds: chatSettings.cooldown_seconds });
+    if(error){ showToast('خطا در تغییر وضعیت چت', 'error'); return; }
+    chatSettings.locked = next; // optimistic — realtime UPDATE above will confirm/correct it
+    updateChatModeUI();
+    showToast(next ? 'چت عمومی بسته شد 🔒' : 'چت عمومی باز شد 🔓');
+  }catch(err){ showToast('مشکل در اتصال به سرور', 'error'); }
+}
+/* ---- Owner-only: set (or clear) the slow-mode cooldown between messages, in seconds or minutes ---- */
+async function promptChatCooldown(){
+  if(!sb || !isAppOwner) return;
+  const choice = prompt('کول‌داون بین پیام‌ها روی چی تنظیم بشه؟\n۱) بر حسب ثانیه\n۲) بر حسب دقیقه\n۳) غیرفعال کردن کول‌داون\n\nعدد ۱، ۲ یا ۳ رو وارد کن:', chatSettings.cooldown_seconds > 0 ? '1' : '3');
+  if(!choice) return;
+  const c = choice.trim();
+  let seconds = 0;
+  if(c === '3' || c === '۳'){
+    seconds = 0;
+  } else if(c === '1' || c === '۱' || c === '2' || c === '۲'){
+    const isMinute = (c === '2' || c === '۲');
+    const valStr = prompt(`چند ${isMinute ? 'دقیقه' : 'ثانیه'} بین هر دو پیام فاصله باشه؟`, '10');
+    if(!valStr) return;
+    const val = parseInt(valStr.trim(), 10);
+    if(!val || val <= 0){ showToast('عدد معتبر وارد نکردی', 'error'); return; }
+    seconds = isMinute ? val * 60 : val;
+  } else {
+    return;
+  }
+  try{
+    const { error } = await sb.rpc('set_chat_settings', { p_locked: chatSettings.locked, p_cooldown_seconds: seconds });
+    if(error){ showToast('خطا در تنظیم کول‌داون', 'error'); return; }
+    chatSettings.cooldown_seconds = seconds; // optimistic — realtime UPDATE above will confirm/correct it
+    updateChatModeUI();
+    showToast(seconds > 0 ? `کول‌داون فعال شد: هر ${toFa(seconds)} ثانیه یه پیام ✅` : 'کول‌داون غیرفعال شد ✅');
+  }catch(err){ showToast('مشکل در اتصال به سرور', 'error'); }
+}
+const chatLockBtnEl = document.getElementById('chatLockBtn');
+if(chatLockBtnEl) chatLockBtnEl.addEventListener('click', toggleChatLock);
+const chatCooldownBtnEl = document.getElementById('chatCooldownBtn');
+if(chatCooldownBtnEl) chatCooldownBtnEl.addEventListener('click', promptChatCooldown);
+/* ---- Per-device slow-mode countdown: after a successful send, locks the composer for
+   cooldown_seconds and counts down in the placeholder. Ticks every second (separate from the
+   30s updateChatModeUI interval) but only acts when nothing else already owns the lock, so it
+   never fights the mute/group-lock/report-mode states above. ---- */
+function chatCooldownSecondsLeft(){
+  if(isAppOwner) return 0;
+  return Math.max(0, Math.ceil((chatCooldownUntil - Date.now()) / 1000));
+}
+function startChatCooldownIfNeeded(){
+  if(isAppOwner || !chatSettings.cooldown_seconds) return;
+  chatCooldownUntil = Date.now() + chatSettings.cooldown_seconds * 1000;
+  updateChatCooldownUI();
+}
+function updateChatCooldownUI(){
+  const input = document.getElementById('chatInput');
+  const sendBtn = document.getElementById('chatSendBtn');
+  if(!input || !sendBtn) return;
+  if(isCurrentlyMuted() || isChatLockedForMe() || (isReportModeActive() && !isAppOwner)) return; // another lock already owns the composer
+  const secondsLeft = chatCooldownSecondsLeft();
+  if(secondsLeft > 0){
+    input.disabled = true;
+    sendBtn.disabled = true;
+    input.placeholder = `${toFa(secondsLeft)} ثانیه دیگه می‌تونی پیام بعدی رو بفرستی...`;
+  } else if(input.disabled && input.placeholder.indexOf('ثانیه دیگه') !== -1){
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.placeholder = 'پیامتو بنویس...';
+  }
+}
+setInterval(updateChatCooldownUI, 1000);
 
 /* ================= Chat-rules suspensions (public chat + مشاور شخصی) =================
    Applied by the owner (see suspendChatUser below) and enforced for real, server-side, by
@@ -15694,6 +15928,41 @@ async function unmuteChatUserByEmail(){
     else alert('خطا: ' + (data.error || 'نامشخص'));
   }catch(err){ alert('مشکل در اتصال به سرور'); }
 }
+
+/* ---- Owner-only: ban a user forever, in one step — unlike suspendChatUser above این از
+   نردبان مراحل (۱ روز ← ۳ روز ← ...) رد نمی‌شه و مستقیم suspended_permanently رو true
+   می‌کنه، پس همون قفلِ isCurrentlySuspended/renderSuspensionLocks که چت + مشاور شخصی رو
+   می‌بنده فوراً و برای همیشه فعال می‌شه. لیدربورد هم جدا این فلگ رو چک می‌کنه (loadLeaderboard)
+   و کسی که suspended_permanently=true باشه اصلاً تو نتیجه‌ها نمیاد. برخلاف suspend/mute که از
+   طریق ورکر با توکن مخفی انجام می‌شن، این دو تابع مستقیم یه RPC امن تو Supabase صدا می‌زنن
+   که خودش سمت سرور چک می‌کنه ایمیلِ کاربرِ لاگین‌شده دقیقاً OWNER_EMAIL باشه — یعنی even اگه
+   یکی isAppOwner رو تو کد کلاینت دستکاری کنه، باز نمی‌تونه کسی رو بن کنه. باید یه‌بار
+   ban-forever-supabase-schema.sql رو تو SQL editor پروژه‌ی Supabase اجرا کنی تا این دو RPC
+   (ban_chat_user_forever / unban_chat_user_forever) ساخته بشن، وگرنه با یه خطای واضح fail
+   می‌کنن نه اینکه بی‌سروصدا کاری نکنن. */
+async function banChatUserForever(userId, username){
+  if(!isAppOwner) return;
+  if(publicChatUser && userId === publicChatUser.id){ showToast('نمی‌تونی خودتو بن کنی', 'error'); return; }
+  if(!confirm(`${username} برای همیشه از چت عمومی، مشاور شخصی و لیدربورد بن بشه؟\nبرخلاف تعلیق، این فوریه و نیاز به تکرار تخلف نداره — ولی هر وقت خواستی از پنل مخفی مدیریت قابل لغوه.`)) return;
+  if(!sb){ showToast('اتصال برقرار نیست', 'error'); return; }
+  try{
+    const { error } = await sb.rpc('ban_chat_user_forever', { target_user_id: userId });
+    if(error){ alert('خطا: ' + translateAuthError(error.message)); return; }
+    alert(`${username} برای همیشه بن شد ✅`);
+    showToast('بن دائم ثبت شد');
+  }catch(err){ alert('مشکل در اتصال به سرور'); }
+}
+async function unbanChatUserForeverByEmail(){
+  if(!isAppOwner) return;
+  const email = prompt('ایمیل کاربری که می‌خوای بنِ دائمش رو لغو کنی:');
+  if(!email || !email.trim()) return;
+  if(!sb){ showToast('اتصال برقرار نیست', 'error'); return; }
+  try{
+    const { error } = await sb.rpc('unban_chat_user_forever', { target_email: email.trim() });
+    if(error){ alert('خطا: ' + translateAuthError(error.message)); return; }
+    alert('بنِ ' + email + ' لغو شد ✅');
+  }catch(err){ alert('مشکل در اتصال به سرور'); }
+}
 document.getElementById('chatSuspendedLogoutBtn').addEventListener('click', async ()=>{
   if(!sb) return;
   intentionalSignOut = true;
@@ -15791,6 +16060,16 @@ async function sendPublicChatMessage(){
     updateChatModeUI();
     return;
   }
+  if(isChatLockedForMe()){
+    showToast('چت عمومی فعلاً توسط مالک بسته شده', 'error');
+    updateChatModeUI();
+    return;
+  }
+  if(chatCooldownSecondsLeft() > 0){
+    showToast(`${toFa(chatCooldownSecondsLeft())} ثانیه دیگه می‌تونی پیام بعدی رو بفرستی`, 'error');
+    updateChatCooldownUI();
+    return;
+  }
   if(!(storeData.premium || isInTrial()) && getFreeChatMsgCountToday() >= FREE_CHAT_DAILY_LIMIT){
     showToast(`تو نسخه‌ی رایگان روزی فقط ${toFa(FREE_CHAT_DAILY_LIMIT)} پیام می‌تونی بفرستی`, 'error');
     openPremiumOverlay();
@@ -15864,6 +16143,7 @@ async function sendPublicChatMessage(){
         pendingEl.classList.remove('cm-pending');
       }
       if(!isPremiumNow) registerFreeChatMsgSent();
+      startChatCooldownIfNeeded();
     }
   }catch(err){
     showToast('پیام ارسال نشد', 'error');
@@ -15895,6 +16175,16 @@ async function sendPublicChatMedia(file){
   if(isCurrentlyMuted()){
     showToast('فعلاً ساکتت کرده‌ن — نمی‌تونی مدیا بفرستی', 'error');
     updateChatModeUI();
+    return;
+  }
+  if(isChatLockedForMe()){
+    showToast('چت عمومی فعلاً توسط مالک بسته شده', 'error');
+    updateChatModeUI();
+    return;
+  }
+  if(chatCooldownSecondsLeft() > 0){
+    showToast(`${toFa(chatCooldownSecondsLeft())} ثانیه دیگه می‌تونی پیام بعدی رو بفرستی`, 'error');
+    updateChatCooldownUI();
     return;
   }
   if(!(storeData.premium || isInTrial()) && getFreeChatMsgCountToday() >= FREE_CHAT_DAILY_LIMIT){
@@ -15967,6 +16257,7 @@ async function sendPublicChatMedia(file){
       addGifPickerRecent(chatMediaPublicUrl(path), chatMediaPublicUrl(path), mediaType);
     }
     if(!isPremiumNow) registerFreeChatMsgSent();
+    startChatCooldownIfNeeded();
   }catch(err){
     console.error('Chat media send error', err);
     // Previously this always showed the same generic "ارسال مدیا ناموفق بود" no matter
@@ -16197,6 +16488,21 @@ async function sendPublicChatGif(gifUrl, gifThumbUrl, mediaType){
     renderSuspensionLocks();
     return;
   }
+  if(isCurrentlyMuted()){
+    showToast('فعلاً ساکتت کرده‌ن — نمی‌تونی گیف بفرستی', 'error');
+    updateChatModeUI();
+    return;
+  }
+  if(isChatLockedForMe()){
+    showToast('چت عمومی فعلاً توسط مالک بسته شده', 'error');
+    updateChatModeUI();
+    return;
+  }
+  if(chatCooldownSecondsLeft() > 0){
+    showToast(`${toFa(chatCooldownSecondsLeft())} ثانیه دیگه می‌تونی پیام بعدی رو بفرستی`, 'error');
+    updateChatCooldownUI();
+    return;
+  }
   if(!(storeData.premium || isInTrial()) && getFreeChatMsgCountToday() >= FREE_CHAT_DAILY_LIMIT){
     showToast(`تو نسخه‌ی رایگان روزی فقط ${toFa(FREE_CHAT_DAILY_LIMIT)} پیام می‌تونی بفرستی`, 'error');
     openPremiumOverlay();
@@ -16230,6 +16536,7 @@ async function sendPublicChatGif(gifUrl, gifThumbUrl, mediaType){
       pendingEl.classList.remove('cm-pending');
     }
     if(!isPremiumNow) registerFreeChatMsgSent();
+    startChatCooldownIfNeeded();
   }catch(err){
     console.error('Giphy gif send error', err);
     showToast(`ارسال گیف ناموفق بود: ${translateTechError(err && err.message)}`, 'error');
@@ -16281,6 +16588,11 @@ function updateReportBtnState(){
     if(hint) hint.textContent = 'فعلاً ساکتی، نمی‌تونی گزارش کار هم بفرستی';
     return;
   }
+  if(isChatLockedForMe()){
+    btn.disabled = true;
+    if(hint) hint.textContent = 'چت عمومی فعلاً توسط مالک بسته شده';
+    return;
+  }
   if(!isReportModeActive() && !isAppOwner){
     btn.disabled = true;
     if(hint) hint.textContent = 'ارسال گزارش کار فقط از ساعت ۲۰ تا ۲۴ فعاله';
@@ -16301,6 +16613,7 @@ function updateReportBtnState(){
 async function sendTaskReport(){
   if(!sb || !publicChatUser) return;
   if(isCurrentlyMuted()){ showToast('فعلاً ساکتت کرده‌ن — نمی‌تونی گزارش کار بفرستی', 'error'); return; }
+  if(isChatLockedForMe()){ showToast('چت عمومی فعلاً توسط مالک بسته شده', 'error'); return; }
   if(!isReportModeActive() && !isAppOwner){ showToast('ارسال گزارش کار فقط از ساعت ۲۰ تا ۲۴ فعاله', 'error'); return; }
   if(!(storeData.premium || isInTrial()) && storeData.taskReportSentOnce){
     showToast('ارسال گزارش کار تو نسخه‌ی رایگان فقط یک‌بار امکان‌پذیره', 'error');
@@ -16993,10 +17306,13 @@ const WO_DURATION_REST = {30:25, 45:35, 60:40, 90:55};
 
 /* ==================== سوپرست / تری‌ست ====================
    بعد از اینکه حرکتِ اولِ هر عضله (سنگین‌ترین/فرم‌محورترین حرکت اون عضله تو استخر
-   چرخشی) به‌صورت مجزا انجام شد، حرکت‌های فرعیِ باقی‌موندهٔ عضله‌های مختلفِ همون روز
-   می‌تونن به‌صورت زوجی (سوپرست، ۲ عضله) یا سه‌تایی (تری‌ست، ۳ عضله) پشتِ سرهم و
-   بدون استراحتِ واقعی ترکیب بشن — دقیقاً همون کاری که یه مربی برای فشرده‌کردنِ جلسه
-   و بالابردنِ فشارِ متابولیک انجام می‌ده. دو قاعده‌ی اصلی:
+   چرخشی) به‌صورت مجزا انجام شد، حرکت‌های فرعیِ باقی‌موندهٔ همون عضله (نه عضله‌های
+   دیگه) می‌تونن به‌صورت زوجی (سوپرست) یا سه‌تایی (تری‌ست) پشتِ سرهم و بدون استراحتِ
+   واقعی ترکیب بشن — دقیقاً همون کاری که یه مربی برای فشرده‌کردنِ جلسه و بالابردنِ
+   فشارِ متابولیک انجام می‌ده. مهم: سوپرست/تری‌ست همیشه محدود به یه عضله/گروه‌عضله
+   می‌مونه (مثلاً بالاسینه + زیرسینه)، هیچ‌وقت بینِ دو عضله‌ی متفاوت (مثل سینه +
+   جلوبازو) ترکیب نمی‌شه — این دقیقاً همون قاعده‌ای‌ست که یه بدنسازِ واقعی رعایت
+   می‌کنه. دو قاعده‌ی اصلی:
 
    ۱) کِی فعال بشه: این آپشن روی برنامه‌ی اولِ کاربرِ مبتدی/متوسط خاموشه — چون قدمِ
       اول یادگیریِ فرمِ درستِ هر حرکت با تمرکز کامله، نه فشردهسازی. از دوره‌ای که طبقِ
@@ -17021,24 +17337,28 @@ function woSupersetGroupSize(){
   return 2;                            // بالک/فیت: سوپرستِ سبک‌تر، تمرکز روی کیفیتِ هر حرکت
 }
 /* perMuscleLists: به ترتیبِ day.muscles، هرکدوم آرایه‌ای از حرکت‌های فرعیِ همون عضله.
-   هر دور، از میانِ عضله‌هایی که هنوز حرکتِ فرعی دارن (با چرخشِ نقطه‌ی شروع برای توزیعِ
-   عادلانه‌ی زوج‌ها)، حداکثر maxSize تا رو برمی‌داره؛ اگه فقط ۱ عضله باقی مونده باشه
-   (یعنی جفت/سه‌تاییِ واقعی ممکن نیست)، بقیه‌ی حرکت‌هاش به‌صورت تکی (leftover) برمی‌گردن. */
+   گروه‌بندی همیشه داخلِ لیستِ خودِ یه عضله انجام می‌شه (نه بینِ عضله‌های مختلف)، چون
+   سوپرست/تری‌ستِ درست باید رویِ یه عضله یا زیرگروهِ همون عضله باشه (مثلاً بالاسینه با
+   زیرسینه، نه سینه با جلوبازو). حرکت‌های پشتِ‌سرهمِ همون لیست به‌ترتیب تا سقفِ maxSize
+   تو یه گروه جمع می‌شن؛ اگه از یه عضله فقط ۱ حرکتِ فرعی مونده باشه (جفت‌شدن ممکن
+   نیست)، همون یکی به‌صورت تکی (leftover) برمی‌گرده. */
 function buildWoSupersetGroups(perMuscleLists, maxSize){
-  const n = perMuscleLists.length;
-  const queues = perMuscleLists.map(l=> l.slice());
   const groups = [];
-  let start = 0;
-  while(true){
-    const order = []; for(let k=0;k<n;k++) order.push((start+k)%n);
-    const available = order.filter(i=> queues[i].length>0);
-    if(available.length < 2) break;
-    const chosen = available.slice(0, maxSize);
-    groups.push(chosen.map(i=> queues[i].shift()));
-    start = (start+1)%n;
-  }
   const leftovers = [];
-  queues.forEach(q=> leftovers.push(...q));
+  perMuscleLists.forEach(list=>{
+    let i = 0;
+    while(i < list.length){
+      const remaining = list.length - i;
+      if(remaining >= 2){
+        const size = Math.min(maxSize, remaining);
+        groups.push(list.slice(i, i+size));
+        i += size;
+      } else {
+        leftovers.push(list[i]);
+        i++;
+      }
+    }
+  });
   return { groups, leftovers };
 }
 
@@ -17190,25 +17510,28 @@ function renewWorkoutCycle(){
   renderWoExercises();
   showToast('حرکت‌های برنامه‌ت تازه شد 🔄', 'success');
 }
+// آیکنِ SVG دکمه‌ی «تغییر حرکت» (دو فلشِ چرخشی) — همیشه یکسانه، مستقل از نوعِ حرکت.
+const WO_SWAP_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 13.66-5.66"/><path d="M20 12a8 8 0 0 1-13.66 5.66"/><path d="M17.5 3v4.4h-4.4"/><path d="M6.5 21v-4.4h4.4"/></svg>`;
 function woExerciseCardHtml(item, groupInfo){
   const { ex, muscle, badge, isBoost, extra } = item;
   const attrs = groupInfo
     ? ` data-group="${groupInfo.id}" data-group-last="${groupInfo.last?1:0}" data-group-label="${groupInfo.label}"`
     : '';
-  return `<div class="exercise-card${isBoost?' focus':''}"${attrs}>
+  return `<div class="exercise-card${isBoost?' focus':''}" data-muscle="${muscle}"${attrs}>
     <div class="ex-icon-box">${woIconSvg(ex.type)}</div>
     <div class="ex-info">
       <div class="ex-name">${ex.name}</div>
       <div class="ex-meta">${MUSCLE_LABELS[muscle]} · ${ex.sets}</div>
       ${badge ? `<span class="ex-focus-badge">${badge}${extra?' · ست اضافه':''}</span>` : ''}
     </div>
+    <button type="button" class="ex-swap-btn" data-swap-trigger="1" title="تغییر حرکت">${WO_SWAP_ICON_SVG}</button>
   </div>`;
 }
 function woGroupBlockHtml(items, groupNumber){
   const kind = WO_GROUP_LABELS[items.length] || 'سوپرست';
   const groupId = 'g' + groupNumber;
   const label = kind + ' ' + toFa(groupNumber);
-  const musclesTxt = items.map(it=>MUSCLE_LABELS[it.muscle]).join(' + ');
+  const musclesTxt = MUSCLE_LABELS[items[0].muscle] || '';
   const cardsHtml = items.map((it,i)=>{
     const card = woExerciseCardHtml(it, { id:groupId, last:i===items.length-1, label });
     const connector = i < items.length-1 ? `<div class="wo-superset-connector">بدون استراحت</div>` : '';
@@ -17224,7 +17547,7 @@ function woGroupBlockHtml(items, groupNumber){
 function woDropSetCardHtml(item, dropNumber){
   const { ex, muscle, badge, extra } = item;
   const label = 'دراپ‌ست ' + toFa(dropNumber);
-  return `<div class="exercise-card dropset" data-dropset="1" data-drop-label="${label}">
+  return `<div class="exercise-card dropset" data-muscle="${muscle}" data-dropset="1" data-drop-label="${label}">
     <div class="ex-icon-box">${woIconSvg(ex.type)}</div>
     <div class="ex-info">
       <div class="ex-name">${ex.name}</div>
@@ -17233,6 +17556,7 @@ function woDropSetCardHtml(item, dropNumber){
       <span class="wo-dropset-badge">🔻 ${label} · ست آخر رو کم‌کن</span>
       <div class="wo-dropset-note">ست آخر رو تا نزدیکِ واماندگی ببر، فوراً حدود ۲۰-۳۰٪ وزنه کم کن و بدون استراحت ادامه بده تا واماندگیِ دوباره.</div>
     </div>
+    <button type="button" class="ex-swap-btn" data-swap-trigger="1" title="تغییر حرکت">${WO_SWAP_ICON_SVG}</button>
   </div>`;
 }
 function renderWoExercises(){
@@ -17288,10 +17612,11 @@ function renderWoExercises(){
     accessoryByMuscle.push(accList);
   });
 
-  // سوپرست/تری‌ست فقط وقتی معنا داره که روز حداقل ۲ عضله داشته باشه (نمی‌شه یه عضله رو
-  // با خودش ترکیب کرد) و طبق سطح/دوره‌ی برنامه‌ی کاربر واقعاً وقتش رسیده باشه.
+  // سوپرست/تری‌ست فقط وقتی معنا داره که، طبق سطح/دوره‌ی برنامه‌ی کاربر، واقعاً وقتش
+  // رسیده باشه؛ خودِ buildWoSupersetGroups فقط از حرکت‌های فرعیِ باقی‌موندهٔ همون
+  // عضله گروه می‌سازه، پس نیازی به حداقل تعداد عضله‌ی روز نیست.
   let groups = [], leftovers = [];
-  if(day.muscles.length >= 2 && woSupersetsEnabled()){
+  if(woSupersetsEnabled()){
     const built = buildWoSupersetGroups(accessoryByMuscle, woSupersetGroupSize());
     groups = built.groups;
     leftovers = built.leftovers;
@@ -17345,12 +17670,13 @@ function buildWoSessionQueue(){
     const nameEl = card.querySelector('.ex-name'), metaEl = card.querySelector('.ex-meta');
     if(!nameEl) return;
     const name = nameEl.textContent, meta = metaEl ? metaEl.textContent : '';
+    const muscle = card.dataset.muscle || null;
     const group = card.dataset.group || null;
     const groupLast = card.dataset.groupLast === '1';
     const groupLabel = card.dataset.groupLabel || '';
     const isDrop = card.dataset.dropset === '1';
     const dropLabel = card.dataset.dropLabel || '';
-    queue.push({ phase:'main', name, meta, workSec: woParseDuration(meta), group, noRestAfter: !!(group && !groupLast), groupLabel, isDrop, dropLabel });
+    queue.push({ phase:'main', name, meta, muscle, workSec: woParseDuration(meta), group, noRestAfter: !!(group && !groupLast), groupLabel, isDrop, dropLabel });
   });
   return queue;
 }
@@ -17376,6 +17702,10 @@ function woRenderSessionStep(){
   document.getElementById('woSessionProgress').textContent = toFa(s.idx+1) + ' از ' + toFa(s.queue.length);
   document.getElementById('woSessionOverlay').classList.toggle('resting', s.mode==='rest');
   document.getElementById('woSessionOverlay').classList.toggle('rest-ready', s.mode==='rest' && s.awaitingConfirm);
+  // دکمه‌ی «تغییر حرکت» فقط رویِ حرکتِ در حالِ اجرا معنا داره (نه استراحت)، و فقط
+  // اگه بشه عضله‌شو تشخیص داد (یعنی از woExerciseList اومده، نه یه فازِ دیگه).
+  const swapBtn = document.getElementById('woSessionSwapBtn');
+  if(swapBtn) swapBtn.style.display = (s.mode==='work' && item && item.muscle) ? '' : 'none';
   const nextItem = s.queue[s.idx+1];
   if(s.mode === 'work'){
     document.getElementById('woSessionPhaseLabel').textContent = item.groupLabel
@@ -17533,6 +17863,7 @@ function woFinalizeSession(quality){
   wh.history.push({ ts:Date.now(), minutes:pending.minutes, quality:quality||null, dayLabel:pending.dayLabel,
     exercisesDone:pending.exercisesDone, exercisesTotal:pending.exercisesTotal, muscleEngagement:pending.muscleEngagement||[] });
   if(wh.history.length > 60) wh.history = wh.history.slice(-60);
+  try{ logDailyFeatureUse('workout'); }catch(e){}
   saveData();
   showToast('تمرین امروز ثبت شد! آفرین 💪', 'success');
   renderWoHistory();
@@ -17551,6 +17882,123 @@ document.getElementById('woSessionSkipBtn').addEventListener('click', woSkipSess
 document.getElementById('woSessionFinishBtn').addEventListener('click', woRequestFinish);
 document.getElementById('woSessionConfirmYesBtn').addEventListener('click', woConfirmFinish);
 document.getElementById('woSessionConfirmNoBtn').addEventListener('click', woCancelFinish);
+
+/* ================= تغییرِ حرکت (جایگزینی با یه حرکتِ مشابه) =================
+   هم قبل از شروعِ تمرین (رویِ کارت‌های تویِ «برنامه‌ی امروز») هم وسطِ جلسه‌ی هدایت‌شده
+   (رویِ حرکتِ در حالِ اجرا) قابلِ استفاده‌ست. لیستِ جایگزین‌ها همیشه از استخرِ همون
+   عضله/همون دسترسی (woAccess) میاد؛ حرکت‌هایی که همون الگوی حرکتی (type) رو دارن اول
+   نشون داده می‌شن چون بیشترین شباهت رو دارن، ولی همه‌ی حرکت‌های اون عضله در دسترسن —
+   حتی اگه هیچ‌کدوم دقیقاً هم‌الگو نباشن، کاربر بازم یه جایگزین می‌بینه، نه دستِ‌خالی. */
+let woSwapCtx = null; // {mode:'list'|'session', card, muscle, currentName}
+function woOpenSwapModal(ctx){
+  let muscle, currentName;
+  if(ctx.mode === 'list'){
+    muscle = ctx.card.dataset.muscle;
+    const nameEl = ctx.card.querySelector('.ex-name');
+    currentName = nameEl ? nameEl.textContent : '';
+  } else {
+    const s = woSession; if(!s) return;
+    const item = s.queue[s.idx];
+    if(!item || !item.muscle){ showToast('این حرکت قابل تغییر نیست', 'error'); return; }
+    muscle = item.muscle;
+    currentName = item.name;
+  }
+  if(!muscle || !MUSCLE_EXERCISES[muscle]){ showToast('این حرکت قابل تغییر نیست', 'error'); return; }
+  woSwapCtx = { mode: ctx.mode, card: ctx.card || null, muscle, currentName };
+  document.getElementById('woSwapCurrent').innerHTML =
+    `<div class="wo-swap-current-label">حرکت فعلی</div><div class="wo-swap-current-name">${currentName}</div>`;
+  woRenderSwapList();
+  document.getElementById('woSwapModal').classList.add('visible');
+}
+function woCloseSwapModal(){
+  document.getElementById('woSwapModal').classList.remove('visible');
+  woSwapCtx = null;
+}
+function woRenderSwapList(){
+  const ctx = woSwapCtx; if(!ctx) return;
+  const listEl = document.getElementById('woSwapList');
+  const pool = (MUSCLE_EXERCISES[ctx.muscle] && MUSCLE_EXERCISES[ctx.muscle][woAccess]) || [];
+  const current = pool.find(e=> e.name === ctx.currentName);
+  const currentType = current ? current.type : null;
+  // حرکت‌هایی که همین الان تویِ برنامه‌ی امروز هستن رو مشخص می‌کنیم (نه حذف)، تا کاربر
+  // بدونه اگه انتخابشون کنه، یه حرکت تکراری تویِ برنامه‌ش می‌افته.
+  const usedNames = new Set(
+    Array.from(document.querySelectorAll('#woExerciseList .ex-name')).map(el=> el.textContent)
+  );
+  const candidates = pool.filter(e=> e.name !== ctx.currentName);
+  candidates.sort((a,b)=>{
+    const aScore = (a.type===currentType?0:1) + (usedNames.has(a.name)?2:0);
+    const bScore = (b.type===currentType?0:1) + (usedNames.has(b.name)?2:0);
+    return aScore - bScore;
+  });
+  if(!candidates.length){
+    listEl.innerHTML = `<div class="wo-swap-empty">حرکت جایگزینی برای این عضله پیدا نشد.</div>`;
+    return;
+  }
+  listEl.innerHTML = candidates.map(e=>{
+    const dup = usedNames.has(e.name);
+    return `<button type="button" class="wo-swap-item${dup?' dup':''}" data-name="${e.name.replace(/"/g,'&quot;')}">
+      <div class="wo-swap-item-icon">${woIconSvg(e.type)}</div>
+      <div class="wo-swap-item-info">
+        <div class="wo-swap-item-name">${e.name}</div>
+        <div class="wo-swap-item-sets">${e.sets}${dup?' · الان تو برنامه‌ی امروزته':''}</div>
+      </div>
+    </button>`;
+  }).join('');
+}
+function woApplySwap(newName){
+  const ctx = woSwapCtx; if(!ctx) return;
+  const pool = (MUSCLE_EXERCISES[ctx.muscle] && MUSCLE_EXERCISES[ctx.muscle][woAccess]) || [];
+  const newEx = pool.find(e=> e.name === newName);
+  if(!newEx) return;
+  const newMeta = `${MUSCLE_LABELS[ctx.muscle]} · ${newEx.sets}`;
+  if(ctx.mode === 'list' && ctx.card){
+    const nameEl = ctx.card.querySelector('.ex-name');
+    const metaEl = ctx.card.querySelector('.ex-meta');
+    const iconBox = ctx.card.querySelector('.ex-icon-box');
+    if(nameEl) nameEl.textContent = newEx.name;
+    if(metaEl) metaEl.textContent = newMeta;
+    if(iconBox) iconBox.innerHTML = woIconSvg(newEx.type);
+  } else if(ctx.mode === 'session' && woSession){
+    const item = woSession.queue[woSession.idx];
+    if(item){
+      item.name = newEx.name;
+      item.meta = newMeta;
+      item.workSec = woParseDuration(newMeta);
+      woRenderSessionStep();
+    }
+  }
+  woCloseSwapModal();
+  showToast('حرکت عوض شد 🔄', 'success');
+}
+const woExerciseListEl = document.getElementById('woExerciseList');
+if(woExerciseListEl){
+  woExerciseListEl.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.ex-swap-btn');
+    if(!btn) return;
+    const card = btn.closest('.exercise-card');
+    if(!card) return;
+    woOpenSwapModal({ mode:'list', card });
+  });
+}
+document.getElementById('woSessionSwapBtn').addEventListener('click', ()=> woOpenSwapModal({ mode:'session' }));
+document.getElementById('woSwapCloseBtn').addEventListener('click', woCloseSwapModal);
+document.getElementById('woSwapModal').addEventListener('click', (e)=>{
+  if(e.target.id === 'woSwapModal') woCloseSwapModal();
+});
+document.getElementById('programHistoryList').addEventListener('click', (e)=>{
+  const row = e.target.closest('.hist-day-row');
+  if(row) openDayDetail(row.dataset.key);
+});
+document.getElementById('dayDetailCloseBtn').addEventListener('click', closeDayDetail);
+document.getElementById('dayDetailModal').addEventListener('click', (e)=>{
+  if(e.target.id === 'dayDetailModal') closeDayDetail();
+});
+document.getElementById('woSwapList').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.wo-swap-item');
+  if(!btn) return;
+  woApplySwap(btn.dataset.name);
+});
 
 
 function woStarsHtml(avg){
@@ -17795,21 +18243,183 @@ function renderRecoveryTab(){
   const imgWrap = document.getElementById('recoveryImgWrap');
   const canvas = document.getElementById('recoveryCanvas');
   if(!canvas) return;
+  recoveryStartAutoRefresh();
+  const mapStage = document.getElementById('recoveryMapStage');
+  const statsSection = document.getElementById('recoveryStatsSection');
+  const rv = storeData.profile.recoveryView;
+  const view = (rv === 'stats') ? 'stats' : ((rv === 'back') ? 'back' : 'front');
+
+  // تب «دفعات تمرین» به عکس بدن یا جنسیت نیازی نداره — مستقیم از تاریخچه‌ی جلسه‌ها ساخته می‌شه.
+  if(view === 'stats'){
+    if(askBox) askBox.style.display = 'none';
+    if(imgWrap) imgWrap.style.display = 'block';
+    setSegActive('recoveryViewSeg', 'stats');
+    if(mapStage) mapStage.style.display = 'none';
+    if(statsSection) statsSection.style.display = 'block';
+    renderRecoveryStats();
+    return;
+  }
+  if(mapStage) mapStage.style.display = '';
+  if(statsSection) statsSection.style.display = 'none';
+  setSegActive('recoveryViewSeg', view);
+
   const g = (storeData.profile && (storeData.profile.recoveryGender || storeData.profile.gender)) || '';
   if(g === 'male' || g === 'female'){
     if(askBox) askBox.style.display = 'none';
     if(imgWrap) imgWrap.style.display = 'block';
     setSegActive('recoveryGenderSeg', g);
-    setSegActive('recoveryViewSeg', (storeData.profile.recoveryView === 'back') ? 'back' : 'front');
     renderRecoveryCanvas();
     renderRecoverySummaryList();
-    recoveryStartAutoRefresh();
     recoveryClearCallout();
   } else {
     if(askBox) askBox.style.display = 'block';
     if(imgWrap) imgWrap.style.display = 'none';
   }
 }
+
+/* ===================== تب «دفعات تمرین»: از روی همون MUSCLE_ENGAGEMENT هر جلسه (که برای
+   رنگ‌کردن نقشه‌ی بدن استفاده می‌شه) می‌شماریم هر گروه عضلانیِ درشت (سینه/پشت/شانه/جلوبازو/
+   پشت‌بازو/پا/باسن/شکم) تو یه بازه‌ی زمانی چند بار و با چه شدتی کار کرده. هیچ آستانه‌ی جدیدی
+   وضع نمی‌کنیم — دقیقاً همون منطقِ «هر امتیازی یعنی اون عضله درگیر بوده» که نقشه‌ی رنگی هم
+   ازش استفاده می‌کنه، اینجا هم رعایت می‌شه تا دو تا تب با هم تناقض نداشته باشن. ---- */
+const RECOVERY_TO_GROUP = {
+  delt_front:'shoulders', delt_mid:'shoulders', delt_rear:'shoulders',
+  pec:'chest', serratus:'chest', intercostals:'chest',
+  biceps_br:'biceps', brachialis:'biceps', forearm_flex:'biceps',
+  forearm_ext:'triceps', triceps:'triceps',
+  abs_upper:'abs', abs_mid:'abs', abs_lower:'abs', obliq_ext:'abs', obliq_int:'abs',
+  hip_flexors:'legs', sartorius:'legs', quad_rf:'legs', quad_vl:'legs', quad_vm:'legs', tib_ant:'legs',
+  ham_bf:'legs', ham_st:'legs', ham_sm:'legs', gastroc_med:'legs', gastroc_lat:'legs', soleus:'legs',
+  traps:'back', rhomboids:'back', lats:'back', teres_major:'back', teres_minor:'back',
+  infraspinatus:'back', subscap:'back', erectors:'back',
+  glute_max:'glutes', glute_med:'glutes', glute_min:'glutes',
+};
+let recoveryStatsPeriodDays = 30; // فقط حالت درون‌جلسه‌ای؛ هربار که تب رو باز می‌کنه از ۳۰ روز شروع می‌شه
+
+function computeMuscleGroupStats(periodDays){
+  const wh = storeData.woHistory;
+  const history = (wh && wh.history) || [];
+  const now = Date.now();
+  const cutoff = (periodDays === Infinity) ? -Infinity : (now - periodDays*86400000);
+  const groups = {};
+  WO_SPLIT_MUSCLE_ORDER.forEach(g=> groups[g] = {count:0, scoreSum:0, lastTs:0});
+  let sessionsInPeriod = 0;
+  history.forEach(h=>{
+    if(!h.ts || h.ts < cutoff) return;
+    sessionsInPeriod++;
+    const hitGroups = {};
+    (h.muscleEngagement||[]).forEach(m=>{
+      const g = RECOVERY_TO_GROUP[m.muscle];
+      if(!g) return;
+      if(!hitGroups[g] || hitGroups[g] < m.score) hitGroups[g] = m.score;
+    });
+    Object.entries(hitGroups).forEach(([g,score])=>{
+      const rec = groups[g];
+      rec.count++;
+      rec.scoreSum += score;
+      if(h.ts > rec.lastTs) rec.lastTs = h.ts;
+    });
+  });
+  return { sessionsInPeriod, groups };
+}
+function recoveryRelTime(ts){
+  if(!ts) return '—';
+  const diffMs = Date.now() - ts;
+  const hr = Math.floor(diffMs/3600000);
+  if(hr < 1) return 'کمتر از ۱ ساعت پیش';
+  if(hr < 24) return toFa(hr)+' ساعت پیش';
+  const day = Math.floor(hr/24);
+  if(day === 1) return 'دیروز';
+  if(day < 30) return toFa(day)+' روز پیش';
+  return toFa(Math.floor(day/30))+' ماه پیش';
+}
+function renderRecoveryStats(){
+  const wrap = document.getElementById('recoveryStatsSection');
+  if(!wrap) return;
+  const { sessionsInPeriod, groups } = computeMuscleGroupStats(recoveryStatsPeriodDays);
+  const trainedGroups = WO_SPLIT_MUSCLE_ORDER.filter(g=> groups[g].count > 0);
+  const untouchedGroups = WO_SPLIT_MUSCLE_ORDER.filter(g=> groups[g].count === 0);
+  const sorted = trainedGroups.slice().sort((a,b)=>
+    groups[b].count - groups[a].count || (groups[b].scoreSum/groups[b].count) - (groups[a].scoreSum/groups[a].count));
+  const topGroup = sorted[0];
+  const maxCount = topGroup ? groups[topGroup].count : 0;
+  const periodLabelMap = {7:'۷ روز', 30:'۳۰ روز', 90:'۹۰ روز'};
+  const periodLabel = periodLabelMap[recoveryStatsPeriodDays] || 'کل مدت';
+
+  let insightHtml = '';
+  if(topGroup){
+    let extra = '';
+    if(untouchedGroups.length){
+      extra = ` هنوز سراغ <b>${MUSCLE_LABELS[untouchedGroups[0]]}</b> نرفتی — شاید وقتشه اضافه‌ش کنی.`;
+    } else if(sorted.length > 1){
+      const leastGroup = sorted[sorted.length-1];
+      if(groups[leastGroup].count < maxCount){
+        extra = ` <b>${MUSCLE_LABELS[leastGroup]}</b> کمتر از بقیه کار کرده.`;
+      }
+    }
+    insightHtml = `<div class="rf-insight">💡 توی این ${periodLabel} بیشترین تمرکزت روی <b>${MUSCLE_LABELS[topGroup]}</b> بوده، ${toFa(groups[topGroup].count)} بار.${extra}</div>`;
+  } else {
+    insightHtml = `<div class="rf-insight">تو این بازه هنوز هیچ تمرینی ثبت نشده. یه جلسه رو از تب «برنامه‌ی امروز» تموم کن تا آمارش اینجا بیفته.</div>`;
+  }
+
+  const totalCardHtml = `
+    <div class="focus-total-card">
+      <div style="text-align:center;flex:1;"><div class="ftl-num">${toFa(sessionsInPeriod)}</div><div class="ftl-label">جلسه‌ی تمرینی</div></div>
+      <div class="ftl-div"></div>
+      <div style="text-align:center;flex:1;"><div class="ftl-num">${toFa(trainedGroups.length)} از ${toFa(WO_SPLIT_MUSCLE_ORDER.length)}</div><div class="ftl-label">عضله‌ی درگیرشده</div></div>
+      <div class="ftl-div"></div>
+      <div style="text-align:center;flex:1;"><div class="ftl-num" style="font-size:14px;">${topGroup ? MUSCLE_LABELS[topGroup] : '—'}</div><div class="ftl-label">پرکارترین عضله</div></div>
+    </div>`;
+
+  const periodSegHtml = `
+    <div class="seg" id="recoveryStatsPeriodSeg" style="max-width:340px;margin:0 auto 14px;">
+      <button type="button" data-val="7">۷ روز</button>
+      <button type="button" data-val="30">۳۰ روز</button>
+      <button type="button" data-val="90">۹۰ روز</button>
+      <button type="button" data-val="all">کل مدت</button>
+    </div>`;
+
+  const rowsHtml = sorted.map(g=>{
+    const rec = groups[g];
+    const avg = rec.scoreSum / rec.count;
+    const pct = maxCount ? Math.round((rec.count/maxCount)*100) : 0;
+    const intensityLabel = avg >= 70 ? 'بالا' : (avg >= 40 ? 'متوسط' : 'سبک');
+    return `<div class="focus-stat-card">
+      <div class="fsc-top">
+        <span class="fsc-title">${MUSCLE_LABELS[g]}</span>
+        <span class="fsc-identity">${toFa(rec.count)} بار</span>
+      </div>
+      <div class="rf-bar-track"><div class="rf-bar-fill" style="width:${pct}%;"></div></div>
+      <div class="fsc-row"><span>شدت میانگین</span><span>${intensityLabel} · ${toFa(Math.round(avg))}٪</span></div>
+      <div class="fsc-row"><span>آخرین بار</span><span>${recoveryRelTime(rec.lastTs)}</span></div>
+    </div>`;
+  }).join('');
+
+  const untouchedHtml = untouchedGroups.length ? `
+    <div class="rf-untouched-head">عضله‌هایی که هنوز کار ندادی</div>
+    <div class="rf-untouched-row">${untouchedGroups.map(g=>`<span class="rf-untouched-chip">${MUSCLE_LABELS[g]}</span>`).join('')}</div>
+  ` : '';
+
+  const totalSessionsStored = (storeData.woHistory && storeData.woHistory.history) ? storeData.woHistory.history.length : 0;
+
+  wrap.innerHTML = `
+    ${totalCardHtml}
+    ${periodSegHtml}
+    ${insightHtml}
+    <div class="focus-stat-grid" style="padding:0 0 4px;">
+      ${rowsHtml || ''}
+    </div>
+    ${untouchedHtml}
+    <div class="rf-foot-note">بر اساس ${toFa(totalSessionsStored)} جلسه‌ی اخیرِ ثبت‌شده‌ت محاسبه شده.</div>
+  `;
+  setSegActive('recoveryStatsPeriodSeg', recoveryStatsPeriodDays === Infinity ? 'all' : String(recoveryStatsPeriodDays));
+}
+document.getElementById('recoveryStatsSection')?.addEventListener('click', (e)=>{
+  const btn = e.target.closest('#recoveryStatsPeriodSeg button[data-val]');
+  if(!btn) return;
+  recoveryStatsPeriodDays = (btn.dataset.val === 'all') ? Infinity : Number(btn.dataset.val);
+  renderRecoveryStats();
+});
 
 /* ---- لمس روی عضله = خط انیمیت‌شده به سمت بیرون کشیده می‌شه و اسم همون عضله رو نشون می‌ده.
    لمس دوباره‌ی همون عضله (یا لمس جای خالی) پاکش می‌کنه. تشخیص اینکه کدوم عضله لمس شده دقیقاً
@@ -17844,20 +18454,59 @@ async function recoveryHandleTap(evt){
   const zoneName = zid ? ZONE_ID_TO_NAME[zid] : null;
   const label = zoneName && ZONE_DISPLAY_LABEL[zoneName];
   if(!label || _recoveryLastZone === zoneName){ recoveryClearCallout(); return; }
-  recoveryDrawCallout(px, py, label, canvas.width);
+  recoveryDrawCallout(px, py, label, canvas.width, canvas.height);
   _recoveryLastZone = zoneName;
 }
-function recoveryDrawCallout(px, py, label, canvasWidth){
+function recoveryDrawCallout(px, py, label, canvasWidth, canvasHeight){
   const svg = document.getElementById('recoveryCalloutSvg');
   if(!svg) return;
   svg.innerHTML = '';
   const ns = 'http://www.w3.org/2000/svg';
-  const scale = canvasWidth / 340; // واحدهای SVG رو با عرض نمایشیِ تقریبی تصویر (۳۴۰px) هم‌مقیاس می‌کنه
+  const cw = canvasWidth, ch = canvasHeight || canvasWidth;
+  const scale = cw / 340; // واحدهای SVG رو با عرض نمایشیِ تقریبی تصویر (۳۴۰px) هم‌مقیاس می‌کنه
   const strokeW = 2.6 * scale, fontSize = 15 * scale, dotR = 4 * scale;
-  const goLeft = px > canvasWidth * 0.5;
+  const goLeft = px > cw * 0.5;
   const dx = goLeft ? -70*scale : 70*scale;
   const dy = (py < 90*scale) ? 55*scale : -55*scale; // نزدیک لبه‌ی بالا؟ خط رو به‌جای بالا می‌کشه پایین
   const ex = px + dx, ey = py + dy;
+
+  // ---- روشِ تضمینی: اول متن رو با x=0,y=0 می‌سازیم و با getBBox() می‌فهمیم
+  // مرورگر دقیقاً کجا و با چه عرض/ارتفاعی رسمش کرده (نه یه فرضِ تقریبی، و نه
+  // با تکیه به text-anchor/direction که رفتارشون تو RTL می‌تونه بین
+  // WebViewهای مختلفِ اندروید فرق کنه — دقیقاً همون چیزی که باعث می‌شد کادر
+  // یه‌جا باشه و متنِ واقعی جای دیگه‌ای رندر بشه). بعد کادر و موقعیتِ متن رو
+  // مستقیماً از روی همون bbox واقعی می‌سازیم، پس متن هندسی امکان نداره از
+  // کادرش بیرون بزنه. در آخر، کل لیبل به داخل محدوده‌ی خودِ تصویر هم قفل
+  // می‌شه تا حتی نزدیکِ لبه‌ی تصویر هم بریده/نصفه نشه.
+  const text = document.createElementNS(ns,'text');
+  text.setAttribute('x', 0); text.setAttribute('y', 0);
+  text.setAttribute('direction', 'rtl');
+  text.setAttribute('class','recovery-callout-label-text');
+  text.setAttribute('font-size', fontSize);
+  text.textContent = label;
+  svg.appendChild(text); // موقتاً مستقیم تو svg تا getBBox جواب واقعی بده
+
+  const padX = fontSize * 0.55, padY = fontSize * 0.42;
+  let bbox = null;
+  try{ bbox = text.getBBox(); }catch(e){}
+  if(!bbox || !(bbox.width > 0)){
+    // بازِ احتیاطیِ خیلی نادر (مثلاً svg هنوز درست attach نشده)
+    bbox = { x:0, y:-fontSize*0.75, width: label.length*fontSize*0.95, height: fontSize*1.1 };
+  }
+
+  const boxW = bbox.width + padX*2;
+  const boxH = bbox.height + padY*2;
+  const margin = 4*scale;
+  let boxX = goLeft ? (ex - boxW) : ex;
+  boxX = Math.max(margin, Math.min(cw - boxW - margin, boxX));
+  let boxY = ey - boxH/2;
+  boxY = Math.max(margin, Math.min(ch - boxH - margin, boxY));
+
+  // خط رابط به لبه‌ی نزدیکِ همین کادرِ (احتمالاً جابه‌جاشده‌ی) نهایی وصل می‌شه،
+  // نه به ex/ey خام، تا حتی وقتی کادر نزدیک لبه‌ی تصویر جابه‌جا می‌شه هم خط
+  // دقیقاً بهش برسه
+  const lineEx = goLeft ? (boxX + boxW) : boxX;
+  const lineEy = Math.max(boxY + boxH*0.22, Math.min(boxY + boxH*0.78, ey));
 
   const dot = document.createElementNS(ns,'circle');
   dot.setAttribute('cx', px); dot.setAttribute('cy', py); dot.setAttribute('r', dotR);
@@ -17866,10 +18515,10 @@ function recoveryDrawCallout(px, py, label, canvasWidth){
 
   const line = document.createElementNS(ns,'line');
   line.setAttribute('x1', px); line.setAttribute('y1', py);
-  line.setAttribute('x2', ex); line.setAttribute('y2', ey);
+  line.setAttribute('x2', lineEx); line.setAttribute('y2', lineEy);
   line.setAttribute('class','recovery-callout-line');
   line.setAttribute('stroke-width', strokeW);
-  const len = Math.hypot(ex-px, ey-py);
+  const len = Math.hypot(lineEx-px, lineEy-py);
   line.style.strokeDasharray = len;
   line.style.strokeDashoffset = len;
   svg.appendChild(line);
@@ -17877,39 +18526,21 @@ function recoveryDrawCallout(px, py, label, canvasWidth){
 
   const grp = document.createElementNS(ns,'g');
   grp.setAttribute('class','recovery-callout-label-group');
-
-  // متن رو اول می‌سازیم و به svg اضافه می‌کنیم تا با getBBox() عرضِ واقعیِ
-  // رندرشده‌اش رو بخونیم — قبلاً عرضِ کادر فقط از روی تعداد کاراکتر تخمین
-  // زده می‌شد (label.length * fontSize * 0.62) که برای بعضی لیبل‌های
-  // فارسی (مثل «سینه (پکتورالیس ماژور)») کمتر از عرض واقعی بود و متن از
-  // کادر بیرون می‌زد. حالا کادر همیشه دقیقاً اندازه‌ی متن واقعی می‌شه.
-  const text = document.createElementNS(ns,'text');
-  text.setAttribute('direction', 'rtl');
-  text.setAttribute('class','recovery-callout-label-text');
-  text.setAttribute('font-size', fontSize);
-  text.textContent = label;
-  grp.appendChild(text);
-  svg.appendChild(grp); // باید به سند وصل بشه تا getBBox زیر مقدار درست بده
-
-  const padX = fontSize * 0.55;
-  let measuredW = 0;
-  try{ measuredW = text.getBBox().width; }catch(e){}
-  const textW = Math.max(46*scale, (measuredW || label.length * fontSize * 0.62) + padX*2);
-  const textH = fontSize * 1.9;
-  const bgX = goLeft ? (ex - textW) : ex;
-  const bgY = ey - textH/2;
-
   const bg = document.createElementNS(ns,'rect');
-  bg.setAttribute('x', bgX); bg.setAttribute('y', bgY);
-  bg.setAttribute('width', textW); bg.setAttribute('height', textH);
-  bg.setAttribute('rx', textH*0.28);
+  bg.setAttribute('x', boxX); bg.setAttribute('y', boxY);
+  bg.setAttribute('width', boxW); bg.setAttribute('height', boxH);
+  bg.setAttribute('rx', boxH*0.28);
   bg.setAttribute('class','recovery-callout-label-bg');
-  grp.insertBefore(bg, text); // پس‌زمینه باید پشتِ متن نقاشی بشه
+  grp.appendChild(bg);
 
-  text.setAttribute('x', goLeft ? (bgX + textW - padX) : (bgX + padX));
-  text.setAttribute('y', ey + fontSize*0.32);
-  text.setAttribute('text-anchor', goLeft ? 'end' : 'start');
+  svg.removeChild(text); // از جای موقتش برداشته و تو گروه، پشتِ کادر می‌ذاریمش
+  grp.appendChild(text);
+  // موقعیتِ نهاییِ متن مستقیماً از روی bbox واقعی محاسبه می‌شه، نه با فرضِ
+  // رفتارِ anchor — پس همیشه دقیقاً وسطِ همین کادر می‌شینه
+  text.setAttribute('x', (boxX + padX) - bbox.x);
+  text.setAttribute('y', (boxY + (boxH - bbox.height)/2) - bbox.y);
 
+  svg.appendChild(grp);
   requestAnimationFrame(()=> requestAnimationFrame(()=> grp.classList.add('show')));
 }
 document.getElementById('recoveryImgStage')?.addEventListener('click', recoveryHandleTap);
@@ -17972,6 +18603,160 @@ function woMuscleEngagementRowHtml(engagement){
     .map(e=> e.label + ' ' + toFa(e.score) + '٪')
     .join('، ');
   return `<div class="fsc-row" style="align-items:flex-start;"><span>عضلات درگیر</span><span style="flex:1;margin-inline-start:8px;">${top}</span></div>`;
+}
+
+// ================== ساید‌تب «تاریخچه» (تب برنامه) ==================
+// آرشیو روزانه: هر روز که ثبت شده، با تپ‌کردن روش یه خلاصه‌ی کامل باز می‌شه — کارهای
+// انجام‌شده/نشده، درس امروز، استفاده از گوشی، زمان تو اپ، آپشن‌های استفاده‌شده، و اگه
+// تمرین داشته چه حرکاتی رو انجام داده. برای کارهای روزانه (do/avoid)، اسم دقیق فقط برای
+// روزهایی در دسترسه که saveData() (از بعد از این آپدیت) عکس‌فوریشون رو گرفته باشه؛ برای
+// روزهای قدیمی‌تر فقط تعداد نشون داده می‌شه، چون فاز/روزِ برنامه‌ی اون‌موقع دیگه قابل‌بازسازی
+// دقیق نیست.
+const FEATURE_LOG_LABELS = {
+  brain_math: '🧮 محاسبه‌ی سریع',
+  brain_stroop: '🎨 تست استروپ',
+  brain_sequence: '🔢 توالی رنگی',
+  brain_nback: '🧠 حافظه‌ی N-back',
+  brain_odd: '🔍 پیدا کردن فرد از جمع',
+  speech_impromptu: '🎙️ سخنرانی بداهه',
+  speech_story: '📖 داستان‌سازی'
+};
+function woDayKeyOf(ts){
+  const d = new Date(ts);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function getDayDetailForKey(dateKey){
+  const entryForDay = (storeData.entries||{})[dateKey] || null;
+  const doList = entryForDay && entryForDay.doItemsSnapshot ? entryForDay.doItemsSnapshot : null;
+  const avoidList = entryForDay && entryForDay.avoidItemsSnapshot ? entryForDay.avoidItemsSnapshot : null;
+  const momentList = BASE_MOMENT_ITEMS.map((label,i)=>({label, done: !!(entryForDay && entryForDay.momentDone && entryForDay.momentDone[i])}));
+  const doneCounts = {
+    do: entryForDay ? Object.values(entryForDay.done||{}).filter(Boolean).length : 0,
+    avoid: entryForDay ? Object.values(entryForDay.avoidDone||{}).filter(Boolean).length : 0,
+    // entry.total از قبل مجموعِ (کارهای مثبت + پرهیزها)ست، نه فقط یکی؛ برای همین وقتی
+    // عکس‌فوریِ دقیق نداریم، فقط یه عدد ترکیبی نشون می‌دیم، نه دو تا عدد جدا که ممکنه غلط باشن.
+    combinedTotal: entryForDay ? (entryForDay.total||0) : 0
+  };
+  const woEntries = ((storeData.woHistory && storeData.woHistory.history) || []).filter(h=> woDayKeyOf(h.ts) === dateKey);
+  const focusEntries = [];
+  Object.keys(storeData.focusSessions||{}).forEach(mode=>{
+    const fs = storeData.focusSessions[mode];
+    (fs.history||[]).filter(h=> woDayKeyOf(h.ts) === dateKey).forEach(h=>{
+      focusEntries.push({ mode, title: (FOCUS_MODES[mode] && FOCUS_MODES[mode].title) || mode, minutes: h.minutes, quality: h.quality });
+    });
+  });
+  const meditated = !!(storeData.meditationLog && storeData.meditationLog[dateKey]);
+  const featureLog = (storeData.dailyFeatureLog && storeData.dailyFeatureLog[dateKey]) || {};
+  const usageMinutes = (storeData.dailyUsageMinutes && storeData.dailyUsageMinutes[dateKey]) || 0;
+  return { dateKey, entry: entryForDay, doList, avoidList, momentList, doneCounts, woEntries, focusEntries, meditated, featureLog, usageMinutes };
+}
+function renderProgramHistory(){
+  const list = document.getElementById('programHistoryList');
+  if(!list) return;
+  const keys = Object.keys(storeData.entries||{}).sort((a,b)=> a<b?1:-1);
+  if(!keys.length){
+    list.innerHTML = '<div class="wo-hist-empty">هنوز هیچ روزی ثبت نشده؛ از فردا هر روز اینجا آرشیو می‌شه.</div>';
+    return;
+  }
+  const woDayKeys = new Set(((storeData.woHistory && storeData.woHistory.history) || []).map(h=> woDayKeyOf(h.ts)));
+  list.innerHTML = keys.map(key=>{
+    const e = storeData.entries[key] || {};
+    const momentTotal = BASE_MOMENT_ITEMS.length;
+    const done = Object.values(e.done||{}).filter(Boolean).length + Object.values(e.avoidDone||{}).filter(Boolean).length + Object.values(e.momentDone||{}).filter(Boolean).length;
+    const total = (e.total||0) + momentTotal;
+    const pct = total ? Math.round((done/total)*100) : 0;
+    const d = new Date(key+'T00:00:00');
+    const dateStr = d.toLocaleDateString('fa-IR', {weekday:'long', day:'numeric', month:'long'});
+    const badges = [];
+    if(storeData.meditationLog && storeData.meditationLog[key]) badges.push('🧘');
+    if(woDayKeys.has(key)) badges.push('🏋️');
+    return `<div class="hist-day-row" data-key="${key}">
+      <div class="hist-day-row-top">
+        <span class="hist-day-date">${dateStr}</span>
+        <span class="hist-day-pct" style="color:${pct>=70?'var(--accent)':pct>=40?'#f59e0b':'var(--muted)'}">${toFa(pct)}٪</span>
+      </div>
+      <div class="hist-day-row-bottom">
+        <span>${toFa(done)} از ${toFa(total)} کار انجام شد</span>
+        ${badges.length?`<span class="hist-day-badges">${badges.join(' ')}</span>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+function openDayDetail(dateKey){
+  const d = getDayDetailForKey(dateKey);
+  const dt = new Date(dateKey+'T00:00:00');
+  const dateHead = document.getElementById('dayDetailDate');
+  if(dateHead) dateHead.textContent = dt.toLocaleDateString('fa-IR', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+
+  let html = '';
+  html += '<div class="day-detail-section"><div class="day-detail-section-title">✅ خلاصه‌ی کارها</div>';
+  if(!d.entry){
+    html += '<div class="day-detail-empty">برای این روز هیچ داده‌ای ثبت نشده.</div>';
+  } else {
+    if(d.doList){
+      html += `<div class="day-detail-sub">کارهای مثبت (${toFa(d.doneCounts.do)} از ${toFa(d.doList.length)})</div>`;
+      html += d.doList.map(it=>`<div class="day-detail-item ${it.done?'done':''}">${it.done?'✅':'▫️'} ${escapeHtml(it.label)}</div>`).join('');
+    }
+    if(d.avoidList){
+      html += `<div class="day-detail-sub" style="margin-top:8px;">پرهیزها (${toFa(d.doneCounts.avoid)} از ${toFa(d.avoidList.length)})</div>`;
+      html += d.avoidList.map(it=>`<div class="day-detail-item ${it.done?'done':''}">${it.done?'✅':'▫️'} ${escapeHtml(it.label)}</div>`).join('');
+    }
+    if(!d.doList && !d.avoidList){
+      // بدون عکس‌فوری، جدا کردنِ «کارهای مثبت» از «پرهیزها» ممکن نیست (توی entry.total
+      // این دوتا با هم جمع شدن)، برای همین فقط یه عدد ترکیبی و درست نشون می‌دیم.
+      html += `<div class="day-detail-sub">مجموع کارهای مثبت و پرهیزها: ${toFa(d.doneCounts.do + d.doneCounts.avoid)} از ${toFa(d.doneCounts.combinedTotal)} انجام شد</div>`;
+    }
+    html += `<div class="day-detail-sub" style="margin-top:8px;">لحظه‌های حساس</div>`;
+    html += d.momentList.map(it=>`<div class="day-detail-item ${it.done?'done':''}">${it.done?'✅':'▫️'} ${escapeHtml(it.label)}</div>`).join('');
+  }
+  html += '</div>';
+
+  html += `<div class="day-detail-section"><div class="day-detail-section-title">📝 درس امروز</div>
+    <div class="day-detail-text">${(d.entry && d.entry.lesson) ? escapeHtml(d.entry.lesson) : 'چیزی ثبت نشده.'}</div></div>`;
+
+  html += `<div class="day-detail-section"><div class="day-detail-section-title">📱 گوشی و اپ</div>
+    <div class="fsc-row"><span>استفاده از گوشی</span><span>${(d.entry && d.entry.phoneHours!=null && d.entry.phoneHours!=='') ? toFa(d.entry.phoneHours)+' ساعت' : 'ثبت نشده'}</span></div>
+    <div class="fsc-row"><span>زمان گذرونده تو اپ</span><span>${d.usageMinutes>0 ? formatFocusDuration(Math.round(d.usageMinutes)) : 'ثبت نشده'}</span></div></div>`;
+
+  const featureRows = [];
+  if(d.meditated) featureRows.push('🧘 مدیتیشن');
+  d.focusEntries.forEach(f=> featureRows.push(`${f.title} · ${formatFocusDuration(f.minutes||0)}`));
+  Object.keys(d.featureLog).forEach(k=>{
+    if(k === 'workout' || k === 'meditation') return; // این دوتا جای دیگه‌ای نشون داده می‌شن
+    const label = FEATURE_LOG_LABELS[k] || k;
+    featureRows.push(label + (d.featureLog[k]>1 ? ' × '+toFa(d.featureLog[k]) : ''));
+  });
+  html += `<div class="day-detail-section"><div class="day-detail-section-title">🧩 آپشن‌های استفاده‌شده</div>
+    ${featureRows.length ? featureRows.map(r=>`<div class="day-detail-item">${r}</div>`).join('') : '<div class="day-detail-empty">چیزی ثبت نشده.</div>'}</div>`;
+
+  if(d.woEntries.length){
+    html += `<div class="day-detail-section"><div class="day-detail-section-title">🏋️ تمرین</div>`;
+    html += d.woEntries.map(h=>`
+      <div class="fsc-row"><span>${escapeHtml(h.dayLabel||'تمرین')}</span><span>${h.quality?woStarsHtml(h.quality):''}</span></div>
+      <div class="fsc-row"><span>مدت</span><span>${woFormatDuration(h.minutes||0)}</span></div>
+      <div class="fsc-row"><span>حرکت‌ها</span><span>${toFa(h.exercisesDone||0)} از ${toFa(h.exercisesTotal||0)}</span></div>
+      ${h.exerciseNames && h.exerciseNames.length ? `<div class="day-detail-sub" style="margin-top:4px;">${h.exerciseNames.map(escapeHtml).join('، ')}</div>` : ''}
+      ${woMuscleEngagementRowHtml(h.muscleEngagement)}
+    `).join('<div style="height:10px;"></div>');
+    html += `</div>`;
+  }
+
+  if(d.entry && (d.entry.mood || d.entry.energy || d.entry.weight)){
+    const moodLabels = {1:'افتضاح',2:'بد',3:'معمولی',4:'خوب',5:'عالی'};
+    html += `<div class="day-detail-section"><div class="day-detail-section-title">🙂 حال‌وهوا</div>
+      ${d.entry.mood?`<div class="fsc-row"><span>خلق‌وخو</span><span>${d.entry.mood}/۵ (${moodLabels[d.entry.mood]||''})</span></div>`:''}
+      ${d.entry.energy?`<div class="fsc-row"><span>انرژی</span><span>${toFa(d.entry.energy)}/۵</span></div>`:''}
+      ${d.entry.weight?`<div class="fsc-row"><span>وزن</span><span>${toFa(d.entry.weight)} کیلوگرم</span></div>`:''}</div>`;
+  }
+
+  const body = document.getElementById('dayDetailBody');
+  if(body) body.innerHTML = html;
+  const modal = document.getElementById('dayDetailModal');
+  if(modal) modal.classList.add('visible');
+}
+function closeDayDetail(){
+  const modal = document.getElementById('dayDetailModal');
+  if(modal) modal.classList.remove('visible');
 }
 
 function saveWoPrefs(){
@@ -19004,6 +19789,7 @@ try{
       if(state && state.isActive) resetPremiumPayBtnIfStuck();
       if(state && state.isActive){ try{ updateLiveCounter(); }catch(e){} }
       handleAppForegroundChange(!!(state && state.isActive));
+      handleAppUsageForegroundChange(!!(state && state.isActive));
     });
   }
 }catch(e){}
@@ -19025,6 +19811,39 @@ try{
    طبق راهنمای رسمی Supabase برای اپ‌های هایبرید (React Native/Capacitor)، باید
    خودمون رفرش خودکار رو دستی با چرخه‌ی resume/pause اپ هماهنگ کنیم، و علاوه بر اون
    سشن رو صریح دوباره چک کنیم تا اگه ایونتی گم شده باشه هم جبران بشه. */
+// ---- ردیابی «چقدر وقت امروز تو اپ گذشت» (برای پاپ‌آپ تاریخچه‌ی برنامه) ----
+// این عمداً از handleAppForegroundChange جداست چون اون تابع به sb (کلاینت Supabase)
+// وابسته‌ست و اگه هنوز آماده نباشه هیچ کاری نمی‌کنه؛ ردیابیِ زمان باید همیشه کار کنه.
+// هر ۶۰ ثانیه که اپ در پیش‌زمینه‌ست، زمان گذشته رو به دقیقه‌های امروز اضافه می‌کنه، و
+// لحظه‌ای که اپ می‌ره پس‌زمینه هم باقی‌مونده رو فوری فلاش می‌کنه تا چیزی گم نشه.
+let appUsageSessionStart = Date.now();
+let appUsageFlushTimer = setInterval(()=>flushAppUsage(), 60000);
+let lastAppUsageState = true;
+function flushAppUsage(){
+  if(!appUsageSessionStart) return;
+  const now = Date.now();
+  addAppUsageMinutes(now - appUsageSessionStart);
+  appUsageSessionStart = now;
+}
+function addAppUsageMinutes(ms){
+  if(!(ms > 0)) return;
+  if(!storeData.dailyUsageMinutes) storeData.dailyUsageMinutes = {};
+  const k = todayKey();
+  storeData.dailyUsageMinutes[k] = (storeData.dailyUsageMinutes[k]||0) + ms/60000;
+  try{ saveData(); }catch(e){}
+}
+function handleAppUsageForegroundChange(isActive){
+  if(isActive === lastAppUsageState) return;
+  lastAppUsageState = isActive;
+  if(isActive){
+    appUsageSessionStart = Date.now();
+    if(!appUsageFlushTimer) appUsageFlushTimer = setInterval(()=>flushAppUsage(), 60000);
+  } else {
+    flushAppUsage();
+    appUsageSessionStart = null;
+    if(appUsageFlushTimer){ clearInterval(appUsageFlushTimer); appUsageFlushTimer = null; }
+  }
+}
 let lastAppForegroundState = true;
 function handleAppForegroundChange(isActive){
   if(!sb) return;
@@ -19049,6 +19868,7 @@ document.addEventListener('visibilitychange', ()=>{
     try{ updateLiveCounter(); }catch(e){}
   }
   handleAppForegroundChange(document.visibilityState === 'visible');
+  handleAppUsageForegroundChange(document.visibilityState === 'visible');
 });
 async function iabVerifyOnServer(purchase){
   try{
@@ -19506,10 +20326,11 @@ if(menuTitleEl){
 }
 function openAdminPanel(){
   if(!isAppOwner) return;
-  const choice = prompt('چه کاری می‌خوای انجام بدی؟\n۱) فعال‌سازی پرمیوم با ایمیل حساب\n۲) لغو تعلیق یه کاربر با ایمیلش\n۳) لغو سکوت یه کاربر با ایمیلش\n\nعدد ۱ یا ۲ یا ۳ رو وارد کن:', '1');
+  const choice = prompt('چه کاری می‌خوای انجام بدی؟\n۱) فعال‌سازی پرمیوم با ایمیل حساب\n۲) لغو تعلیق یه کاربر با ایمیلش\n۳) لغو سکوت یه کاربر با ایمیلش\n۴) لغو بن دائم یه کاربر با ایمیلش\n\nعدد ۱ تا ۴ رو وارد کن:', '1');
   if(!choice) return;
   if(choice.trim() === '2' || choice.trim() === '۲'){ unsuspendChatUserByEmail(); return; }
   if(choice.trim() === '3' || choice.trim() === '۳'){ unmuteChatUserByEmail(); return; }
+  if(choice.trim() === '4' || choice.trim() === '۴'){ unbanChatUserForeverByEmail(); return; }
   const token = prompt('رمز مدیریت:');
   if(!token) return;
   // قبلاً اینجا شماره موبایل می‌گرفت، ولی هیچ ستونی برای phone تو profiles نیست و این
@@ -19537,3 +20358,3683 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+
+/* ===================== HOKM — STAGE 2 (لابی عمومی: ساخت/دیدن/پیوستن به میز) =====================
+   فقط اضافه شده؛ به هیچ تابع/متغیر موجود اپ (یا به ماژول دموی مرحله‌ی ۴ بالا) دست نزده —
+   یه IIFE کاملاً جدا با try/catch، تا اگه خطایی داد بقیه‌ی اپ (چک‌لیست/چت/SOS/دموی حکم)
+   از کار نیفته. همه‌چیز پیشوند hk داره.
+   از جدول‌ها و RPCهای hokm_02_lobby_rpc.sql استفاده می‌کنه (باید قبلش تو Supabase
+   SQL editor اجرا شده باشه). realtimeِ لابی با broadcast دستی (self:false، کانال
+   hokm_lobby) پیاده شده، نه postgres_changes — طبق سند معماری، برای مصرف کمِ پیام. */
+(function(){
+  try{
+    if(typeof window === 'undefined') return;
+
+    let hkLobbyChannel = null;
+    let hkMyRoom = null;      // { room_id, room_status, seats_filled, my_seat } یا null
+    let hkOpenRooms = [];     // [{ room_id, seats_filled, created_at }]
+    let hkLobbyBusy = false;
+
+    function hkLobbyEl(id){ return document.getElementById(id); }
+
+    function hkMinAgoLabel(createdAt){
+      try{
+        const min = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
+        return min < 1 ? 'همین الان' : (toFa(min) + ' دقیقه پیش');
+      }catch(e){ return ''; }
+    }
+
+    function hkLobbyErrorMessage(e){
+      const msg = (e && e.message) || '';
+      if(msg.indexOf('already_in_room') > -1 || msg.indexOf('already_in_this_room') > -1) return 'شما همین الان تو یه میز دیگه‌اید.';
+      if(msg.indexOf('room_full') > -1) return 'این میز همین الان پر شد؛ لیست به‌روزرسانی شد.';
+      if(msg.indexOf('room_not_open') > -1 || msg.indexOf('room_not_found') > -1) return 'این میز دیگه در دسترس نیست.';
+      if(msg.indexOf('not_authenticated') > -1) return 'برای این کار باید وارد حساب بشی.';
+      return 'مشکلی پیش اومد، دوباره امتحان کن.';
+    }
+
+    async function hkRefreshMyRoom(){
+      try{
+        const { data, error } = await sb.rpc('hokm_my_active_room');
+        if(error) throw error;
+        hkMyRoom = (data && data.length) ? data[0] : null;
+      }catch(e){
+        console.warn('hkRefreshMyRoom failed', e);
+        hkMyRoom = null;
+      }
+    }
+
+    async function hkRefreshOpenRooms(){
+      try{
+        const { data, error } = await sb.rpc('hokm_list_open_rooms');
+        if(error) throw error;
+        hkOpenRooms = data || [];
+      }catch(e){
+        console.warn('hkRefreshOpenRooms failed', e);
+        hkOpenRooms = [];
+      }
+    }
+
+    function hkRenderOpenRoomsList(){
+      const listEl = hkLobbyEl('hkLobbyList');
+      const emptyEl = hkLobbyEl('hkLobbyEmpty');
+      if(!listEl) return;
+      if(!hkOpenRooms.length){
+        listEl.innerHTML = '';
+        if(emptyEl) emptyEl.style.display = 'block';
+        return;
+      }
+      if(emptyEl) emptyEl.style.display = 'none';
+      listEl.innerHTML = hkOpenRooms.map(function(r){
+        const filled = r.seats_filled || 0;
+        return '<div class="hk-room-card">'
+          + '<div class="hk-room-info">'
+          + '<span class="hk-room-icon">🃏</span>'
+          + '<span class="hk-room-count">' + toFa(filled) + '/۴ نفر</span>'
+          + '<span class="hk-room-time">' + hkMinAgoLabel(r.created_at) + '</span>'
+          + '</div>'
+          + '<button type="button" class="hk-room-join-btn" data-join-room="' + escapeHtml(r.room_id) + '">پیوستن</button>'
+          + '</div>';
+      }).join('');
+    }
+
+    function hkRenderLobby(){
+      try{
+        const loadingEl = hkLobbyEl('hkLobbyLoading');
+        const myCard = hkLobbyEl('hkMyRoomCard');
+        const browse = hkLobbyEl('hkLobbyBrowse');
+        if(loadingEl) loadingEl.style.display = 'none';
+        if(!myCard || !browse) return;
+        if(hkMyRoom){
+          browse.style.display = 'none';
+          myCard.style.display = 'block';
+          const filled = hkMyRoom.seats_filled || 1;
+          const countEl = hkLobbyEl('hkMyRoomCount');
+          if(countEl) countEl.textContent = toFa(filled) + '/۴';
+          const seatsWrap = hkLobbyEl('hkMyRoomSeats');
+          if(seatsWrap){
+            let dots = '';
+            for(let i = 0; i < 4; i++){
+              dots += '<span class="hk-seat-dot' + (i < filled ? ' hk-seat-dot-filled' : '') + '"></span>';
+            }
+            seatsWrap.innerHTML = dots;
+          }
+          const statusEl = hkLobbyEl('hkMyRoomStatus');
+          const leaveBtn = hkLobbyEl('hkLeaveRoomBtn');
+          if(hkMyRoom.room_status === 'playing'){
+            if(statusEl) statusEl.textContent = '🎉 میز پر شد! بازی به‌زودی شروع می‌شه...';
+            if(leaveBtn) leaveBtn.style.display = 'none';
+          } else {
+            if(statusEl) statusEl.textContent = 'در انتظار بازیکن‌های بیشتر...';
+            if(leaveBtn) leaveBtn.style.display = '';
+          }
+        } else {
+          myCard.style.display = 'none';
+          browse.style.display = 'block';
+          hkRenderOpenRoomsList();
+        }
+      }catch(e){ console.warn('hkRenderLobby failed', e); }
+    }
+
+    function hkSubscribeLobbyChannel(){
+      try{
+        if(hkLobbyChannel || !sb) return;
+        hkLobbyChannel = sb.channel('hokm_lobby', { config: { broadcast: { self: false } } })
+          .on('broadcast', { event: 'update' }, function(msg){
+            hkHandleLobbyBroadcast(msg && msg.payload);
+          })
+          .subscribe();
+      }catch(e){ console.warn('hkSubscribeLobbyChannel failed', e); }
+    }
+
+    async function hkHandleLobbyBroadcast(payload){
+      try{
+        await hkRefreshMyRoom();
+        if(!hkMyRoom) await hkRefreshOpenRooms();
+        hkRenderLobby();
+      }catch(e){ console.warn('hkHandleLobbyBroadcast failed', e); }
+    }
+
+    function hkBroadcastLobbyUpdate(roomId){
+      try{
+        if(!hkLobbyChannel || !roomId) return;
+        hkLobbyChannel.send({ type: 'broadcast', event: 'update', payload: { room_id: roomId } });
+      }catch(e){ console.warn('hkBroadcastLobbyUpdate failed', e); }
+    }
+
+    async function hkCreateRoom(){
+      if(hkLobbyBusy) return;
+      hkLobbyBusy = true;
+      const btn = hkLobbyEl('hkCreateRoomBtn');
+      if(btn) btn.disabled = true;
+      try{
+        if(!sb || !publicChatUser) return;
+        const { error } = await sb.rpc('hokm_create_room');
+        if(error) throw error;
+        await hkRefreshMyRoom();
+        hkRenderLobby();
+        if(hkMyRoom) hkBroadcastLobbyUpdate(hkMyRoom.room_id);
+      }catch(e){
+        console.error('hkCreateRoom failed', e);
+        if(typeof showToast === 'function') showToast(hkLobbyErrorMessage(e), 'error');
+        await hkRefreshMyRoom();
+        if(!hkMyRoom) await hkRefreshOpenRooms();
+        hkRenderLobby();
+      }finally{
+        hkLobbyBusy = false;
+        if(btn) btn.disabled = false;
+      }
+    }
+
+    async function hkJoinRoom(roomId){
+      if(hkLobbyBusy || !roomId) return;
+      hkLobbyBusy = true;
+      try{
+        if(!sb || !publicChatUser) return;
+        const { error } = await sb.rpc('hokm_join_room', { p_room_id: roomId });
+        if(error) throw error;
+        await hkRefreshMyRoom();
+        hkRenderLobby();
+        hkBroadcastLobbyUpdate(roomId);
+      }catch(e){
+        console.error('hkJoinRoom failed', e);
+        if(typeof showToast === 'function') showToast(hkLobbyErrorMessage(e), 'error');
+        await hkRefreshMyRoom();
+        if(!hkMyRoom) await hkRefreshOpenRooms();
+        hkRenderLobby();
+      }finally{
+        hkLobbyBusy = false;
+      }
+    }
+
+    async function hkLeaveRoom(){
+      if(hkLobbyBusy || !hkMyRoom) return;
+      hkLobbyBusy = true;
+      const roomId = hkMyRoom.room_id;
+      try{
+        const { error } = await sb.rpc('hokm_leave_room', { p_room_id: roomId });
+        if(error) throw error;
+        hkMyRoom = null;
+        await hkRefreshOpenRooms();
+        hkRenderLobby();
+        hkBroadcastLobbyUpdate(roomId);
+      }catch(e){
+        console.error('hkLeaveRoom failed', e);
+        if(typeof showToast === 'function') showToast(hkLobbyErrorMessage(e), 'error');
+        await hkRefreshMyRoom();
+        hkRenderLobby();
+      }finally{
+        hkLobbyBusy = false;
+      }
+    }
+
+    function hkWireLobbyControls(){
+      const createBtn = hkLobbyEl('hkCreateRoomBtn');
+      if(createBtn && !createBtn.dataset.hkWired){
+        createBtn.dataset.hkWired = '1';
+        createBtn.addEventListener('click', hkCreateRoom);
+      }
+      const leaveBtn = hkLobbyEl('hkLeaveRoomBtn');
+      if(leaveBtn && !leaveBtn.dataset.hkWired){
+        leaveBtn.dataset.hkWired = '1';
+        leaveBtn.addEventListener('click', hkLeaveRoom);
+      }
+      const listEl = hkLobbyEl('hkLobbyList');
+      if(listEl && !listEl.dataset.hkWired){
+        listEl.dataset.hkWired = '1';
+        listEl.addEventListener('click', function(e){
+          const jbtn = e.target.closest('[data-join-room]');
+          if(!jbtn) return;
+          hkJoinRoom(jbtn.dataset.joinRoom);
+        });
+      }
+    }
+
+    async function hkLoadLobby(){
+      try{
+        if(!sb || !publicChatUser) return;
+        hkWireLobbyControls();
+        hkSubscribeLobbyChannel();
+        const loadingEl = hkLobbyEl('hkLobbyLoading');
+        if(loadingEl && !hkMyRoom && !hkOpenRooms.length) loadingEl.style.display = 'block';
+        await hkRefreshMyRoom();
+        if(!hkMyRoom) await hkRefreshOpenRooms();
+        hkRenderLobby();
+      }catch(e){ console.warn('hkLoadLobby failed', e); }
+    }
+
+    // تنها نقطه‌ی ورودیِ عمومی که app.js صداش می‌زنه (از showPublicTabInner).
+    window.hkLoadLobby = hkLoadLobby;
+
+  }catch(e){ console.warn('Hokm lobby module failed to load', e); }
+})();
+
+/* ===================== ESMFAMIL — STAGE 2، نیمه‌ی دوم (لابیِ واقعی، وصل به Supabase) =====================
+   نیمه‌ی اولِ STAGE 2 (esmfamil_01_schema.sql + esmfamil_02_lobby_rpc.sql) قبلاً رو Supabase اجرا شده.
+   این بخش، پیاده‌سازیِ mockِ STAGE 1 (efMockState/EF_MOCK_ROOMS، تویِ همون کامیت قبلی) رو با یه
+   ماژولِ واقعیِ عیناً هم‌الگو با ماژولِ لابیِ حکم (بالا) جایگزین می‌کنه: همون ۵ RPC
+   (esmfamil_create_room/join_room/leave_room/list_open_rooms/my_active_room)، همون سبکِ
+   realtimeِ broadcast دستی (self:false)، فقط رو کانالِ esmfamil_lobby به‌جایِ hokm_lobby.
+   HTML/CSS (efLobbyPanel و بچه‌هاش، پیشوندِ ef-) دست‌نخورده مونده — فقط دیتای واقعی جایِ
+   دیتایِ فِیک می‌شینه. یه IIFE کاملاً جدا با try/catch، پیشوند ef، تا اگه خطایی داد بقیه‌ی
+   اپ (شاملِ خودِ حکم) از کار نیفته. */
+(function(){
+  try{
+    if(typeof window === 'undefined') return;
+
+    const EF_CATEGORY_LABELS = {
+      name:'اسم', lastname:'فامیل', city:'شهر', country:'کشور', food:'غذا',
+      car:'ماشین', object:'اشیاء', fruit:'میوه', animal:'حیوان', color:'رنگ'
+    };
+
+    let efLobbyChannel = null;
+    let efMyRoom = null;      // { room_id, room_status, seats_filled, my_seat, categories, turns_per_player, round_seconds, is_creator } یا null
+    let efOpenRooms = [];     // [{ room_id, seats_filled, categories, turns_per_player, round_seconds, created_at }]
+    let efLobbyBusy = false;
+    const efSelectedCats = new Set();
+    let efSelectedTurns = 1;
+
+    // ---- STAGE 3 (۳/۳): دکمه‌ی شروعِ بازی + صفحه‌ی دور + UIِ انتخابِ حرف ----
+    let efRoomChannel = null;    // کانالِ esmfamil_room_<roomId>، موازیِ hk3RoomChannel
+    let efRoomChannelId = null;
+    let efCurrentRound = null;   // { round_id, round_index, picker_user_id, letter, status, total_rounds } یا null
+    let efStartBusy = false;
+    let efPickLetterBusy = false;
+
+    // ---- STAGE 4 (۳/۳): فرمِ پاسخ‌دهی (autosave)، دکمه‌ی استاپ، نمایشِ پاسخ‌های بقیه بعدِ
+    // استاپ. اسکیما + esmfamil_submit_answers (esmfamil_06/07) و esmfamil_stop_round +
+    // esmfamil_round_answers (esmfamil_08) قبلاً رو Supabase اجرا شدن؛ این بخش فقط کلاینته. ----
+    let efMyAnswers = {};            // { دسته: متن } — پاسخ‌های خودم برای دورِ جاری
+    let efAnswerSaveTimers = {};     // { دسته: timeoutId } — دیبانسِ autosave، هر دسته جدا
+    let efAnswerFetchedFor = null;   // round_id ای که پاسخ‌های خودم ازش prefill شده (جلوگیری از fetchِ تکراری)
+    let efStopBusy = false;
+    let efRoundAnswers = null;       // [{user_id, category, answer_text, is_valid, is_duplicate, score}] — همه‌ی پاسخ‌ها، فقط بعدِ استاپ
+    let efRoundAnswersFetchedFor = null;
+    let efProfileCache = {};         // { user_id: نامِ نمایشی } — برایِ جدولِ نتیجه بعدِ استاپ
+    let efAnswerTimerHandle = null;
+    let efAnswerDeadline = null;
+    let efAnswerTimerRoundId = null;
+    let efAutoStopTried = null;      // round_id ای که یه‌بار auto-stopِ پایانِ تایمر براش امتحان شده
+    // ---- STAGE 5: داوریِ خودکارِ لایه‌ی ۱ (esmfamil_judge_round) — بررسیِ مکانیکیِ
+    // خالی/حرفِ‌اول/تکراری، بلافاصله بعدِ دیدنِ status='judging'. ----
+    let efJudgeBusy = false;
+    let efJudgedFor = null;          // round_id ای که برایِ یه‌بار esmfamil_judge_round براش صدا زده شده
+
+    // ---- STAGE 7، نیمه‌ی دوم — کاملاً تکمیل شد (۱/۲ + ۲/۲): اعتراض به پاسخِ نامعتبرِ خودم
+    // (esmfamil_raise_objection) + نمایشِ وضعیت/نتیجه (esmfamil_round_objections) +
+    // auto-finalize بعدِ ۲۰ثانیه (esmfamil_finalize_objection) + رای‌دادنِ فعالِ بقیه رویِ
+    // اعتراضِ همدیگه (esmfamil_cast_objection_vote، پایین‌تر). ----
+    let efRoundObjections = [];      // [{objection_id, answer_id, category, objector_user_id, status, resolution, resolved_by, penalty_points, vote_deadline_at, yes_count, no_count, my_vote}]
+    let efObjectionsFetchedFor = null;
+    let efRaiseObjectionBusy = false;
+    let efObjectionFinalizeTimers = {}; // { objection_id: timeoutId } — auto-callِ esmfamil_finalize_objection سرِ موعد
+    // پنجره‌ی ۱۰ثانیه‌ایِ «اجازه‌ی زدنِ دکمه‌ی اعتراض» صرفاً نمایشیه (نه server-authoritative —
+    // دقیقاً هم‌روحِ efAnswerDeadline تو STAGE 4): چون esmfamil_current_round خودِ ended_at رو
+    // برنمی‌گردونه، این‌جا از لحظه‌ای که کلاینت «همه‌ی پاسخ‌ها امتیازِ قطعی گرفتن» رو می‌بینه
+    // (همون stillJudging=false تویِ efRenderResultsTable) به‌عنوانِ لنگرِ محلیِ done‌شدن استفاده
+    // می‌شه. اگه کاربر دیر بزنه، esmfamil_raise_objection خودش objection_window_closed
+    // برمی‌گردونه — این پنجره فقط UI رو زودتر مخفی می‌کنه، نه مرجعِ نهاییِ تصمیم.
+    let efObjectionWindowUntil = {}; // { round_id: msEpoch }
+    let efObjectionTickerHandle = null;
+    let efObjectionTickerRoundId = null;
+    // ---- STAGE 7، نیمه‌ی دوم، ۲/۲: رای‌دادنِ فعالِ بقیه‌ی نشسته‌ها (غیرِ معترض) رویِ اعتراضِ
+    // هم (esmfamil_cast_objection_vote) — تایید/رد، قابلِ تغییر تا قبلِ resolve. ----
+    let efCastVoteBusy = {}; // { objection_id: true } — گاردِ دابل‌تپ، جدا از efRaiseObjectionBusy
+    // عیناً همون فهرست/ترتیبِ v_allowed تو esmfamil_pick_letter (esmfamil_05)، تا هیچ حرفی
+    // این‌جا نشون داده بشه که سرور رد می‌کنه.
+    const EF_PERSIAN_LETTERS = [
+      'ا','ب','پ','ت','ث','ج','چ','ح','خ','د','ذ','ر','ز','ژ','س','ش','ص','ض','ط','ظ',
+      'ع','غ','ف','ق','ک','گ','ل','م','ن','و','ه','ی'
+    ];
+
+    function efEl(id){ return document.getElementById(id); }
+
+    function efMinAgoLabel(createdAt){
+      try{
+        const min = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
+        return min < 1 ? 'همین الان' : (toFa(min) + ' دقیقه پیش');
+      }catch(e){ return ''; }
+    }
+
+    function efLobbyErrorMessage(e){
+      const msg = (e && e.message) || '';
+      if(msg.indexOf('already_in_room') > -1) return 'شما همین الان تو یه میز دیگه‌اید.';
+      if(msg.indexOf('room_full') > -1) return 'این میز همین الان پر شد؛ لیست به‌روزرسانی شد.';
+      if(msg.indexOf('room_not_open') > -1 || msg.indexOf('room_not_found') > -1) return 'این میز دیگه در دسترس نیست.';
+      if(msg.indexOf('not_authenticated') > -1) return 'برای این کار باید وارد حساب بشی.';
+      if(msg.indexOf('invalid_categories') > -1) return 'باید بینِ ۶ تا ۹ دسته انتخاب کنی.';
+      if(msg.indexOf('invalid_turns') > -1) return 'تعدادِ نوبت‌ها نامعتبره.';
+      return 'مشکلی پیش اومد، دوباره امتحان کن.';
+    }
+
+    // ---- STAGE 3 (۳/۳): خطاهای esmfamil_start_round/esmfamil_pick_letter (esmfamil_04/05) ----
+    function efRoundErrorMessage(e){
+      const msg = (e && e.message) || '';
+      if(msg.indexOf('only_creator_can_start') > -1) return 'فقط سازنده‌ی میز می‌تونه بازی رو شروع کنه.';
+      if(msg.indexOf('not_enough_players') > -1) return 'برای شروع، حداقل ۲ نفر لازمه.';
+      if(msg.indexOf('round_in_progress') > -1) return 'دورِ قبلی هنوز تموم نشده.';
+      if(msg.indexOf('room_finished') > -1) return 'این بازی تموم شده.';
+      if(msg.indexOf('not_your_turn') > -1) return 'نوبتِ شما نیست.';
+      if(msg.indexOf('letter_already_picked') > -1) return 'حرفِ این دور قبلاً انتخاب شده.';
+      if(msg.indexOf('invalid_letter') > -1) return 'این حرف قابلِ انتخاب نیست.';
+      if(msg.indexOf('round_not_found') > -1) return 'این دور دیگه در دسترس نیست.';
+      if(msg.indexOf('not_in_room') > -1) return 'شما تو این میز نیستید.';
+      if(msg.indexOf('not_authenticated') > -1) return 'برای این کار باید وارد حساب بشی.';
+      // ---- STAGE 4 (۳/۳): خطاهای esmfamil_submit_answers/esmfamil_stop_round (esmfamil_07/08) ----
+      if(msg.indexOf('round_not_answering') > -1) return 'این دور دیگه باز نیست.';
+      if(msg.indexOf('invalid_category') > -1) return 'این دسته جزوِ دسته‌های این بازیه نیست.';
+      if(msg.indexOf('invalid_answers') > -1) return 'پاسخِ نامعتبر.';
+      // ---- STAGE 5: خطاهای esmfamil_judge_round (esmfamil_10) ----
+      if(msg.indexOf('round_not_stopped') > -1) return 'این دور هنوز استاپ نشده.';
+      // ---- STAGE 6: خطاهای لایه‌ی ۲ (esmfamil_12) — داوریِ هوشمند ----
+      if(msg.indexOf('layer2_judge_failed') > -1) return 'داوریِ هوشمندِ پاسخ‌ها موقتاً در دسترس نیست؛ چند لحظه دیگه دوباره امتحان کن.';
+      if(msg.indexOf('layer2_config_missing') > -1) return 'داوریِ هوشمند فعلاً تنظیم نشده؛ به پشتیبانی خبر بده.';
+      // ---- STAGE 7، نیمه‌ی دوم: خطاهای esmfamil_raise_objection/cast_objection_vote/finalize_objection (esmfamil_18) ----
+      if(msg.indexOf('round_not_done') > -1) return 'نتیجه‌ی این دور هنوز نهایی نشده.';
+      if(msg.indexOf('objection_window_closed') > -1) return 'مهلتِ ده‌ثانیه‌ایِ اعتراض تموم شده.';
+      if(msg.indexOf('answer_not_found') > -1) return 'پاسخی برای این دسته پیدا نشد.';
+      if(msg.indexOf('only_invalid_can_be_appealed') > -1) return 'فقط رویِ پاسخِ نامعتبر می‌شه اعتراض زد.';
+      if(msg.indexOf('already_objected_this_round') > -1 || msg.indexOf('already_objected') > -1) return 'شما تو این دور قبلاً اعتراض زدید.';
+      if(msg.indexOf('objection_not_found') > -1) return 'این اعتراض دیگه در دسترس نیست.';
+      if(msg.indexOf('objection_already_resolved') > -1) return 'نتیجه‌ی این اعتراض قبلاً مشخص شده.';
+      return 'مشکلی پیش اومد، دوباره امتحان کن.';
+    }
+
+    async function efRefreshMyRoom(){
+      try{
+        const { data, error } = await sb.rpc('esmfamil_my_active_room');
+        if(error) throw error;
+        efMyRoom = (data && data.length) ? data[0] : null;
+      }catch(e){
+        console.warn('efRefreshMyRoom failed', e);
+        efMyRoom = null;
+      }
+    }
+
+    async function efRefreshOpenRooms(){
+      try{
+        const { data, error } = await sb.rpc('esmfamil_list_open_rooms');
+        if(error) throw error;
+        efOpenRooms = data || [];
+      }catch(e){
+        console.warn('efRefreshOpenRooms failed', e);
+        efOpenRooms = [];
+      }
+    }
+
+    function efRenderOpenRoomsList(){
+      const listEl = efEl('efLobbyList');
+      const emptyEl = efEl('efLobbyEmpty');
+      if(!listEl) return;
+      if(!efOpenRooms.length){
+        listEl.innerHTML = '';
+        if(emptyEl) emptyEl.style.display = 'block';
+        return;
+      }
+      if(emptyEl) emptyEl.style.display = 'none';
+      listEl.innerHTML = efOpenRooms.map(function(r){
+        const filled = r.seats_filled || 0;
+        const catCount = (r.categories || []).length;
+        return '<div class="ef-room-card">'
+          + '<div class="ef-room-info">'
+          + '<span class="ef-room-icon">🔤</span>'
+          + '<span class="ef-room-count">' + toFa(filled) + ' نفر</span>'
+          + '<span class="ef-room-meta">' + toFa(catCount) + ' دسته · ' + toFa(r.turns_per_player) + ' نوبت · ' + efMinAgoLabel(r.created_at) + '</span>'
+          + '</div>'
+          + '<button type="button" class="ef-room-join-btn" data-join-room="' + escapeHtml(r.room_id) + '">پیوستن</button>'
+          + '</div>';
+      }).join('');
+    }
+
+    function efUpdateCategoryCounter(){
+      const counterEl = efEl('efCategoryCounter');
+      const submitBtn = efEl('efCreateSubmitBtn');
+      if(!counterEl) return;
+      const n = efSelectedCats.size;
+      counterEl.textContent = toFa(n) + ' از ۱۰ دسته انتخاب شده';
+      const ok = n >= 6 && n <= 9;
+      counterEl.classList.toggle('ef-count-ok', ok);
+      counterEl.classList.toggle('ef-count-bad', n > 9);
+      if(submitBtn) submitBtn.disabled = !ok;
+    }
+
+    function efResetCreateForm(){
+      efSelectedCats.clear();
+      efSelectedTurns = 1;
+      const grid = efEl('efCategoryGrid');
+      if(grid) grid.querySelectorAll('.ef-cat-chip').forEach(function(c){ c.classList.remove('selected'); });
+      const turnsSeg = efEl('efTurnsSegment');
+      if(turnsSeg) turnsSeg.querySelectorAll('.ef-turns-btn').forEach(function(b){ b.classList.toggle('active', b.dataset.turns === '1'); });
+      efUpdateCategoryCounter();
+    }
+
+    function efRenderLobby(){
+      try{
+        const myCard = efEl('efMyRoomCard');
+        const browse = efEl('efLobbyBrowse');
+        const form = efEl('efCreateForm');
+        const roundPanel = efEl('efRoundPanel'); // STAGE 3 (۳/۳)
+        if(!myCard || !browse) return;
+
+        // STAGE 9، نیمه‌ی اول: بازی طبیعی تموم شده (efShowGameEnd این حالت رو محلی ست کرده —
+        // esmfamil_my_active_room اصلاً میزهایِ 'finished' رو برنمی‌گردونه، پس این حالت هرگز
+        // از رویِ خودِ efRefreshMyRoom نمیاد). لابی/فرمِ ساخت/صفحه‌ی دور مخفی می‌مونن تا زیرِ
+        // efGameEndOverlay چیزِ اشتباهی دیده نشه؛ خودِ اورلی (efRenderGameEndOverlay) و
+        // دکمه‌ی «بازگشت به لابی»یِ داخلش مسئولِ ادامه‌ی مسیرن، نه این تابع.
+        if(efMyRoom && efMyRoom.room_status === 'finished'){
+          if(form) form.style.display = 'none';
+          browse.style.display = 'none';
+          myCard.style.display = 'none';
+          if(roundPanel) roundPanel.style.display = 'none';
+          return;
+        }
+
+        // STAGE 3 (۳/۳): بازی شروع شده → کلِ لابی (کارتِ میز/مرورِ میزها/فرمِ ساخت) مخفی،
+        // فقط صفحه‌ی دور نمایان.
+        if(efMyRoom && efMyRoom.room_status === 'playing'){
+          if(form) form.style.display = 'none';
+          browse.style.display = 'none';
+          myCard.style.display = 'none';
+          if(roundPanel){ roundPanel.style.display = 'block'; efRenderRoundScreen(); }
+          return;
+        }
+        if(roundPanel) roundPanel.style.display = 'none';
+
+        if(efMyRoom){
+          if(form) form.style.display = 'none';
+          browse.style.display = 'none';
+          myCard.style.display = 'block';
+          const filled = efMyRoom.seats_filled || 1;
+          const countEl = efEl('efMyRoomCount');
+          if(countEl) countEl.textContent = toFa(filled) + ' نفر';
+          const seatsWrap = efEl('efMyRoomSeats');
+          if(seatsWrap){
+            let dots = '';
+            for(let i = 0; i < filled; i++) dots += '<span class="ef-seat-dot ef-seat-dot-filled"></span>';
+            seatsWrap.innerHTML = dots;
+          }
+          const catsWrap = efEl('efMyRoomCats');
+          if(catsWrap){
+            catsWrap.innerHTML = (efMyRoom.categories || []).map(function(c){
+              return '<span class="ef-myroom-cat-chip">' + (EF_CATEGORY_LABELS[c] || c) + '</span>';
+            }).join('');
+          }
+          const turnsEl = efEl('efMyRoomTurns');
+          if(turnsEl) turnsEl.textContent = 'هر بازیکن ' + (efMyRoom.turns_per_player === 2 ? '۲ بار' : '۱ بار') + ' نوبتِ انتخابِ حرف داره';
+          // اینجا room_status همیشه 'waiting'ه (حالتِ 'playing' بالاتر return شد) —
+          // STAGE 3 (۳/۳): دکمه‌ی «شروع بازی» فقط برایِ سازنده، فقط با حداقل ۲ نفر.
+          const statusEl = efEl('efMyRoomStatus');
+          const leaveBtn = efEl('efLeaveRoomBtn');
+          const startBtn = efEl('efStartGameBtn');
+          const canStart = !!efMyRoom.is_creator && filled >= 2;
+          if(startBtn){
+            startBtn.style.display = canStart ? '' : 'none';
+            startBtn.disabled = efStartBusy;
+          }
+          if(statusEl){
+            if(canStart) statusEl.textContent = 'آماده‌ی شروعه — هر وقت خواستی بزن «شروع بازی»!';
+            else if(efMyRoom.is_creator) statusEl.textContent = 'در انتظارِ حداقل یه بازیکنِ دیگه...';
+            else statusEl.textContent = 'در انتظارِ شروعِ بازی توسط سازنده‌ی میز...';
+          }
+          if(leaveBtn) leaveBtn.style.display = '';
+        } else {
+          myCard.style.display = 'none';
+          const formOpen = !!(form && form.style.display === 'block');
+          browse.style.display = formOpen ? 'none' : 'block';
+          if(!formOpen) efRenderOpenRoomsList();
+        }
+      }catch(e){ console.warn('efRenderLobby failed', e); }
+    }
+
+    function efSubscribeLobbyChannel(){
+      try{
+        if(efLobbyChannel || !sb) return;
+        efLobbyChannel = sb.channel('esmfamil_lobby', { config: { broadcast: { self: false } } })
+          .on('broadcast', { event: 'update' }, function(msg){
+            efHandleLobbyBroadcast(msg && msg.payload);
+          })
+          .subscribe();
+      }catch(e){ console.warn('efSubscribeLobbyChannel failed', e); }
+    }
+
+    async function efHandleLobbyBroadcast(payload){
+      try{
+        await efRefreshMyRoom();
+        if(efMyRoom){
+          efSubscribeRoomChannel(efMyRoom.room_id); // STAGE 3 (۳/۳)
+        } else {
+          efUnsubscribeRoomChannel(); // STAGE 3 (۳/۳)
+          efCurrentRound = null;
+          efResetRoundAnswerState(); // STAGE 4 (۳/۳)
+          await efRefreshOpenRooms();
+        }
+        efRenderLobby();
+      }catch(e){ console.warn('efHandleLobbyBroadcast failed', e); }
+    }
+
+    function efBroadcastLobbyUpdate(roomId){
+      try{
+        if(!efLobbyChannel || !roomId) return;
+        efLobbyChannel.send({ type: 'broadcast', event: 'update', payload: { room_id: roomId } });
+      }catch(e){ console.warn('efBroadcastLobbyUpdate failed', e); }
+    }
+
+    // =====================================================================
+    // STAGE 3 (۳/۳) — دکمه‌ی «شروع بازی»، صفحه‌ی دور، UIِ انتخابِ حرف.
+    // ۱/۳ و ۲/۳ (اسکیما + esmfamil_start_round + esmfamil_pick_letter/esmfamil_current_round)
+    // قبلاً رو Supabase اجرا شدن (esmfamil_03/04/05). این بخش فقط کلاینته.
+    //
+    // یه کانالِ realtimeِ دیگه، این‌بار per-room (esmfamil_room_<roomId>، موازیِ hokm_room_<id>
+    // تو hk3SubscribeRoomChannel) — جدا از efLobbyChannel که فقط برای لیستِ میزهای بازه.
+    // هر بازیکنی که تو یه میز فعاله (چه waiting چه playing) روش سابسکرایب می‌مونه، تا وقتی
+    // سازنده esmfamil_start_round رو صدا می‌زنه، بقیه هم لحظه‌ای بفهمن (نه با poll).
+    // broadcast همیشه بعدِ موفقیتِ RPC از سمتِ کلاینت زده می‌شه (دقیقاً طبقِ کامنتِ خودِ
+    // esmfamil_pick_letter تو esmfamil_05)، نه از تریگرِ دیتابیس.
+    // =====================================================================
+
+    // بازسازیِ دورِ جاری از سرور — برای وقتی صفحه تازه لود شده و میز از قبل 'playing'ه
+    // (چون RLSِ esmfamil_rounds بسته‌ست، تنها راه همینه؛ broadcast فقط لحظه‌ای که اتفاق
+    // می‌افته به گوشِ سابسکرایب‌شده‌ها می‌رسه، نه به کسی که تازه صفحه رو باز کرده).
+    async function efFetchCurrentRound(roomId){
+      try{
+        const { data, error } = await sb.rpc('esmfamil_current_round', { p_room_id: roomId });
+        if(error) throw error;
+        efCurrentRound = (data && data.length) ? data[0] : null;
+        efMarkActivity(); // STAGE 8/۲: سینکِ واقعیِ دور، فعالیتِ واقعیه — واچ‌داگ رو صفر کن
+      }catch(e){ console.warn('efFetchCurrentRound failed', e); efCurrentRound = null; }
+    }
+
+    function efSubscribeRoomChannel(roomId){
+      try{
+        if(!sb || !roomId) return;
+        if(efRoomChannel && efRoomChannelId === roomId) return;
+        if(efRoomChannel){ try{ sb.removeChannel(efRoomChannel); }catch(e){} efRoomChannel = null; }
+        efRoomChannelId = roomId;
+        efRoomChannel = sb.channel('esmfamil_room_' + roomId, { config: { broadcast: { self: false } } })
+          .on('broadcast', { event: 'round_started' }, function(msg){ efHandleRoundStarted(msg && msg.payload); })
+          .on('broadcast', { event: 'letter_picked' }, function(msg){ efHandleLetterPicked(msg && msg.payload); })
+          .on('broadcast', { event: 'round_stopped' }, function(msg){ efHandleRoundStopped(msg && msg.payload); }) // STAGE 4 (۳/۳)
+          .on('broadcast', { event: 'round_judged' }, function(msg){ efHandleRoundJudged(msg && msg.payload); }) // STAGE 5
+          .on('broadcast', { event: 'room_cancelled' }, function(msg){ efHandleRoomCancelled(msg && msg.payload && msg.payload.reason); }) // STAGE 8
+          .on('broadcast', { event: 'game_finished' }, function(msg){ efHandleGameFinished(msg && msg.payload); }) // STAGE 9، نیمه‌ی اول
+          .on('broadcast', { event: 'objection_raised' }, function(msg){ efHandleObjectionRaised(msg && msg.payload); }) // STAGE 7، نیمه‌ی دوم
+          .on('broadcast', { event: 'objection_voted' }, function(msg){ efHandleObjectionVoted(msg && msg.payload); }) // STAGE 7، نیمه‌ی دوم، ۲/۲
+          .on('broadcast', { event: 'objection_resolved' }, function(msg){ efHandleObjectionResolved(msg && msg.payload); }) // STAGE 7، نیمه‌ی دوم
+          .subscribe();
+      }catch(e){ console.warn('efSubscribeRoomChannel failed', e); }
+    }
+
+    function efUnsubscribeRoomChannel(){
+      try{ if(efRoomChannel) sb.removeChannel(efRoomChannel); }catch(e){}
+      efRoomChannel = null; efRoomChannelId = null;
+    }
+
+    // یه بازیکنِ دیگه (یا خودمون تو یه تبِ دیگه) esmfamil_start_round رو صدا زده — پیامِ
+    // broadcast خودِ خروجیِ RPC رو حمل می‌کنه، پس نیازی به یه fetchِ اضافه نیست.
+    async function efHandleRoundStarted(payload){
+      try{
+        if(!payload || !payload.round_id) return;
+        efMarkActivity(); // STAGE 8/۲: broadcastِ واقعی رسید، واچ‌داگ صفر بشه
+        efCurrentRound = {
+          round_id: payload.round_id, round_index: payload.round_index,
+          picker_user_id: payload.picker_user_id, letter: null,
+          status: 'awaiting_letter', total_rounds: payload.total_rounds
+        };
+        efResetRoundAnswerState(); // STAGE 4 (۳/۳): دورِ تازه‌ست، فرم/تایمر/پاسخ‌های دورِ قبل نباید بمونن
+        await efRefreshMyRoom(); // status از 'waiting' به 'playing' عوض شده
+        efRenderLobby();
+      }catch(e){ console.warn('efHandleRoundStarted failed', e); }
+    }
+
+    // پیکر (picker) این دور، حرف رو انتخاب کرد — فقط وضعیتِ محلیِ همین دور رو آپدیت می‌کنیم.
+    function efHandleLetterPicked(payload){
+      try{
+        if(!payload || !efCurrentRound || efCurrentRound.round_id !== payload.round_id) return;
+        efMarkActivity(); // STAGE 8/۲: broadcastِ واقعی رسید، واچ‌داگ صفر بشه
+        efCurrentRound.letter = payload.letter;
+        efCurrentRound.status = 'answering';
+        efRenderRoundScreen();
+      }catch(e){ console.warn('efHandleLetterPicked failed', e); }
+    }
+
+    // صفحه‌ی دور: می‌گه نوبتِ کیه، و اگه نوبتِ خودمونه، گریدِ ۳۲ حرف رو نشون می‌ده؛ بعدِ
+    // انتخاب، حرف رو به‌صورتِ یه چیپِ بزرگ نشون می‌ده (فرمِ پاسخ‌دهی، STAGEِ بعدیه).
+    function efRenderRoundScreen(){
+      try{
+        if(!efMyRoom || efMyRoom.room_status !== 'playing') return;
+        const idxEl = efEl('efRoundIndexLabel');
+        const totalEl = efEl('efRoundTotalLabel');
+        const turnBox = efEl('efRoundTurnBox');
+        const grid = efEl('efLetterGrid');
+        const chip = efEl('efRoundLetterChip');
+        if(!turnBox) return;
+
+        if(!efCurrentRound){
+          turnBox.textContent = 'در حالِ بارگذاریِ دور...';
+          turnBox.classList.remove('ef-my-turn');
+          if(grid) grid.style.display = 'none';
+          if(chip) chip.style.display = 'none';
+          return;
+        }
+
+        if(idxEl) idxEl.textContent = toFa((efCurrentRound.round_index || 0) + 1);
+        if(totalEl) totalEl.textContent = toFa(efCurrentRound.total_rounds || 1);
+
+        const isMyTurn = !!(publicChatUser && efCurrentRound.picker_user_id === publicChatUser.id);
+        const awaitingLetter = efCurrentRound.status === 'awaiting_letter';
+
+        if(awaitingLetter && isMyTurn){
+          turnBox.textContent = 'نوبتِ شماست — یه حرف انتخاب کن';
+          turnBox.classList.add('ef-my-turn');
+          if(chip) chip.style.display = 'none';
+          if(grid){
+            grid.style.display = 'grid';
+            if(!grid.dataset.efBuilt){
+              grid.dataset.efBuilt = '1';
+              grid.innerHTML = EF_PERSIAN_LETTERS.map(function(L){
+                return '<button type="button" class="ef-letter-btn" data-letter="' + L + '">' + L + '</button>';
+              }).join('');
+              grid.addEventListener('click', function(e){
+                const btn = e.target.closest('.ef-letter-btn');
+                if(btn) efPickLetter(btn.dataset.letter);
+              });
+            }
+            grid.querySelectorAll('.ef-letter-btn').forEach(function(b){ b.disabled = efPickLetterBusy; });
+          }
+          efHideAnswerAndResultsPanels(); // STAGE 4 (۳/۳): قبلِ انتخابِ حرف هنوز چیزی برایِ نمایش نیست
+        } else if(awaitingLetter){
+          turnBox.textContent = 'در انتظارِ انتخابِ حرف توسط بازیکنِ دیگه...';
+          turnBox.classList.remove('ef-my-turn');
+          if(grid) grid.style.display = 'none';
+          if(chip) chip.style.display = 'none';
+          efHideAnswerAndResultsPanels(); // STAGE 4 (۳/۳)
+        } else {
+          turnBox.textContent = 'حرفِ این دور انتخاب شد ✅';
+          turnBox.classList.remove('ef-my-turn');
+          if(grid) grid.style.display = 'none';
+          if(chip){
+            chip.style.display = 'block';
+            chip.innerHTML = '<span class="ef-round-letter-big">' + escapeHtml(efCurrentRound.letter || '') + '</span>';
+          }
+          // ---- STAGE 4 (۳/۳): حرف انتخاب شده — یا تو 'answering'یم (فرمِ پاسخ‌دهی + استاپ)،
+          // یا بعدِ استاپ تو 'judging'/'done' (نمایشِ پاسخِ همه). ----
+          if(efCurrentRound.status === 'answering'){
+            const resultsPanel0 = efEl('efResultsPanel');
+            if(resultsPanel0) resultsPanel0.style.display = 'none';
+            const answerPanel0 = efBuildAnswerPanelIfNeeded();
+            if(answerPanel0) answerPanel0.style.display = 'block';
+            efBuildAnswerFields();
+            efEnsureMyAnswersLoaded();
+            efStartAnswerTimerIfNeeded();
+          } else {
+            efClearAnswerTimer();
+            const answerPanel1 = efEl('efAnswerPanel');
+            if(answerPanel1) answerPanel1.style.display = 'none';
+            efEnsureRoundAnswersLoaded();
+          }
+        }
+      }catch(e){ console.warn('efRenderRoundScreen failed', e); }
+    }
+
+    // =====================================================================
+    // STAGE 4 (۳/۳) — فرمِ پاسخ‌دهی هر دسته (autosave)، دکمه‌ی استاپ، نمایشِ پاسخ‌های
+    // بقیه بعدِ استاپ. اسکیما + esmfamil_submit_answers (esmfamil_06/07) و
+    // esmfamil_stop_round + esmfamil_round_answers (esmfamil_08) قبلاً رو Supabase اجرا
+    // شدن؛ این بخش فقط کلاینته.
+    //
+    // markupِ efAnswerPanel/efResultsPanel (خالی، زیرِ efRoundLetterChip تویِ efRoundPanel)
+    // تو index.html اضافه شده؛ محتوایِ داخلشون (efAnswerFields/efResultsPanel) عیناً هم‌الگو
+    // با efLetterGrid (که grid.dataset.efBuilt یه‌بار innerHTML رو می‌سازه) این‌جا lazy پر می‌شن.
+    //
+    // Autosave: هر ورودی با یه دیبانسِ ۷۰۰ میلی‌ثانیه‌ای (به‌ازایِ هر دسته جدا) به
+    // esmfamil_submit_answers صدا می‌زنه — همون امضایِ jsonb {دسته: متن} که خودِ RPC
+    // می‌خواد. قبلِ زدنِ استاپ، efFlushAllAnswers هر دیبانسِ معلق رو فوری flush می‌کنه تا
+    // آخرین ادیت گم نشه.
+    //
+    // تایمر: صرفاً نمایشیه (نه server-authoritative — سرور فعلاً هیچ اجرایی برایِ پایانِ
+    // خودکارِ دور نداره)، از efMyRoom.round_seconds، از لحظه‌ای که این کلاینت وضعیتِ
+    // 'answering' رو می‌بینه شمرده می‌شه. صفر که بشه، همین کلاینت یه‌بار esmfamil_stop_round
+    // رو صدا می‌زنه (بندِ «ب» سندِ معماری: «یا استاپ یا پایانِ تایمر») — اگه یه کلاینتِ دیگه
+    // زودتر استاپ زده باشه، این صدازدن فقط round_not_answering می‌گیره که بی‌خطر ignore
+    // می‌شه (دقیقاً همون رفتاری که esmfamil_stop_round برایِ استاپِ هم‌زمانِ چند نفر پیش‌بینی
+    // کرده).
+    // =====================================================================
+
+    function efHideAnswerAndResultsPanels(){
+      const a = efEl('efAnswerPanel'); if(a) a.style.display = 'none';
+      const r = efEl('efResultsPanel'); if(r) r.style.display = 'none';
+      const n = efEl('efNextRoundBtn'); if(n) n.style.display = 'none'; // STAGE 9، نیمه‌ی اول
+    }
+
+    function efResetRoundAnswerState(){
+      efMyAnswers = {};
+      efAnswerFetchedFor = null;
+      efRoundAnswers = null;
+      efRoundAnswersFetchedFor = null;
+      efAutoStopTried = null;
+      efStopBusy = false;
+      efJudgeBusy = false;  // STAGE 5
+      efJudgedFor = null;   // STAGE 5
+      efClearAnswerTimer();
+      Object.keys(efAnswerSaveTimers).forEach(function(k){
+        if(efAnswerSaveTimers[k]) clearTimeout(efAnswerSaveTimers[k]);
+      });
+      efAnswerSaveTimers = {};
+      const fieldsWrap = efEl('efAnswerFields');
+      if(fieldsWrap){
+        fieldsWrap.querySelectorAll('[data-ef-cat]').forEach(function(inp){ inp.value = ''; });
+        fieldsWrap.querySelectorAll('[id^="efAnsStatus_"]').forEach(function(s){ s.textContent = ''; });
+      }
+      const resultsPanel = efEl('efResultsPanel');
+      if(resultsPanel){ resultsPanel.innerHTML = ''; resultsPanel.style.display = 'none'; }
+      const answerPanel = efEl('efAnswerPanel');
+      if(answerPanel) answerPanel.style.display = 'none';
+      // STAGE 9، نیمه‌ی اول: دورِ تازه شروع شده، دکمه‌ی «دورِ بعدی»یِ دورِ قبل نباید دیده بشه —
+      // تا efRenderResultsTableِ همینِ دورِ تازه (بعدِ استاپ/داوریِ خودش) دوباره تصمیم بگیره.
+      const nextRoundBtn = efEl('efNextRoundBtn');
+      if(nextRoundBtn) nextRoundBtn.style.display = 'none';
+      // STAGE 7، نیمه‌ی دوم: اعتراضِ دورِ قبل و تایمرهایِ auto-finalizeَش نباید به دورِ تازه درز کنه.
+      efRoundObjections = [];
+      efObjectionsFetchedFor = null;
+      efRaiseObjectionBusy = false;
+      efCastVoteBusy = {}; // STAGE 7، نیمه‌ی دوم، ۲/۲
+      Object.keys(efObjectionFinalizeTimers).forEach(function(k){ clearTimeout(efObjectionFinalizeTimers[k]); });
+      efObjectionFinalizeTimers = {};
+      efClearObjectionTicker();
+    }
+
+    // ---------------------------------------------------------------------
+    // فرمِ پاسخ‌دهی + autosave
+    // ---------------------------------------------------------------------
+
+    // markupِ efAnswerPanel (efAnswerTimerLabel/efAnswerFields/efStopRoundBtn) و
+    // efResultsPanel از قبل تو index.html هستن (زیرِ efRoundLetterChip، همون efRoundPanel) —
+    // این تابع فقط پیدا می‌کنه و دکمه‌ی استاپ رو (یه‌بار) قلاب می‌کنه. اگه به هر دلیلی
+    // markupِ HTML نبود (مثلاً یه نسخه‌ی قدیمی‌تر)، برایِ اطمینان یه fallback می‌سازه —
+    // دقیقاً هم‌کلاس با CSSِ efAnswerPanel، نه استایلِ inline.
+    function efBuildAnswerPanelIfNeeded(){
+      let panel = efEl('efAnswerPanel');
+      if(!panel){
+        const roundPanel = efEl('efRoundPanel');
+        if(!roundPanel) return null;
+        panel = document.createElement('div');
+        panel.id = 'efAnswerPanel';
+        panel.className = 'ef-answer-panel';
+        panel.style.display = 'none';
+        panel.innerHTML =
+            '<div class="ef-answer-timer" id="efAnswerTimerLabel"></div>'
+          + '<div class="ef-answer-fields" id="efAnswerFields"></div>'
+          + '<button type="button" class="ef-stop-btn" id="efStopRoundBtn">استاپ! 🛑</button>';
+        roundPanel.appendChild(panel);
+      }
+      const stopBtn = efEl('efStopRoundBtn');
+      if(stopBtn && !stopBtn.dataset.efWired){
+        stopBtn.dataset.efWired = '1';
+        stopBtn.addEventListener('click', efStopRound);
+      }
+      return panel;
+    }
+
+    function efBuildAnswerFields(){
+      const panel = efBuildAnswerPanelIfNeeded();
+      if(!panel) return;
+      const fieldsWrap = efEl('efAnswerFields');
+      if(!fieldsWrap || fieldsWrap.dataset.efBuilt) return;
+      fieldsWrap.dataset.efBuilt = '1';
+      const cats = (efMyRoom && efMyRoom.categories) || [];
+      fieldsWrap.innerHTML = cats.map(function(c){
+        const label = EF_CATEGORY_LABELS[c] || c;
+        return '<div class="ef-answer-row">'
+          + '<label class="ef-answer-label">'
+          + '<span>' + escapeHtml(label) + '</span>'
+          + '<span class="ef-answer-status" id="efAnsStatus_' + c + '"></span>'
+          + '</label>'
+          + '<input type="text" maxlength="40" dir="rtl" class="ef-answer-input" data-ef-cat="' + c + '" '
+          + 'id="efAnsInput_' + c + '" placeholder="کلمه‌ای که با حرفِ انتخاب‌شده شروع بشه" />'
+          + '</div>';
+      }).join('');
+      fieldsWrap.addEventListener('input', function(e){
+        const input = e.target.closest('[data-ef-cat]');
+        if(!input) return;
+        efOnAnswerInput(input.dataset.efCat, input.value);
+      });
+    }
+
+    function efSetFieldStatus(category, status){
+      const el = efEl('efAnsStatus_' + category);
+      if(!el) return;
+      const map = { pending: '...', saving: 'در حالِ ذخیره...', saved: 'ذخیره شد ✓', error: 'خطا در ذخیره' };
+      el.textContent = map[status] || '';
+      el.classList.remove('ef-status-saved', 'ef-status-error');
+      if(status === 'saved') el.classList.add('ef-status-saved');
+      if(status === 'error') el.classList.add('ef-status-error');
+    }
+
+    function efOnAnswerInput(category, value){
+      efMyAnswers[category] = value;
+      efSetFieldStatus(category, 'pending');
+      if(efAnswerSaveTimers[category]) clearTimeout(efAnswerSaveTimers[category]);
+      efAnswerSaveTimers[category] = setTimeout(function(){ efSaveAnswerNow(category); }, 700);
+    }
+
+    // هم از دیبانسِ بالا صدا زده می‌شه، هم از efFlushAllAnswers (قبلِ استاپ) برایِ ذخیره‌ی
+    // فوریِ آخرین ادیت.
+    async function efSaveAnswerNow(category){
+      try{
+        if(efAnswerSaveTimers[category]){ clearTimeout(efAnswerSaveTimers[category]); efAnswerSaveTimers[category] = null; }
+        if(!efCurrentRound || efCurrentRound.status !== 'answering' || !sb) return;
+        const val = efMyAnswers[category] || '';
+        efSetFieldStatus(category, 'saving');
+        const payload = {}; payload[category] = val;
+        const { error } = await sb.rpc('esmfamil_submit_answers', { p_round_id: efCurrentRound.round_id, p_answers: payload });
+        if(error) throw error;
+        efSetFieldStatus(category, 'saved');
+      }catch(e){
+        console.warn('efSaveAnswerNow failed', e);
+        efSetFieldStatus(category, 'error');
+      }
+    }
+
+    async function efFlushAllAnswers(){
+      const cats = Object.keys(Object.assign({}, efAnswerSaveTimers, efMyAnswers));
+      await Promise.all(cats.map(function(c){ return efSaveAnswerNow(c); }));
+    }
+
+    // prefillِ فرمِ خودم — برایِ وقتی صفحه وسطِ دور رفرش می‌شه (پاسخ‌هایی که قبلاً autosave
+    // شدن نباید گم به‌نظر برسن). esmfamil_round_answers قبلِ استاپ فقط ردیفِ خودِ caller رو
+    // برمی‌گردونه (طبقِ RLS/منطقِ خودِ RPC)، پس فیلترِ اضافه‌ای لازم نیست، ولی برایِ اطمینان
+    // رویِ user_id هم چک می‌کنیم.
+    async function efEnsureMyAnswersLoaded(){
+      try{
+        if(!efCurrentRound || !sb) return;
+        if(efAnswerFetchedFor === efCurrentRound.round_id) return;
+        efAnswerFetchedFor = efCurrentRound.round_id;
+        const { data, error } = await sb.rpc('esmfamil_round_answers', { p_round_id: efCurrentRound.round_id });
+        if(error) throw error;
+        (data || []).forEach(function(row){
+          if(!publicChatUser || row.user_id === publicChatUser.id){
+            efMyAnswers[row.category] = row.answer_text;
+          }
+        });
+        efPrefillAnswerFields();
+      }catch(e){ console.warn('efEnsureMyAnswersLoaded failed', e); efAnswerFetchedFor = null; }
+    }
+
+    function efPrefillAnswerFields(){
+      const cats = (efMyRoom && efMyRoom.categories) || [];
+      cats.forEach(function(c){
+        const input = efEl('efAnsInput_' + c);
+        if(input && efMyAnswers[c] && input.value !== efMyAnswers[c]) input.value = efMyAnswers[c];
+        if(efMyAnswers[c]) efSetFieldStatus(c, 'saved');
+      });
+    }
+
+    // ---------------------------------------------------------------------
+    // تایمرِ نمایشیِ دور + دکمه‌ی استاپ
+    // ---------------------------------------------------------------------
+
+    function efStartAnswerTimerIfNeeded(){
+      if(!efCurrentRound || efCurrentRound.status !== 'answering') return;
+      if(efAnswerTimerRoundId === efCurrentRound.round_id && efAnswerTimerHandle) return;
+      efClearAnswerTimer();
+      efAnswerTimerRoundId = efCurrentRound.round_id;
+      const seconds = (efMyRoom && efMyRoom.round_seconds) || 60;
+      efAnswerDeadline = Date.now() + seconds * 1000;
+      efAnswerTimerHandle = setInterval(efTickAnswerTimer, 500);
+      efTickAnswerTimer();
+    }
+
+    function efClearAnswerTimer(){
+      if(efAnswerTimerHandle){ clearInterval(efAnswerTimerHandle); efAnswerTimerHandle = null; }
+      efAnswerTimerRoundId = null;
+      efAnswerDeadline = null;
+    }
+
+    function efTickAnswerTimer(){
+      const label = efEl('efAnswerTimerLabel');
+      if(!label || !efAnswerDeadline){ return; }
+      const remain = Math.max(0, Math.round((efAnswerDeadline - Date.now()) / 1000));
+      const mm = Math.floor(remain / 60), ss = remain % 60;
+      label.textContent = 'زمانِ باقی‌مانده: ' + toFa(mm) + ':' + toFa(ss < 10 ? ('0' + ss) : ss);
+      if(remain <= 0){
+        efClearAnswerTimer();
+        if(efCurrentRound && efCurrentRound.status === 'answering' && efAutoStopTried !== efCurrentRound.round_id){
+          efAutoStopTried = efCurrentRound.round_id;
+          efStopRound();
+        }
+      }
+    }
+
+    // هر بازیکنِ نشسته رویِ میز می‌تونه بزنه (طبقِ سندِ معماری)، نه فقط picker — دقیقاً
+    // هم‌راستا با esmfamil_stop_round که همینو چک می‌کنه.
+    async function efStopRound(){
+      try{
+        if(efStopBusy || !efCurrentRound || efCurrentRound.status !== 'answering' || !sb) return;
+        efStopBusy = true;
+        const btn = efEl('efStopRoundBtn'); if(btn) btn.disabled = true;
+        await efFlushAllAnswers();
+        const { data, error } = await sb.rpc('esmfamil_stop_round', { p_round_id: efCurrentRound.round_id });
+        if(error) throw error;
+        const row = (data && data.length) ? data[0] : null;
+        efClearAnswerTimer();
+        if(row && efCurrentRound && efCurrentRound.round_id === row.round_id){
+          efCurrentRound.status = row.status || 'judging';
+          efMarkActivity(); // STAGE 8/۲: خودم استاپ زدم، فعالیتِ واقعیه
+          if(efRoomChannel){
+            efRoomChannel.send({ type: 'broadcast', event: 'round_stopped', payload: { round_id: row.round_id } });
+          }
+        }
+        efRenderRoundScreen();
+      }catch(e){
+        console.warn('efStopRound failed', e);
+        if(typeof showToast === 'function') showToast(efRoundErrorMessage(e), 'error');
+      }finally{
+        efStopBusy = false;
+        const btn2 = efEl('efStopRoundBtn'); if(btn2) btn2.disabled = false;
+      }
+    }
+
+    // یه بازیکنِ دیگه استاپ رو زده — پیامِ broadcast فقط round_id رو حمل می‌کنه، بقیه‌ی
+    // منطق (نمایشِ پاسخِ همه، و بعدش داوریِ لایه‌ی ۱) از efRenderRoundScreen →
+    // efEnsureRoundAnswersLoaded میاد.
+    function efHandleRoundStopped(payload){
+      try{
+        if(!payload || !efCurrentRound || efCurrentRound.round_id !== payload.round_id) return;
+        efMarkActivity(); // STAGE 8/۲: broadcastِ واقعی رسید، واچ‌داگ صفر بشه
+        efCurrentRound.status = 'judging';
+        efClearAnswerTimer();
+        efRenderRoundScreen();
+      }catch(e){ console.warn('efHandleRoundStopped failed', e); }
+    }
+
+    // =====================================================================
+    // STAGE 5 — امتیازدهیِ لایه‌ی ۱ (بررسیِ مکانیکیِ کاملاً خودکار: خالی/حرفِ‌اول/تکراری).
+    // اسکیما + esmfamil_normalize_fa/esmfamil_judge_round (esmfamil_09/10) و بازتعریفِ
+    // esmfamil_round_answers با ستون‌هایِ امتیاز (esmfamil_11) قبلاً رو Supabase اجرا شدن؛
+    // این بخش فقط کلاینته.
+    //
+    // esmfamil_judge_round کاملاً idempotent و بی‌طرفه نسبت به این‌که کدوم کلاینت صداش
+    // می‌زنه — پس efJudgeRoundIfNeeded از تنها یه نقطه (efEnsureRoundAnswersLoaded، درست
+    // قبلِ fetchِ نتیجه‌ها) صدا زده می‌شه: هم برایِ بازیکنی که خودش استاپ زده، هم برایِ بقیه‌ای
+    // که با broadcastِ round_stopped یا صرفاً با رفرشِ صفحه به این‌جا رسیدن. efJudgedFor
+    // جلویِ صدازدنِ تکراری‌یِ بی‌دلیل رو برایِ همین یه دور می‌گیره (نه به‌خاطرِ درستی — خودِ
+    // RPC صددرصد idempotent‌ه — فقط برایِ صرفه‌جویی تویِ رفت‌وبرگشتِ شبکه).
+    // =====================================================================
+
+    // STAGE 6: efJudgeErrorShownFor جلویِ توستِ تکراری رو می‌گیره — اگه فراخوانیِ لایه‌ی ۲
+    // (Groq، سمتِ esmfamil_judge_round) شکست بخوره، efJudgedFor ست نمی‌شه، یعنی دفعه‌ی بعد که
+    // efEnsureRoundAnswersLoaded دوباره صدا زده بشه (رفرش/broadcast) خودش دوباره امتحان می‌شه؛
+    // این متغیر فقط برایِ اینه که کاربر یه توستِ خطا رو ده‌ها بار پشتِ‌هم نبینه، نه برایِ جلوگیریِ
+    // خودِ retry (که کارِ efJudgedFor/RPCِ idempotent‌ه).
+    let efJudgeErrorShownFor = null;
+    async function efJudgeRoundIfNeeded(){
+      try{
+        if(!efCurrentRound || !sb) return;
+        if(efCurrentRound.status !== 'judging') return; // 'done' یعنی STAGE 6 قبلاً تمومش کرده
+        if(efJudgeBusy || efJudgedFor === efCurrentRound.round_id) return;
+        efJudgeBusy = true;
+        const roundId = efCurrentRound.round_id;
+        const { error } = await sb.rpc('esmfamil_judge_round', { p_round_id: roundId });
+        if(error) throw error;
+        efJudgedFor = roundId;
+        efJudgeErrorShownFor = null;
+        if(efRoomChannel){
+          efRoomChannel.send({ type: 'broadcast', event: 'round_judged', payload: { round_id: roundId } });
+        }
+      }catch(e){
+        console.warn('efJudgeRoundIfNeeded failed', e);
+        // STAGE 6: قبلاً این خطا کاملاً بی‌صدا بود (چون لایه‌ی ۱ تقریباً هیچ‌وقت fail نمی‌شد)؛
+        // حالا که یه فراخوانیِ واقعیِ شبکه (Groq) وسطشه، شکست‌خوردن محتمل‌تره — کاربر باید بدونه
+        // که نتیجه هنوز نهایی نشده، نه اینکه فکر کنه گیر کرده.
+        if(efCurrentRound && efJudgeErrorShownFor !== efCurrentRound.round_id){
+          efJudgeErrorShownFor = efCurrentRound.round_id;
+          if(typeof showToast === 'function') showToast(efRoundErrorMessage(e), 'error');
+        }
+      }
+      finally{ efJudgeBusy = false; }
+    }
+
+    // یه بازیکنِ دیگه (یا خودمون تو یه تبِ دیگه) داوریِ لایه‌ی ۱ رو انجام داد — چون payload
+    // فقط round_id رو حمل می‌کنه (نه خودِ نتیجه‌ها)، کشِ محلی باطل می‌شه تا رفرشِ بعدی، نتیجه‌ی
+    // تازه رو با یه fetchِ جدید بگیره؛ دقیقاً هم‌الگو با efHandleRoundStopped.
+    function efHandleRoundJudged(payload){
+      try{
+        if(!payload || !efCurrentRound || efCurrentRound.round_id !== payload.round_id) return;
+        efMarkActivity(); // STAGE 8/۲: broadcastِ واقعی رسید، واچ‌داگ صفر بشه
+        efJudgedFor = payload.round_id; // یه کلاینتِ دیگه همین الان اجراش کرد؛ خودمون نیازی به تکرار نداریم
+        efRoundAnswersFetchedFor = null;
+        if(efCurrentRound.status === 'judging' || efCurrentRound.status === 'done'){
+          efEnsureRoundAnswersLoaded();
+        }
+      }catch(e){ console.warn('efHandleRoundJudged failed', e); }
+    }
+
+    // ---------------------------------------------------------------------
+    // نمایشِ پاسخِ همه بعدِ استاپ (esmfamil_round_answers، بعدِ judging/done همه‌ی ردیف‌ها
+    // رو برمی‌گردونه، به‌همراهِ نتیجه‌ی داوریِ لایه‌ی ۱) + نامِ نمایشیِ بازیکن‌ها (جدولِ عمومیِ
+    // profiles، همون الگویِ خطِ ۱۳۶۴۳/۱۶۷۹۸یِ همین فایل).
+    // ---------------------------------------------------------------------
+
+    // markupِ efResultsPanel از قبل تو index.html هست (زیرِ efAnswerPanel، همون efRoundPanel)؛
+    // اگه نبود (fallback)، هم‌کلاس با CSSِ efResultsPanel ساخته می‌شه.
+    function efBuildResultsPanelIfNeeded(){
+      let panel = efEl('efResultsPanel');
+      if(!panel){
+        const roundPanel = efEl('efRoundPanel');
+        if(!roundPanel) return null;
+        panel = document.createElement('div');
+        panel.id = 'efResultsPanel';
+        panel.className = 'ef-results-panel';
+        panel.style.display = 'none';
+        roundPanel.appendChild(panel);
+      }
+      // STAGE 7، نیمه‌ی دوم: دلگیشنِ کلیک برایِ دکمه‌ی اعتراض و دکمه‌هایِ رای — چون innerHTMLِ
+      // پنل هر رندر عوض می‌شه، لیسنر رویِ خودِ پنل (که عوض نمی‌شه) یه‌بار قلاب می‌شه، نه رویِ
+      // تک‌تکِ دکمه‌ها.
+      if(!panel.dataset.efObjWired){
+        panel.dataset.efObjWired = '1';
+        panel.addEventListener('click', function(e){
+          const objBtn = e.target.closest('[data-ef-objection-cat]');
+          if(objBtn){ efRaiseObjection(objBtn.dataset.efObjectionCat); return; }
+          const voteBtn = e.target.closest('[data-ef-vote-obj]'); // STAGE 7، نیمه‌ی دوم، ۲/۲
+          if(voteBtn){ efCastObjectionVote(voteBtn.dataset.efVoteObj, voteBtn.dataset.efVoteVal === '1'); return; }
+        });
+      }
+      return panel;
+    }
+
+    async function efEnsureRoundAnswersLoaded(){
+      try{
+        if(!efCurrentRound || !sb) return;
+        if(efRoundAnswersFetchedFor === efCurrentRound.round_id && efRoundAnswers){
+          efRenderResultsTable();
+          return;
+        }
+        efRoundAnswersFetchedFor = efCurrentRound.round_id;
+        await efJudgeRoundIfNeeded(); // STAGE 5: قبلِ نمایش، لایه‌ی ۱ رو برایِ این دور تضمین می‌کنه
+        const { data, error } = await sb.rpc('esmfamil_round_answers', { p_round_id: efCurrentRound.round_id });
+        if(error) throw error;
+        efRoundAnswers = data || [];
+        const ids = Array.from(new Set(efRoundAnswers.map(function(r){ return r.user_id; })));
+        await efEnsureProfilesLoaded(ids);
+        await efEnsureObjectionsLoaded(); // STAGE 7، نیمه‌ی دوم
+        efRenderResultsTable();
+      }catch(e){ console.warn('efEnsureRoundAnswersLoaded failed', e); efRoundAnswersFetchedFor = null; }
+    }
+
+    async function efEnsureProfilesLoaded(ids){
+      try{
+        const missing = ids.filter(function(id){ return !efProfileCache[id]; });
+        if(!missing.length || !sb) return;
+        const { data, error } = await sb.from('profiles').select('id,username').in('id', missing);
+        if(error) throw error;
+        (data || []).forEach(function(p){ efProfileCache[p.id] = displayName(p.username); });
+      }catch(e){ console.warn('efEnsureProfilesLoaded failed', e); }
+      finally{
+        ids.forEach(function(id){ if(!efProfileCache[id]) efProfileCache[id] = 'کاربر'; });
+      }
+    }
+
+    // =====================================================================
+    // STAGE 7، نیمه‌ی دوم — کاملاً تکمیل شد: دکمه‌ی اعتراض رویِ پاسخِ نامعتبرِ خودم + نمایشِ
+    // وضعیت/نتیجه + auto-finalize بعدِ ۲۰ثانیه + رای‌دادنِ فعالِ بقیه‌ی نشسته‌ها (تایید/رد،
+    // esmfamil_cast_objection_vote) رویِ اعتراضِ هم. اسکیما + esmfamil_raise_objection/
+    // cast_objection_vote/finalize_objection/round_objections (esmfamil_17/18) قبلاً رو
+    // Supabase اجرا شدن؛ این بخش (همه‌ش) کلاینته.
+    // =====================================================================
+
+    async function efEnsureObjectionsLoaded(){
+      try{
+        if(!efCurrentRound || !sb) return;
+        const { data, error } = await sb.rpc('esmfamil_round_objections', { p_round_id: efCurrentRound.round_id });
+        if(error) throw error;
+        efRoundObjections = data || [];
+        efObjectionsFetchedFor = efCurrentRound.round_id;
+        efScheduleObjectionFinalizers();
+      }catch(e){ console.warn('efEnsureObjectionsLoaded failed', e); }
+    }
+
+    // به‌ازایِ هر اعتراضِ بازِ (status='voting')، یه‌بار setTimeout برایِ لحظه‌ی رسیدنِ
+    // vote_deadline_at (که خودِ سرور برگردونده، پس server-authoritative‌ست، برخلافِ
+    // efObjectionWindowUntilِ بالا). چندبار صدازدنِ finalize (از چند کلاینتِ هم‌زمان) کاملاً
+    // بی‌خطره چون esmfamil__resolve_objection_core خودش idempotent‌ه.
+    function efScheduleObjectionFinalizers(){
+      efRoundObjections.forEach(function(o){
+        if(o.status !== 'voting') return;
+        if(efObjectionFinalizeTimers[o.objection_id]) return;
+        const ms = new Date(o.vote_deadline_at).getTime() - Date.now();
+        efObjectionFinalizeTimers[o.objection_id] = setTimeout(function(){
+          delete efObjectionFinalizeTimers[o.objection_id];
+          efFinalizeObjection(o.objection_id);
+        }, Math.max(0, ms) + 400);
+      });
+    }
+
+    async function efFinalizeObjection(objectionId){
+      try{
+        if(!sb) return;
+        const { error } = await sb.rpc('esmfamil_finalize_objection', { p_objection_id: objectionId });
+        if(error) throw error;
+        if(efRoomChannel && efCurrentRound){
+          efRoomChannel.send({
+            type: 'broadcast', event: 'objection_resolved',
+            payload: { round_id: efCurrentRound.round_id, objection_id: objectionId }
+          });
+        }
+        efRoundAnswersFetchedFor = null; // score ممکنه عوض شده باشه (اگه نتیجه معتبر شد)
+        await efEnsureObjectionsLoaded();
+        await efEnsureRoundAnswersLoaded();
+      }catch(e){ console.warn('efFinalizeObjection failed', e); }
+    }
+
+    // هر بازیکنِ نشسته، فقط رویِ پاسخِ خودش و فقط وقتی is_valid=false — بقیه‌ی اعتبارسنجی
+    // (پنجره‌ی ۱۰ثانیه، یه اعتراض در هر دور) سمتِ سرورِه؛ این‌جا فقط UI رو گارد می‌کنه.
+    async function efRaiseObjection(category){
+      try{
+        if(efRaiseObjectionBusy || !efCurrentRound || !category || !sb) return;
+        efRaiseObjectionBusy = true;
+        efRenderResultsTable(); // دکمه رو موقتِ اجرا disable کن
+        const { error } = await sb.rpc('esmfamil_raise_objection', {
+          p_round_id: efCurrentRound.round_id, p_category: category
+        });
+        if(error) throw error;
+        efMarkActivity(); // STAGE 8/۲: اعتراضِ خودم، فعالیتِ واقعیه
+        if(efRoomChannel){
+          efRoomChannel.send({
+            type: 'broadcast', event: 'objection_raised',
+            payload: { round_id: efCurrentRound.round_id }
+          });
+        }
+        efRoundAnswersFetchedFor = null; // رایِ ضمنیِ خودِ معترض تو میزِ ۲نفره ممکنه همون‌جا resolve کرده باشه
+        await efEnsureObjectionsLoaded();
+        await efEnsureRoundAnswersLoaded();
+      }catch(e){
+        console.warn('efRaiseObjection failed', e);
+        if(typeof showToast === 'function') showToast(efRoundErrorMessage(e), 'error');
+      }finally{
+        efRaiseObjectionBusy = false;
+        efRenderResultsTable();
+      }
+    }
+
+    // یه بازیکنِ دیگه (یا خودمون تو یه تبِ دیگه) اعتراض زده — کشِ محلی باطل می‌شه، لیستِ
+    // اعتراض‌ها دوباره fetch می‌شه، دقیقاً هم‌الگو با efHandleRoundJudged.
+    function efHandleObjectionRaised(payload){
+      try{
+        if(!payload || !efCurrentRound || efCurrentRound.round_id !== payload.round_id) return;
+        efMarkActivity(); // STAGE 8/۲
+        efEnsureObjectionsLoaded().then(efRenderResultsTable);
+      }catch(e){ console.warn('efHandleObjectionRaised failed', e); }
+    }
+
+    // STAGE 7، نیمه‌ی دوم، ۲/۲ — هر بازیکنِ نشسته (غیرِ خودِ معترض) رویِ یه اعتراضِ بازِ
+    // 'voting' تایید/رد می‌زنه؛ می‌تونه تا قبلِ resolve نظرش رو عوض کنه (خودِ RPC با یه
+    // on-conflict این کار رو اجازه می‌ده). resolve ممکنه همون‌جا (سمتِ سرور) اتفاق بیفته —
+    // برایِ بقیه فرقی نمی‌کنه با objection_resolved یا objection_voted خبردار بشن، چون هردو
+    // به efEnsureObjectionsLoaded/efEnsureRoundAnswersLoaded ختم می‌شن؛ فقط type‌ِ broadcast
+    // رو دقیق‌تر می‌کنیم تا لاگ/دیباگ گنگ نشه.
+    async function efCastObjectionVote(objectionId, vote){
+      try{
+        if(!objectionId || efCastVoteBusy[objectionId] || !sb) return;
+        efCastVoteBusy[objectionId] = true;
+        efRenderResultsTable();
+        const { data, error } = await sb.rpc('esmfamil_cast_objection_vote', {
+          p_objection_id: objectionId, p_vote: vote
+        });
+        if(error) throw error;
+        efMarkActivity(); // STAGE 8/۲: رایِ خودم، فعالیتِ واقعیه
+        const row = (data && data.length) ? data[0] : null;
+        const resolved = !!(row && row.status === 'resolved');
+        if(efRoomChannel && efCurrentRound){
+          efRoomChannel.send({
+            type: 'broadcast', event: resolved ? 'objection_resolved' : 'objection_voted',
+            payload: { round_id: efCurrentRound.round_id, objection_id: objectionId }
+          });
+        }
+        if(resolved) efRoundAnswersFetchedFor = null; // score/is_valid ممکنه عوض شده باشه
+        await efEnsureObjectionsLoaded();
+        if(resolved) await efEnsureRoundAnswersLoaded(); else efRenderResultsTable();
+      }catch(e){
+        console.warn('efCastObjectionVote failed', e);
+        if(typeof showToast === 'function') showToast(efRoundErrorMessage(e), 'error');
+      }finally{
+        efCastVoteBusy[objectionId] = false;
+        efRenderResultsTable();
+      }
+    }
+
+    // یه بازیکنِ دیگه رای داد ولی هنوز resolve نشده (وگرنه efHandleObjectionResolved صدا زده
+    // می‌شد) — فقط شمارشِ تاییدها/ردها رو رفرش کن.
+    function efHandleObjectionVoted(payload){
+      try{
+        if(!payload || !efCurrentRound || efCurrentRound.round_id !== payload.round_id) return;
+        efMarkActivity(); // STAGE 8/۲
+        efEnsureObjectionsLoaded().then(efRenderResultsTable);
+      }catch(e){ console.warn('efHandleObjectionVoted failed', e); }
+    }
+
+    // یه اعتراض resolve شد (چه با رایِ همه، چه با auto-finalize) — چون score/is_valid رویِ
+    // esmfamil_answers هم ممکنه عوض شده باشه، هم اعتراض‌ها هم خودِ نتیجه‌ها رو دوباره می‌خونه.
+    function efHandleObjectionResolved(payload){
+      try{
+        if(!payload || !efCurrentRound || efCurrentRound.round_id !== payload.round_id) return;
+        efMarkActivity(); // STAGE 8/۲
+        efRoundAnswersFetchedFor = null;
+        efEnsureObjectionsLoaded().then(efEnsureRoundAnswersLoaded);
+      }catch(e){ console.warn('efHandleObjectionResolved failed', e); }
+    }
+
+    // پنجره‌یِ نمایشیِ ۱۰ثانیه‌ای (بالاتر تو تعریفِ efObjectionWindowUntil توضیح داده شده) —
+    // یه تیکرِ ۱ثانیه‌ای فقط تا وقتی که هنوز باز باشه، برایِ زنده‌نگه‌داشتنِ شمارش‌معکوس رویِ
+    // خودِ دکمه؛ بعدِ بسته‌شدنِ پنجره خودش clear می‌شه.
+    function efClearObjectionTicker(){
+      if(efObjectionTickerHandle){ clearInterval(efObjectionTickerHandle); efObjectionTickerHandle = null; }
+      efObjectionTickerRoundId = null;
+    }
+
+    function efStartObjectionTickerIfNeeded(roundId){
+      if(efObjectionTickerRoundId === roundId && efObjectionTickerHandle) return;
+      efClearObjectionTicker();
+      efObjectionTickerRoundId = roundId;
+      efObjectionTickerHandle = setInterval(function(){
+        const until = efObjectionWindowUntil[roundId];
+        if(!until || Date.now() >= until){ efClearObjectionTicker(); }
+        efRenderResultsTable();
+      }, 1000);
+    }
+
+    // STAGE 6: نشانِ وضعیتِ هر پاسخ. تا وقتی esmfamil_judge_round برنگشته، score هر ردیف
+    // (نه is_duplicate — اون از لایه‌ی ۱ همیشه پر می‌شه و دیگه نشونه‌ی «تمومِ کار» نیست) هنوز
+    // null‌ه؛ یعنی معیارِ واقعیِ «داوریِ نهایی تموم شده یا نه» از این‌جا به بعد score‌ه، نه
+    // is_duplicate. سه حالتِ قطعیِ نهایی (نامعتبر / معتبرِ تکراری=۵ / معتبرِ بدونِ‌تکرار=۱۰)
+    // + یه حالتِ گذرا برایِ لحظه‌ی کوتاهِ بینِ استاپ و برگشتنِ نتیجه‌ی لایه‌ی ۲.
+    function efResultBadgeHtml(r){
+      if(r.score == null){
+        return '<span class="ef-result-badge ef-result-badge-pending">در حالِ بررسی</span>';
+      }
+      if(r.score === 0){
+        return '<span class="ef-result-badge ef-result-badge-invalid">نامعتبر</span>';
+      }
+      if(r.is_duplicate){
+        return '<span class="ef-result-badge ef-result-badge-duplicate">تکراری (۵ امتیاز)</span>';
+      }
+      return '<span class="ef-result-badge ef-result-badge-unique">بدونِ‌تکرار (۱۰ امتیاز)</span>';
+    }
+
+    function efRenderResultsTable(){
+      const panel = efBuildResultsPanelIfNeeded();
+      if(!panel || !efRoundAnswers) return;
+      const cats = (efMyRoom && efMyRoom.categories) || [];
+      const byCat = {};
+      cats.forEach(function(c){ byCat[c] = []; });
+      efRoundAnswers.forEach(function(r){
+        if(!byCat[r.category]) byCat[r.category] = [];
+        byCat[r.category].push(r);
+      });
+      // STAGE 6: تا وقتی حتی یه ردیف score=null داره (یعنی esmfamil_judge_round هنوز کامل
+      // برنگشته — چه لایه‌ی ۱ چه ۲)، پیامِ گذرا نشون داده می‌شه؛ بعدِ تمومِ داوری (همه‌ی
+      // ردیف‌ها score‌ی قطعی گرفتن: ۰/۵/۱۰)، پیامِ نهایی.
+      const stillJudging = efRoundAnswers.some(function(r){ return r.score == null; });
+      const note = stillJudging
+        ? '<div class="ef-results-note">در حالِ بررسیِ خودکارِ پاسخ‌ها...</div>'
+        : '<div class="ef-results-note">امتیازدهی نهایی شد: پاسخِ خالی/بدونِ حرفِ درست یا نامعتبر صفر، '
+          + 'معتبرِ تکراری ۵ امتیاز، معتبرِ بدونِ‌تکرار ۱۰ امتیاز.</div>';
+
+      // STAGE 7، نیمه‌ی دوم: همین که برایِ اولین‌بار داوری کاملاً تموم شد، پنجره‌ی ۱۰ثانیه‌ایِ
+      // نمایشیِ اعتراض از همین لحظه شروع می‌شه (توضیحِ کامل بالایِ تعریفِ efObjectionWindowUntil).
+      if(!stillJudging && efCurrentRound && !efObjectionWindowUntil[efCurrentRound.round_id]){
+        efObjectionWindowUntil[efCurrentRound.round_id] = Date.now() + 10000;
+        efStartObjectionTickerIfNeeded(efCurrentRound.round_id);
+      }
+      const objWindowUntil = efCurrentRound ? efObjectionWindowUntil[efCurrentRound.round_id] : null;
+      const objWithinWindow = !!objWindowUntil && Date.now() < objWindowUntil;
+      const objSecondsLeft = objWithinWindow ? Math.max(0, Math.ceil((objWindowUntil - Date.now()) / 1000)) : 0;
+
+      const objByKey = {};
+      efRoundObjections.forEach(function(o){ objByKey[o.objector_user_id + '|' + o.category] = o; });
+
+      const tables = cats.map(function(c){
+        const label = EF_CATEGORY_LABELS[c] || c;
+        const rows = (byCat[c] || []).map(function(r){
+          const name = efProfileCache[r.user_id] || 'کاربر';
+          const text = r.answer_text ? escapeHtml(r.answer_text) : '<span class="ef-result-answer-empty">—</span>';
+          const isMine = !!(publicChatUser && r.user_id === publicChatUser.id);
+          return '<div class="ef-result-row">'
+            + '<span class="ef-result-user">' + escapeHtml(name) + '</span>'
+            + '<span class="ef-result-answer-wrap">'
+            +   '<span class="ef-result-answer">' + text + '</span>'
+            +   efResultBadgeHtml(r)
+            +   efObjectionHtml(r, isMine, objByKey[r.user_id + '|' + c], stillJudging, objWithinWindow, objSecondsLeft)
+            + '</span>'
+            + '</div>';
+        }).join('');
+        return '<div class="ef-result-category">'
+          + '<div class="ef-result-cat-title">' + escapeHtml(label) + '</div>'
+          + rows
+          + '</div>';
+      }).join('');
+      panel.innerHTML = note + tables;
+      panel.style.display = 'block';
+
+      // STAGE 9، نیمه‌ی اول: «دورِ بعدی» فقط وقتی داوریِ این دور کاملاً تموم شده (stillJudging=false)
+      // نمایان می‌شه — قبلِ اون یعنی هنوز score‌یِ قطعیِ همه‌ی پاسخ‌ها آماده نیست که بشه بر
+      // اساسش هم دورِ بعد رو شروع کرد هم (اگه دوری نمونده بود) جدولِ امتیازِ نهایی رو نشون داد.
+      const nextRoundBtn = efEl('efNextRoundBtn');
+      if(nextRoundBtn) nextRoundBtn.style.display = stillJudging ? 'none' : 'block';
+    }
+
+    // نمایشِ کنارِ هر پاسخ: یا دکمه‌ی «اعتراض» (فقط پاسخِ نامعتبرِ خودم، تا ۱۰ثانیه بعدِ
+    // نهایی‌شدنِ داوری، وقتی هنوز اعتراضی روش ثبت نشده)، یا وضعیتِ اعتراضِ ثبت‌شده: اگه
+    // اعتراض مالِ خودمه فقط شمارش؛ اگه مالِ یه بازیکنِ دیگه‌ست و هنوز 'voting'ه، دو تا دکمه‌ی
+    // تایید/رد (STAGE 7، نیمه‌ی دوم، ۲/۲) — قابلِ تغییر تا قبلِ resolve؛ وگرنه نتیجه‌ی نهایی.
+    function efObjectionHtml(r, isMine, obj, stillJudging, objWithinWindow, objSecondsLeft){
+      if(obj){
+        const counts = '(' + toFa(obj.yes_count) + '✓/' + toFa(obj.no_count) + '✗)';
+        if(obj.status === 'voting'){
+          const iAmObjector = !!(publicChatUser && obj.objector_user_id === publicChatUser.id);
+          if(iAmObjector){
+            return '<span class="ef-objection-status ef-objection-status-voting">اعتراضِ من — در حالِ رای‌گیری ' + counts + '</span>';
+          }
+          const busy = !!efCastVoteBusy[obj.objection_id];
+          const yesOn = obj.my_vote === true ? ' ef-objection-vote-on' : '';
+          const noOn = obj.my_vote === false ? ' ef-objection-vote-on' : '';
+          return '<span class="ef-objection-vote-wrap">'
+            + '<span class="ef-objection-status ef-objection-status-voting">' + counts + '</span>'
+            + '<button type="button" class="ef-objection-vote-btn ef-objection-vote-yes' + yesOn + '" '
+              + 'data-ef-vote-obj="' + obj.objection_id + '" data-ef-vote-val="1"' + (busy ? ' disabled' : '') + '>✓</button>'
+            + '<button type="button" class="ef-objection-vote-btn ef-objection-vote-no' + noOn + '" '
+              + 'data-ef-vote-obj="' + obj.objection_id + '" data-ef-vote-val="0"' + (busy ? ' disabled' : '') + '>✗</button>'
+            + '</span>';
+        }
+        if(obj.resolution === true){
+          return '<span class="ef-objection-status ef-objection-status-approved">اعتراض تایید شد ✓</span>';
+        }
+        return '<span class="ef-objection-status ef-objection-status-rejected">اعتراض رد شد (۵-)</span>';
+      }
+      if(isMine && !stillJudging && r.score === 0 && objWithinWindow){
+        return '<button type="button" class="ef-objection-btn" data-ef-objection-cat="' + escapeHtml(r.category) + '" '
+          + (efRaiseObjectionBusy ? 'disabled' : '') + '>اعتراض 🚩 (' + toFa(objSecondsLeft) + ')</button>';
+      }
+      return '';
+    }
+
+    // فقط picker خودش، فقط وقتی دور تو 'awaiting_letter'ه — بقیه‌ی اعتبارسنجی سمتِ سرورِه
+    // (esmfamil_pick_letter)؛ این‌جا فقط یه گاردِ محافظه‌کارانه‌ی سمتِ کلاینته.
+    async function efPickLetter(letter){
+      try{
+        if(efPickLetterBusy || !efCurrentRound || efCurrentRound.status !== 'awaiting_letter') return;
+        if(!publicChatUser || efCurrentRound.picker_user_id !== publicChatUser.id) return;
+        if(!sb) return;
+        efPickLetterBusy = true;
+        efRenderRoundScreen();
+        const { data, error } = await sb.rpc('esmfamil_pick_letter', {
+          p_round_id: efCurrentRound.round_id, p_letter: letter
+        });
+        if(error) throw error;
+        const row = (data && data.length) ? data[0] : null;
+        if(row){
+          efCurrentRound.letter = row.letter;
+          efCurrentRound.status = 'answering';
+          efMarkActivity(); // STAGE 8/۲: خودم حرف رو انتخاب کردم، فعالیتِ واقعیه
+          if(efRoomChannel){
+            efRoomChannel.send({
+              type: 'broadcast', event: 'letter_picked',
+              payload: { round_id: row.round_id, letter: row.letter }
+            });
+          }
+        }
+      }catch(e){
+        console.warn('efPickLetter failed', e);
+        if(typeof showToast === 'function') showToast(efRoundErrorMessage(e), 'error');
+      }finally{
+        efPickLetterBusy = false;
+        efRenderRoundScreen();
+      }
+    }
+
+    // فقط سازنده، فقط وقتی میز 'waiting'ه — esmfamil_start_round خودش هم اینا رو چک
+    // می‌کنه (not_enough_players/only_creator_can_start)، این‌جا فقط UI رو گارد می‌کنه.
+    async function efStartGame(){
+      if(efStartBusy || !efMyRoom || !efMyRoom.is_creator) return;
+      if(!sb) return;
+      efStartBusy = true;
+      const btn = efEl('efStartGameBtn');
+      if(btn) btn.disabled = true;
+      const roomId = efMyRoom.room_id;
+      try{
+        const { data, error } = await sb.rpc('esmfamil_start_round', { p_room_id: roomId });
+        if(error) throw error;
+        const row = (data && data.length) ? data[0] : null;
+        if(row && row.round_id){
+          efCurrentRound = {
+            round_id: row.round_id, round_index: row.round_index,
+            picker_user_id: row.picker_user_id, letter: null,
+            status: 'awaiting_letter', total_rounds: row.total_rounds
+          };
+          efResetRoundAnswerState(); // STAGE 4 (۳/۳)
+          efMarkActivity(); // STAGE 8/۲: خودم بازی رو شروع کردم، فعالیتِ واقعیه
+          efSubscribeRoomChannel(roomId); // احتیاطی — معمولاً از قبل (تو efLoadLobby) سابسکرایب بودیم
+          if(efRoomChannel){
+            efRoomChannel.send({
+              type: 'broadcast', event: 'round_started',
+              payload: {
+                round_id: row.round_id, round_index: row.round_index,
+                picker_user_id: row.picker_user_id, total_rounds: row.total_rounds
+              }
+            });
+          }
+        }
+        await efRefreshMyRoom();
+        efRenderLobby();
+        // میز دیگه تو لیستِ میزهای بازِ لابیِ عمومی نباید بمونه — بقیه‌ی کاربرهای لابی رو خبر کن
+        efBroadcastLobbyUpdate(roomId);
+      }catch(e){
+        console.error('efStartGame failed', e);
+        if(typeof showToast === 'function') showToast(efRoundErrorMessage(e), 'error');
+        await efRefreshMyRoom();
+        efRenderLobby();
+      }finally{
+        efStartBusy = false;
+        const btn2 = efEl('efStartGameBtn');
+        if(btn2) btn2.disabled = false;
+      }
+    }
+
+    async function efCreateRoom(){
+      if(efLobbyBusy) return;
+      const n = efSelectedCats.size;
+      if(n < 6 || n > 9) return;
+      efLobbyBusy = true;
+      const submitBtn = efEl('efCreateSubmitBtn');
+      if(submitBtn) submitBtn.disabled = true;
+      try{
+        if(!sb || !publicChatUser) return;
+        const { error } = await sb.rpc('esmfamil_create_room', {
+          p_categories: Array.from(efSelectedCats),
+          p_turns_per_player: efSelectedTurns
+        });
+        if(error) throw error;
+        efResetCreateForm();
+        await efRefreshMyRoom();
+        if(efMyRoom) efSubscribeRoomChannel(efMyRoom.room_id); // STAGE 3 (۳/۳)
+        efRenderLobby();
+        if(efMyRoom) efBroadcastLobbyUpdate(efMyRoom.room_id);
+      }catch(e){
+        console.error('efCreateRoom failed', e);
+        if(typeof showToast === 'function') showToast(efLobbyErrorMessage(e), 'error');
+        await efRefreshMyRoom();
+        if(!efMyRoom) await efRefreshOpenRooms();
+        efRenderLobby();
+      }finally{
+        efLobbyBusy = false;
+        efUpdateCategoryCounter();
+      }
+    }
+
+    async function efJoinRoom(roomId){
+      if(efLobbyBusy || !roomId) return;
+      efLobbyBusy = true;
+      try{
+        if(!sb || !publicChatUser) return;
+        const { error } = await sb.rpc('esmfamil_join_room', { p_room_id: roomId });
+        if(error) throw error;
+        await efRefreshMyRoom();
+        if(efMyRoom) efSubscribeRoomChannel(efMyRoom.room_id); // STAGE 3 (۳/۳)
+        efRenderLobby();
+        efBroadcastLobbyUpdate(roomId);
+      }catch(e){
+        console.error('efJoinRoom failed', e);
+        if(typeof showToast === 'function') showToast(efLobbyErrorMessage(e), 'error');
+        await efRefreshMyRoom();
+        if(!efMyRoom) await efRefreshOpenRooms();
+        efRenderLobby();
+      }finally{
+        efLobbyBusy = false;
+      }
+    }
+
+    async function efLeaveRoom(){
+      if(efLobbyBusy || !efMyRoom) return;
+      efLobbyBusy = true;
+      const roomId = efMyRoom.room_id;
+      try{
+        const { error } = await sb.rpc('esmfamil_leave_room', { p_room_id: roomId });
+        if(error) throw error;
+        efMyRoom = null;
+        efCurrentRound = null;      // STAGE 3 (۳/۳)
+        efResetRoundAnswerState();  // STAGE 4 (۳/۳)
+        efUnsubscribeRoomChannel(); // STAGE 3 (۳/۳)
+        await efRefreshOpenRooms();
+        efRenderLobby();
+        efBroadcastLobbyUpdate(roomId);
+      }catch(e){
+        console.error('efLeaveRoom failed', e);
+        if(typeof showToast === 'function') showToast(efLobbyErrorMessage(e), 'error');
+        await efRefreshMyRoom();
+        efRenderLobby();
+      }finally{
+        efLobbyBusy = false;
+      }
+    }
+
+    function efWireLobbyControls(){
+      const createRoomBtn = efEl('efCreateRoomBtn');
+      if(createRoomBtn && !createRoomBtn.dataset.efWired){
+        createRoomBtn.dataset.efWired = '1';
+        createRoomBtn.addEventListener('click', function(){
+          const browse = efEl('efLobbyBrowse');
+          const form = efEl('efCreateForm');
+          if(browse) browse.style.display = 'none';
+          if(form) form.style.display = 'block';
+        });
+      }
+      const createCloseBtn = efEl('efCreateCloseBtn');
+      if(createCloseBtn && !createCloseBtn.dataset.efWired){
+        createCloseBtn.dataset.efWired = '1';
+        createCloseBtn.addEventListener('click', function(){
+          const browse = efEl('efLobbyBrowse');
+          const form = efEl('efCreateForm');
+          if(form) form.style.display = 'none';
+          if(browse) browse.style.display = 'block';
+          efResetCreateForm();
+        });
+      }
+      const categoryGrid = efEl('efCategoryGrid');
+      if(categoryGrid && !categoryGrid.dataset.efWired){
+        categoryGrid.dataset.efWired = '1';
+        categoryGrid.querySelectorAll('.ef-cat-chip').forEach(function(chip){
+          chip.addEventListener('click', function(){
+            const cat = chip.dataset.cat;
+            if(efSelectedCats.has(cat)) efSelectedCats.delete(cat); else efSelectedCats.add(cat);
+            chip.classList.toggle('selected', efSelectedCats.has(cat));
+            efUpdateCategoryCounter();
+          });
+        });
+      }
+      const turnsSegment = efEl('efTurnsSegment');
+      if(turnsSegment && !turnsSegment.dataset.efWired){
+        turnsSegment.dataset.efWired = '1';
+        turnsSegment.querySelectorAll('.ef-turns-btn').forEach(function(btn){
+          btn.addEventListener('click', function(){
+            efSelectedTurns = parseInt(btn.dataset.turns, 10);
+            turnsSegment.querySelectorAll('.ef-turns-btn').forEach(function(b){ b.classList.toggle('active', b === btn); });
+          });
+        });
+      }
+      const submitBtn = efEl('efCreateSubmitBtn');
+      if(submitBtn && !submitBtn.dataset.efWired){
+        submitBtn.dataset.efWired = '1';
+        submitBtn.addEventListener('click', efCreateRoom);
+      }
+      const leaveBtn = efEl('efLeaveRoomBtn');
+      if(leaveBtn && !leaveBtn.dataset.efWired){
+        leaveBtn.dataset.efWired = '1';
+        leaveBtn.addEventListener('click', efLeaveRoom);
+      }
+      // STAGE 3 (۳/۳)
+      const startBtn = efEl('efStartGameBtn');
+      if(startBtn && !startBtn.dataset.efWired){
+        startBtn.dataset.efWired = '1';
+        startBtn.addEventListener('click', efStartGame);
+      }
+      // STAGE 9، نیمه‌ی اول: استاتیک تو مارک‌آپ (زیرِ efResultsPanel)، دقیقاً هم‌الگو با
+      // startBtn/leaveBtn بالا — فقط نمایش/مخفی‌بودنش با JS کنترل می‌شه (efRenderResultsTable).
+      const nextRoundBtn = efEl('efNextRoundBtn');
+      if(nextRoundBtn && !nextRoundBtn.dataset.efWired){
+        nextRoundBtn.dataset.efWired = '1';
+        nextRoundBtn.addEventListener('click', efGoToNextRound);
+      }
+      const listEl = efEl('efLobbyList');
+      if(listEl && !listEl.dataset.efWired){
+        listEl.dataset.efWired = '1';
+        listEl.addEventListener('click', function(e){
+          const jbtn = e.target.closest('[data-join-room]');
+          if(!jbtn) return;
+          efJoinRoom(jbtn.dataset.joinRoom);
+        });
+      }
+      // STAGE 9، نیمه‌ی دوم: دکمه‌ی «تاریخچه» + بستنِ هردو مودال (چه با دکمه‌ی ✕ چه با کلیک
+      // رویِ خودِ بک‌دراپ) — دقیقاً هم‌الگو با woSwapModal/dayDetailModal (بیرون از این IIFE).
+      const historyBtn = efEl('efHistoryBtn');
+      if(historyBtn && !historyBtn.dataset.efWired){
+        historyBtn.dataset.efWired = '1';
+        historyBtn.addEventListener('click', efOpenHistory);
+      }
+      const historyCloseBtn = efEl('efHistoryCloseBtn');
+      if(historyCloseBtn && !historyCloseBtn.dataset.efWired){
+        historyCloseBtn.dataset.efWired = '1';
+        historyCloseBtn.addEventListener('click', efCloseHistory);
+      }
+      const historyModal = efEl('efHistoryModal');
+      if(historyModal && !historyModal.dataset.efWired){
+        historyModal.dataset.efWired = '1';
+        historyModal.addEventListener('click', function(e){
+          if(e.target.id === 'efHistoryModal') efCloseHistory();
+        });
+      }
+      // ردیف‌های تاریخچه استاتیک نیستن (هر بار efRenderHistoryList دوباره innerHTML رو
+      // می‌سازه)، برای همین delegation رویِ خودِ efHistoryList — دقیقاً هم‌الگو با efLobbyList
+      // بالا (data-join-room) — نه addEventListener رویِ تک‌تکِ ردیف‌ها.
+      const historyList = efEl('efHistoryList');
+      if(historyList && !historyList.dataset.efWired){
+        historyList.dataset.efWired = '1';
+        historyList.addEventListener('click', function(e){
+          const row = e.target.closest('.ef-history-row');
+          if(row && row.dataset.roomId) efOpenHistoryDetail(row.dataset.roomId);
+        });
+      }
+      const historyDetailCloseBtn = efEl('efHistoryDetailCloseBtn');
+      if(historyDetailCloseBtn && !historyDetailCloseBtn.dataset.efWired){
+        historyDetailCloseBtn.dataset.efWired = '1';
+        historyDetailCloseBtn.addEventListener('click', efCloseHistoryDetail);
+      }
+      const historyDetailModal = efEl('efHistoryDetailModal');
+      if(historyDetailModal && !historyDetailModal.dataset.efWired){
+        historyDetailModal.dataset.efWired = '1';
+        historyDetailModal.addEventListener('click', function(e){
+          if(e.target.id === 'efHistoryDetailModal') efCloseHistoryDetail();
+        });
+      }
+    }
+
+    // =====================================================================
+    // STAGE 8 — نیمه‌ی دوم (سیمِ‌کشیِ سمتِ کلاینت): هارت‌بیت + تشخیصِ خروجِ وسطِ بازی.
+    // نیمه‌ی اول (esmfamil_13_heartbeat_schema.sql + esmfamil_14_heartbeat_rpc.sql — ستونِ
+    // last_seen_at رویِ esmfamil_seats، ستونِ cancel_reason رویِ esmfamil_rooms، و RPCهایِ
+    // esmfamil_heartbeat/esmfamil_room_status) قبلاً رو Supabase اجرا شده؛ این بخش فقط کلاینته.
+    //
+    // کلونِ مستقیمِ الگویِ STAGE 7ِ حکم (بخش‌های ۲ و ۴ از ۴، تویِ ماژولِ hk3 پایین‌ترِ همین فایل):
+    //   ۱/۳ (efMarkActivity/efWatchdogTick/efStartWatchdog/efSilentResync) — کلونِ
+    //     hk7MarkActivity/hk7WatchdogTick/hk7StartWatchdog/hk7SilentResync: اگه EF_WATCHDOG_
+    //     SILENCE_MS هیچ broadcastای نرسه، یه‌بار (نه پیوسته/پولینگ) وضعیتِ میز+دور رو از
+    //     سرور دوباره می‌خونه — فقط برایِ جبرانِ یه broadcastِ گم‌شده.
+    //   ۲/۳ (efHandleRoomCancelled) — کلونِ hk7HandleRoomCancelled: toast + ریستِ کاملِ
+    //     وضعیتِ محلیِ میز/دور + برگردوندنِ کاربر به لیستِ میزهایِ باز.
+    //   ۳/۳ (efHeartbeatTick/efStartHeartbeat) — کلونِ hk7HeartbeatTick/hk7StartHeartbeat:
+    //     هر EF_HEARTBEAT_MS (عیناً هم‌عددِ HK7_HEARTBEAT_MS تو حکم)، فقط وقتی واقعاً وسطِ یه
+    //     میزِ 'playing'ایم، esmfamil_heartbeat رو صدا می‌زنه. اگه RPC خبر بده میز به‌خاطرِ
+    //     خروجِ یه بازیکن لغو شده، یه broadcastِ یه‌باره (نه پیوسته — در کلِ عمرِ میز فقط
+    //     یه‌بار اتفاق می‌افته) رویِ efRoomChannel می‌فرسته تا بقیه‌ی کلاینت‌هایِ وصل فوری
+    //     بفهمن، بعد خودش هم efHandleRoomCancelled رو مستقیم صدا می‌زنه (چون کانال self:false
+    //     ه، پیامِ خودش به خودش برنمی‌گرده). کلاینتی که دیر resync می‌شه (یا رفرش می‌کنه) هم
+    //     از رویِ esmfamil_room_status.cancel_reason می‌فهمه (اگه بعداً لازم شد استفاده بشه؛
+    //     فعلاً efRefreshMyRoom/efSilentResync کافیه چون میزِ لغوشده دیگه تو
+    //     esmfamil_my_active_room دیده نمی‌شه — یعنی efMyRoom خودش null می‌شه).
+    //
+    // STAGE 7ِ خودِ سندِ معماری (دریچه‌ی اعتراض) و بخشِ ۳/۴ِ حکم (تایمرِ نمایشیِ نوبت) عمداً
+    // اینجا کلون نشدن: اسم‌فامیل از قبل (STAGE 4) یه تایمرِ نمایشیِ مالِ خودش برایِ فازِ
+    // پاسخ‌دهی داره (efStartAnswerTimerIfNeeded/efTickAnswerTimer)؛ فازِ انتخابِ حرف
+    // (awaiting_letter) هم اصلاً ددلاینِ سرور نداره تا بخواد نمایشش بدیم.
+    // =====================================================================
+    const EF_HEARTBEAT_MS = 20000;
+    let efHeartbeatTimer = null;
+
+    const EF_WATCHDOG_SILENCE_MS = 7000;
+    let efLastActivityAt = Date.now();
+    let efWatchdogFiredThisWait = false;
+    let efWatchdogTimer = null;
+
+    // فعالیتِ واقعی (broadcastِ واقعی رسید، یا خودمون یه حرکتِ واقعی زدیم) — واچ‌داگ رو صفر می‌کنه.
+    function efMarkActivity(){
+      efLastActivityAt = Date.now();
+      efWatchdogFiredThisWait = false;
+    }
+
+    // ری‌سینکِ بی‌صدا: وضعیتِ میز + دورِ جاری رو دوباره از سرور می‌خونه (همون مسیرِ
+    // efRefreshMyRoom/efFetchCurrentRound)، بدونِ هیچ toast/پیامی — فقط برایِ جبرانِ یه
+    // broadcastِ گم‌شده. اگه میز خودش تویِ همین فاصله لغو شده باشه (STAGE 8، efHeartbeatTick)،
+    // efRefreshMyRoom خودش efMyRoom را null می‌کنه — ولی toast/ریست کارِ efHandleRoomCancelled
+    // ه، نه اینجا؛ پس تویِ اون حالتِ خاص، efHeartbeatTickِ بعدی خودش (یا broadcastِ یه
+    // بازیکنِ دیگه) این‌کارو می‌کنه، نه این تابع.
+    async function efSilentResync(){
+      try{
+        if(!efMyRoom) return;
+        await efRefreshMyRoom();
+        if(!efMyRoom){ efRenderLobby(); return; }
+        if(efMyRoom.room_status === 'playing'){
+          await efFetchCurrentRound(efMyRoom.room_id);
+          efRenderRoundScreen();
+        }
+        efRenderLobby();
+      }catch(e){ console.warn('efSilentResync failed', e); }
+      finally{ efMarkActivity(); } // چه موفق چه ناموفق، این دوره‌ی سکوت رو «چک‌شده» علامت بزن
+    }
+
+    function efWatchdogTick(){
+      try{
+        if(!efMyRoom || efMyRoom.room_status !== 'playing' || !efCurrentRound) return;
+        if(efWatchdogFiredThisWait) return; // این دوره‌ی سکوت قبلاً یه‌بار resync شده
+        if(Date.now() - efLastActivityAt < EF_WATCHDOG_SILENCE_MS) return;
+        efWatchdogFiredThisWait = true; // «یه‌بار» — تا فعالیتِ واقعیِ بعدی دیگه صدا زده نمی‌شه
+        efSilentResync();
+      }catch(e){ console.warn('efWatchdogTick failed', e); }
+    }
+
+    function efStartWatchdog(){
+      if(efWatchdogTimer) return;
+      efWatchdogTimer = setInterval(efWatchdogTick, 1000);
+    }
+
+    // میز لغو شد (خروجِ یه بازیکنِ دیگه، طبقِ esmfamil_heartbeat) — چه خودمون تشخیصش داده
+    // باشیم (efHeartbeatTick)، چه با broadcastِ یه بازیکنِ دیگه رسیده باشه.
+    function efHandleRoomCancelled(reason){
+      try{
+        if(!efMyRoom) return; // قبلاً reset شده (مثلاً خودمون همین الان پردازشش کردیم)
+        if(typeof showToast === 'function'){
+          showToast(reason === 'opponent_left'
+            ? 'یکی از بازیکن‌ها بیش از ۲ دقیقه بی‌خبر موند؛ این میز لغو شد.'
+            : 'این میز لغو شد.', 'error');
+        }
+        efMyRoom = null;
+        efCurrentRound = null;
+        efResetRoundAnswerState();
+        efUnsubscribeRoomChannel();
+        efRefreshOpenRooms().then(efRenderLobby);
+      }catch(e){ console.warn('efHandleRoomCancelled failed', e); }
+    }
+
+    async function efHeartbeatTick(){
+      try{
+        if(!sb || !efMyRoom || efMyRoom.room_status !== 'playing') return;
+        const roomIdAtCall = efMyRoom.room_id;
+        const { data, error } = await sb.rpc('esmfamil_heartbeat', { p_room_id: roomIdAtCall });
+        if(error) throw error;
+        if(!efMyRoom || efMyRoom.room_id !== roomIdAtCall) return; // تا رفتنِ RPC از میز دیگه‌ای رد شدیم
+        const row = (data && data.length) ? data[0] : null;
+        if(row && row.room_cancelled){
+          if(efRoomChannel){
+            efRoomChannel.send({ type: 'broadcast', event: 'room_cancelled', payload: { reason: row.cancel_reason } });
+          }
+          efHandleRoomCancelled(row.cancel_reason);
+        }
+      }catch(e){ console.warn('efHeartbeatTick failed', e); }
+    }
+
+    function efStartHeartbeat(){
+      if(efHeartbeatTimer) return;
+      efHeartbeatTimer = setInterval(efHeartbeatTick, EF_HEARTBEAT_MS);
+      efHeartbeatTick(); // یه‌بار فوری؛ لازم نیست ۲۰ ثانیه‌ی اول منتظرِ اولین tick بمونیم
+    }
+
+    // =====================================================================
+    // STAGE 9، نیمه‌ی اول — جدولِ امتیازِ نهایی. esmfamil_15_final_scores_rpc.sql
+    // (esmfamil_final_scores) قبلاً رو Supabase اجرا شده؛ این بخش فقط کلاینته.
+    //
+    // پیش‌نیازِ این نیمه چیزی بود که تا همین‌جا اصلاً وجود نداشت: هیچ راهی برای رفتن از
+    // دورِ ۰ به دورِ ۱ نبود (efStartGame فقط بارِ اولِ 'waiting'→'playing' رو صدا می‌زد).
+    // پس efGoToNextRound اینجا هر دو نقش رو داره: هم «ادامه به دورِ بعد»، هم (وقتی
+    // esmfamil_start_round دیگه round_id برنگردونه) «تشخیصِ پایانِ بازی» — دقیقاً چون خودِ
+    // RPC (esmfamil_04) هم دقیقاً همین دو نقش رو یه‌جا داره (نگاه کن به کامنتِ خودش).
+    //
+    // efGoToNextRound — عیناً هم‌الگو با efStartGame (همون RPC، همون broadcastِ
+    // round_started)، فقط این‌بار میز از قبل 'playing'ه (نه 'waiting') و هر بازیکنِ نشسته
+    // می‌تونه بزنه، نه فقط سازنده — دقیقاً طبقِ الگویِ efStopRound/efJudgeRoundIfNeeded (که
+    // اونا هم «هر بازیکنِ نشسته» ان)، و هم‌راستا با خودِ esmfamil_start_round که برایِ
+    // حالتِ «میز از قبل playing‌ه» هیچ چکِ only_creator ای نداره.
+    //
+    // پیچیدگیِ اصلیِ نیمه‌ی «پایانِ بازی»: esmfamil_my_active_room (STAGE 2) عمداً میزهایِ
+    // 'finished' رو برنمی‌گردونه (طبقِ کامنتِ خودش) — یعنی یه efRefreshMyRoom بعدِ پایانِ
+    // بازی، efMyRoom رو کاملاً null می‌کرد و کلِ زمینه‌ی «کدوم میز، چه دسته‌هایی، چند نفر»
+    // رو گم می‌کردیم. راه‌حل: efShowGameEnd هیچ‌وقت efRefreshMyRoom صدا نمی‌زنه؛ به‌جاش
+    // room_status رو رویِ همون رونوشتِ محلیِ efMyRoم (که هنوز room_id/categories درستی
+    // داره) دستی 'finished' می‌کنه. efRenderLobby هم برایِ همین یه شاخه‌ی صریح برایِ
+    // 'finished' داره (بالاتر، کنارِ شاخه‌ی 'playing') — نه اینکه بذاره قاطی‌شده با حالتِ
+    // «تو هیچ میزی نیستم» بیفته.
+    //
+    // esmfamil_final_scores عمداً بدونِ فیلترِ status=finished نوشته شده (کامنتِ خودِ SQL)
+    // — یعنی تئوری می‌شد این جدول رو وسطِ بازی هم نشون داد؛ ولی طبقِ سندِ معماری، نیمه‌ی
+    // اول فقط «نمایشِ نتیجه‌ی کلِ بازی» بعدِ پایانه، پس اینجا فقط همون یه نقطه (efShowGameEnd)
+    // صداش می‌زنه — تصمیمِ «امتیازِ زنده‌ی وسطِ بازی» عمداً برایِ بعد گذاشته شده.
+    //
+    // محدودیتِ شناخته‌شده (عمداً، جزوِ همین نیمه نیست): کسی که دقیقاً همون لحظه‌ی پایان
+    // آنلاین نبوده (broadcast رو از دست داده) یا بعداً صفحه رو رفرش کرده، efMyRoم اش
+    // efRefreshMyRoom می‌شه و چون esmfamil_my_active_room میزِ finished رو برنمی‌گردونه،
+    // دیگه جدولِ امتیازِ نهایی رو نمی‌بینه — فقط برمی‌گرده به لابیِ عمومی. دسترسیِ پایدار
+    // بعدِ پایانِ میز (تاریخچه) دقیقاً همون چیزیه که سندِ معماری برایِ STAGE 9، نیمه‌ی دومِ
+    // اسم‌فامیل (یکپارچگی با لیدربوردِ فعلیِ DreamLife) در نظر گرفته، نه اینجا.
+    // =====================================================================
+    let efFinalScores = null;          // [{user_id, total_score}] — فقط بعدِ efLoadFinalScores
+    let efFinalScoresFetchedFor = null; // room_id ای که جدول براش گرفته شده (جلوگیری از fetchِ تکراری)
+    let efNextRoundBusy = false;
+
+    async function efGoToNextRound(){
+      try{
+        if(efNextRoundBusy || !efMyRoom || efMyRoom.room_status !== 'playing' || !sb) return;
+        // گاردِ محافظه‌کارانه‌ی سمتِ کلاینت (خودِ esmfamil_judge_round/RPC هم چکِ خودشون رو
+        // دارن): تا وقتی همه‌ی پاسخ‌هایِ دورِ جاری score‌ی قطعی نگرفتن، معنی‌دار نیست که
+        // بریم سراغِ دورِ بعد یا جدولِ امتیازِ نهایی.
+        if(!efRoundAnswers || efRoundAnswers.some(function(r){ return r.score == null; })) return;
+        efNextRoundBusy = true;
+        const btn = efEl('efNextRoundBtn'); if(btn) btn.disabled = true;
+        const roomId = efMyRoom.room_id;
+        const { data, error } = await sb.rpc('esmfamil_start_round', { p_room_id: roomId });
+        if(error) throw error;
+        const row = (data && data.length) ? data[0] : null;
+        if(row && row.round_id){
+          // ---- دوری مونده: عیناً هم‌الگو با efStartGame (efHandleRoundStarted سمتِ بقیه) ----
+          efCurrentRound = {
+            round_id: row.round_id, round_index: row.round_index,
+            picker_user_id: row.picker_user_id, letter: null,
+            status: 'awaiting_letter', total_rounds: row.total_rounds
+          };
+          efResetRoundAnswerState();
+          efMarkActivity(); // STAGE 8/۲: خودم دورِ بعد رو شروع کردم، فعالیتِ واقعیه
+          if(efRoomChannel){
+            efRoomChannel.send({
+              type: 'broadcast', event: 'round_started',
+              payload: {
+                round_id: row.round_id, round_index: row.round_index,
+                picker_user_id: row.picker_user_id, total_rounds: row.total_rounds
+              }
+            });
+          }
+          efRenderRoundScreen();
+        } else {
+          // ---- دوری نمونده: طبقِ کامنتِ خودِ esmfamil_04، سرور همین الان میز رو 'finished'
+          // کرده. بقیه‌ی کلاینت‌هایِ وصل با broadcastِ game_finished (self:false، پس خودِ
+          // caller این پیام رو نمی‌گیره — برایِ همین efShowGameEnd رو مستقیم هم صدا می‌زنیم). ----
+          if(efRoomChannel){
+            efRoomChannel.send({ type: 'broadcast', event: 'game_finished', payload: { room_id: roomId } });
+          }
+          efMarkActivity();
+          await efShowGameEnd(roomId);
+        }
+      }catch(e){
+        console.warn('efGoToNextRound failed', e);
+        if(typeof showToast === 'function') showToast(efRoundErrorMessage(e), 'error');
+      }finally{
+        efNextRoundBusy = false;
+        const btn2 = efEl('efNextRoundBtn'); if(btn2) btn2.disabled = false;
+      }
+    }
+
+    // یه بازیکنِ دیگه esmfamil_start_round رو صدا زده و دیگه دوری نمونده — پیامِ broadcast
+    // فقط room_id رو حمل می‌کنه (خودِ جدولِ امتیاز رو efLoadFinalScores با یه RPCِ تازه
+    // می‌گیره، نه از رویِ payload؛ دقیقاً هم‌الگو با efHandleRoundJudged).
+    function efHandleGameFinished(payload){
+      try{
+        if(!payload || !payload.room_id || !efMyRoom || efMyRoom.room_id !== payload.room_id) return;
+        efMarkActivity(); // STAGE 8/۲: broadcastِ واقعی رسید، واچ‌داگ صفر بشه
+        efShowGameEnd(payload.room_id);
+      }catch(e){ console.warn('efHandleGameFinished failed', e); }
+    }
+
+    // بازی طبیعی تموم شد (چه خودمون esmfamil_start_round رو صدا زده باشیم، چه با
+    // broadcastِ game_finished فهمیده باشیم). صفحه‌ی دور رو مخفی می‌کنه، هارت‌بیت/واچ‌داگ رو
+    // متوقف می‌کنه (دیگه میز 'playing' نیست) و efGameEndOverlay رو با جدولِ امتیازِ نهایی
+    // باز می‌کنه. عمداً efRefreshMyRoom صدا نمی‌زنه — دلیلش تویِ کامنتِ بالایِ همین ماژوله.
+    async function efShowGameEnd(roomId){
+      try{
+        if(efMyRoom) efMyRoom.room_status = 'finished';
+        efCurrentRound = null;
+        efClearAnswerTimer();
+        if(efHeartbeatTimer){ clearInterval(efHeartbeatTimer); efHeartbeatTimer = null; } // STAGE 8/۳: دیگه لازم نیست
+        if(efWatchdogTimer){ clearInterval(efWatchdogTimer); efWatchdogTimer = null; }     // STAGE 8/۲: همین‌طور
+        const roundPanel = efEl('efRoundPanel');
+        if(roundPanel) roundPanel.style.display = 'none';
+        await efLoadFinalScores(roomId);
+      }catch(e){ console.warn('efShowGameEnd failed', e); }
+    }
+
+    async function efLoadFinalScores(roomId){
+      try{
+        if(!sb || !roomId) return;
+        if(efFinalScoresFetchedFor === roomId && efFinalScores){
+          efRenderGameEndOverlay();
+          return;
+        }
+        const { data, error } = await sb.rpc('esmfamil_final_scores', { p_room_id: roomId });
+        if(error) throw error;
+        efFinalScores = data || [];
+        efFinalScoresFetchedFor = roomId;
+        const ids = Array.from(new Set(efFinalScores.map(function(r){ return r.user_id; })));
+        await efEnsureProfilesLoaded(ids); // همون کشِ پروفایلِ efResultsPanel (STAGE 4)
+        efRenderGameEndOverlay();
+      }catch(e){
+        console.warn('efLoadFinalScores failed', e);
+        if(typeof showToast === 'function') showToast('گرفتنِ جدولِ امتیازِ نهایی الان جواب نداد؛ دوباره امتحان کن.', 'error');
+      }
+    }
+
+    // STAGE 9، نیمه‌ی دوم: این هلپر از دلِ efRenderGameEndOverlay بیرون کشیده شد تا
+    // efOpenHistoryDetail (پایین‌تر، تاریخچه) هم بتونه دقیقاً همون HTMLِ ردیف‌های اسکوربورد
+    // (مدال/رتبه/اسم/امتیاز) رو بدونِ کپی‌کردنِ منطق بسازه — ورودی‌اش دقیقاً همون شکلِ
+    // خروجیِ esmfamil_final_scores ([{user_id, total_score}], از قبل نزولی مرتب‌شده).
+    function efScoreRowsHtml(rows){
+      const medals = ['🥇', '🥈', '🥉'];
+      return (rows || []).map(function(r, i){
+        const name = efProfileCache[r.user_id] || 'کاربر';
+        const isMe = !!(publicChatUser && r.user_id === publicChatUser.id);
+        const rank = medals[i] || ('#' + toFa(i + 1));
+        return '<div class="ef-gameend-row' + (isMe ? ' ef-gameend-row-me' : '') + '">'
+          + '<span class="ef-gameend-rank">' + rank + '</span>'
+          + '<span class="ef-gameend-name">' + escapeHtml(name) + (isMe ? ' (شما)' : '') + '</span>'
+          + '<span class="ef-gameend-score">' + toFa(r.total_score || 0) + '</span>'
+          + '</div>';
+      }).join('');
+    }
+
+    // کارتِ اورلی — عیناً هم‌الگو با hk6ShowMatchEnd (بالاتر تو همین فایل، ماژولِ
+    // «HOKM — STAGE 6»): پرکردنِ innerHTML + نمایان‌کردنِ اورلی + قلاب‌کردنِ دکمه‌ی «بازگشت
+    // به لابی». برخلافِ hk6ShowMatchEnd (که «بازیِ دوباره» هم داره)، اینجا فقط یه دکمه‌ست —
+    // «بازیِ دوباره»یِ اسم‌فامیل یعنی ساختِ یه میزِ کاملاً تازه (نه یه matchِ جدید تو همون
+    // میز، چون میزِ اسم‌فامیل به‌محضِ تمومِ دورها دیگه معنایی نداره)، که همون مسیرِ عادیِ
+    // «+ ساختِ میزِ جدید»یِ لابیه — نیازی به دکمه‌ی جدا نداره.
+    function efRenderGameEndOverlay(){
+      try{
+        const overlay = efEl('efGameEndOverlay');
+        if(!overlay || !efFinalScores) return;
+        const rows = efScoreRowsHtml(efFinalScores);
+
+        overlay.innerHTML =
+          '<div class="ef-gameend-card">' +
+            '<div class="ef-gameend-emoji">🏁</div>' +
+            '<div class="ef-gameend-title">بازی تموم شد!</div>' +
+            '<div class="ef-gameend-rows">' + rows + '</div>' +
+            '<button type="button" class="ef-gameend-btn" id="efBackLobbyFromEndBtn">بازگشت به لابی</button>' +
+          '</div>';
+        overlay.style.display = 'flex';
+
+        const backBtn = efEl('efBackLobbyFromEndBtn');
+        if(backBtn){
+          backBtn.addEventListener('click', function(){
+            overlay.style.display = 'none';
+            efMyRoom = null;
+            efCurrentRound = null;
+            efFinalScores = null;
+            efFinalScoresFetchedFor = null;
+            efResetRoundAnswerState();
+            efUnsubscribeRoomChannel();
+            efRefreshOpenRooms().then(efRenderLobby);
+          });
+        }
+      }catch(e){ console.warn('efRenderGameEndOverlay failed', e); }
+    }
+
+    // =====================================================================
+    // STAGE 9، نیمه‌ی دوم — تاریخچه. esmfamil_16_history_rpc.sql (ended_at رویِ
+    // esmfamil_rooms + esmfamil_my_history + esmfamil_my_stats) قبلاً رو Supabase اجرا
+    // شده؛ این بخش فقط کلاینته.
+    //
+    // این نیمه دقیقاً همون محدودیتِ شناخته‌شده‌ای رو حل می‌کنه که تویِ کامنتِ STAGE 9/نیمه‌ی
+    // اول صریحاً نوشته شده بود: efGameEndOverlay فقط لحظه‌ای/زنده‌ست (efMyRoم رو efShowGameEnd
+    // فقط تو حافظه‌ی همون تب دستی 'finished' می‌کنه؛ رفرشِ صفحه یا برگشتن بعداً یعنی گمشدنِ
+    // اون overlay). efHistoryModal یه راهِ کاملاً جدا و پایدار برایِ دیدنِ همون نتیجه‌هاست —
+    // با یه RPCِ تازه (esmfamil_my_history)، نه با تکیه به efMyRoم یا efFinalScores ای که
+    // efShowGameEnd پر کرده.
+    //
+    // چرا «لیدربوردِ فعلیِ DreamLife» دست‌نخورده موند: توضیحِ کاملش تویِ کامنتِ
+    // esmfamil_16_history_rpc.sql (هدرِ فایلِ SQL) هست — خلاصه‌اش: اون لیدربورد رویِ
+    // day_count‌ه (روزِ برنامه‌ی خودسازی)، یه معیارِ کاملاً بی‌ربط به امتیازِ یه بازیِ کلمه‌ای.
+    // به‌جاش esmfamil_my_stats یه خلاصه‌ی شخصیِ («چند بازی، چندتاش رو بردم») مستقلِ خودِ
+    // اسم‌فامیله که همینجا تو efHistoryStats دیده می‌شه.
+    //
+    // efOpenHistoryDetail عمداً از efShowGameEnd/efMyRoم کاملاً جداست — چون ممکنه کاربر
+    // همین الان تو یه میزِ زنده‌ی دیگه باشه (یا اصلاً تو هیچ میزی نباشه) وقتی داره تاریخچه‌ی
+    // یه بازیِ گذشته رو مرور می‌کنه؛ بستنِ efHistoryDetailModal فقط خودشو مخفی می‌کنه، هیچ
+    // ریست/refresh ای رویِ efMyRoم یا efRoomChannel انجام نمی‌ده.
+    // =====================================================================
+
+    async function efOpenHistory(){
+      const modal = efEl('efHistoryModal');
+      if(modal) modal.classList.add('visible');
+      await efLoadHistory();
+    }
+
+    function efCloseHistory(){
+      const modal = efEl('efHistoryModal');
+      if(modal) modal.classList.remove('visible');
+    }
+
+    async function efLoadHistory(){
+      try{
+        if(!sb) return;
+        const listEl = efEl('efHistoryList');
+        if(listEl) listEl.innerHTML = '<div class="ef-history-empty">در حالِ بارگذاری...</div>';
+        const [statsRes, historyRes] = await Promise.all([
+          sb.rpc('esmfamil_my_stats'),
+          sb.rpc('esmfamil_my_history', { p_limit: 20 })
+        ]);
+        if(statsRes.error) throw statsRes.error;
+        if(historyRes.error) throw historyRes.error;
+        const stats = (statsRes.data && statsRes.data[0]) || { games_played: 0, games_won: 0 };
+        const rows = historyRes.data || [];
+        efRenderHistoryStats(stats);
+        efRenderHistoryList(rows);
+      }catch(e){
+        console.warn('efLoadHistory failed', e);
+        const listEl = efEl('efHistoryList');
+        if(listEl) listEl.innerHTML = '<div class="ef-history-empty">گرفتنِ تاریخچه الان جواب نداد؛ دوباره امتحان کن.</div>';
+      }
+    }
+
+    function efRenderHistoryStats(stats){
+      const el = efEl('efHistoryStats');
+      if(!el) return;
+      el.innerHTML =
+        '<div class="ef-history-stat"><div class="ef-history-stat-num">' + toFa(stats.games_played || 0) + '</div>'
+          + '<div class="ef-history-stat-label">بازی</div></div>'
+        + '<div class="ef-history-stat"><div class="ef-history-stat-num">' + toFa(stats.games_won || 0) + '</div>'
+          + '<div class="ef-history-stat-label">برد 🏆</div></div>';
+    }
+
+    // ردیف‌های لیست — هر ردیف داده‌ی خودش رو تو dataset نگه می‌داره (نه closure ی جدا برای
+    // هر ردیف) تا کلیک‌هندلرِ efHistoryList (تویِ efWireLobbyControls، delegationِ یه‌باره)
+    // بتونه با یه event delegation ساده efOpenHistoryDetail رو صدا بزنه — دقیقاً هم‌الگو با
+    // efLobbyList/efHandleLobbyBroadcast (data-join-room).
+    function efRenderHistoryList(rows){
+      const listEl = efEl('efHistoryList');
+      if(!listEl) return;
+      if(!rows.length){
+        listEl.innerHTML = '<div class="ef-history-empty">هنوز هیچ بازیِ تمومی نداری — یه میز بساز و شروع کن! 🔤</div>';
+        return;
+      }
+      const medals = ['🥇', '🥈', '🥉'];
+      listEl.innerHTML = rows.map(function(r){
+        const catsLabel = (r.categories || []).map(function(c){ return EF_CATEGORY_LABELS[c] || c; }).join('، ');
+        const dt = r.ended_at ? new Date(r.ended_at) : null;
+        const dateLabel = dt ? dt.toLocaleDateString('fa-IR', { day:'numeric', month:'long' }) : '';
+        const rankIcon = medals[(r.my_rank || 99) - 1] || ('#' + toFa(r.my_rank || '?'));
+        return '<div class="ef-history-row" data-room-id="' + r.room_id + '">'
+          + '<span class="ef-history-row-rank">' + rankIcon + '</span>'
+          + '<div class="ef-history-row-info">'
+            + '<div class="ef-history-row-cats">' + escapeHtml(catsLabel) + '</div>'
+            + '<div class="ef-history-row-meta">' + toFa(r.players_count || 0) + ' بازیکن' + (dateLabel ? ' · ' + dateLabel : '') + '</div>'
+          + '</div>'
+          + '<span class="ef-history-row-score">' + toFa(r.my_score || 0) + '</span>'
+          + '</div>';
+      }).join('');
+    }
+
+    async function efOpenHistoryDetail(roomId){
+      try{
+        if(!sb || !roomId) return;
+        const titleEl = efEl('efHistoryDetailTitle');
+        if(titleEl) titleEl.textContent = 'در حالِ بارگذاری...';
+        const rowsEl = efEl('efHistoryDetailRows');
+        if(rowsEl) rowsEl.innerHTML = '';
+        const modal = efEl('efHistoryDetailModal');
+        if(modal) modal.classList.add('visible');
+
+        const { data, error } = await sb.rpc('esmfamil_final_scores', { p_room_id: roomId });
+        if(error) throw error;
+        const scores = data || [];
+        const ids = Array.from(new Set(scores.map(function(r){ return r.user_id; })));
+        await efEnsureProfilesLoaded(ids);
+        if(titleEl) titleEl.textContent = '🏁 نتیجه‌ی بازی';
+        if(rowsEl) rowsEl.innerHTML = efScoreRowsHtml(scores);
+      }catch(e){
+        console.warn('efOpenHistoryDetail failed', e);
+        const titleEl = efEl('efHistoryDetailTitle');
+        if(titleEl) titleEl.textContent = '🏁 نتیجه‌ی بازی';
+        const rowsEl = efEl('efHistoryDetailRows');
+        if(rowsEl) rowsEl.innerHTML = '<div class="ef-history-empty">گرفتنِ جزئیات الان جواب نداد.</div>';
+      }
+    }
+
+    function efCloseHistoryDetail(){
+      const modal = efEl('efHistoryDetailModal');
+      if(modal) modal.classList.remove('visible');
+    }
+
+    async function efLoadLobby(){
+      try{
+        if(!sb || !publicChatUser) return;
+        efWireLobbyControls();
+        efSubscribeLobbyChannel();
+        await efRefreshMyRoom();
+        if(efMyRoom){
+          efSubscribeRoomChannel(efMyRoom.room_id); // STAGE 3 (۳/۳)
+          // اگه صفحه تازه لود شده و میز از قبل وسطِ بازیه، دورِ جاری رو از سرور بخون
+          // (broadcastِ start/pick فقط به کسی می‌رسه که همون لحظه سابسکرایب بوده).
+          if(efMyRoom.room_status === 'playing' && !efCurrentRound){
+            await efFetchCurrentRound(efMyRoom.room_id);
+          }
+        } else {
+          efUnsubscribeRoomChannel(); // STAGE 3 (۳/۳)
+          efCurrentRound = null;
+          await efRefreshOpenRooms();
+        }
+        efRenderLobby();
+        efMarkActivity();     // STAGE 8/۲: ورود/سینکِ صفحه هم فعالیتِ واقعیه، واچ‌داگ رو صفر کن
+        efStartWatchdog();    // STAGE 8/۲: تایمرِ سبکِ محلی، فقط وقتی سکوتِ واقعی دید RPC می‌زنه
+        efStartHeartbeat();   // STAGE 8/۳: هر ۲۰ ثانیه، فقط وقتی واقعاً وسطِ یه میزِ در حالِ بازی‌ایم
+      }catch(e){ console.warn('efLoadLobby failed', e); }
+    }
+
+    // تنها نقطه‌ی ورودیِ عمومی که app.js صداش می‌زنه (از showPublicTabInner، کنارِ hkLoadLobby).
+    window.efLoadLobby = efLoadLobby;
+
+  }catch(e){ console.warn('Esmfamil lobby module failed to load', e); }
+})();
+
+/* ===================== HOKM — STAGE 3 + STAGE 5 (پخش‌کارت/حاکم + خودِ بازی‌کردنِ کارت) =====================
+   فقط اضافه شده؛ به هیچ تابع/متغیر مراحلِ قبل (۲ و ۴) دست نزده — یه IIFE کاملاً جدا با
+   try/catch، پیشوند hk3، تا اگه خطایی داد بقیه‌ی اپ کار کنه.
+   از جدول‌ها/RPCهای hokm_03_deal_engine.sql و hokm_04_play_card.sql استفاده می‌کنه (باید بعد از
+   hokm_01_schema.sql و hokm_02_lobby_rpc.sql تو Supabase SQL editor اجرا شده باشن). به
+   window.hkLoadLobby (که مرحله‌ی ۲ اکسپوز کرده) با wrap کردنش قلاب می‌شه — بدونِ دست‌زدن به
+   تعریفِ اصلیش. markupِ لازم (hkHandPanel/hkHandTitle/hkHandCards/hkHandAction) تو index.html،
+   زیرِ hkMyRoomCard، اضافه شده.
+
+   بخشِ STAGE 5 (اضافه‌شده تو همین ماژول، چون به همون hk3State نیاز داره): کلیک‌کردنِ رویِ
+   یه کارتِ دستِ خودم → optimistic (فوری تو UI جابه‌جا می‌شه) → hokm_play_card → موفق:
+   broadcastِ سبکِ {seat, card} با self:false؛ ناموفق: rollback کامل (کارت برمی‌گرده،
+   وضعیتِ دست به قبل برمی‌گرده). کارتِ ۳ نفرِ دیگه از همون broadcast می‌رسه و پرواز
+   می‌کنه وسطِ میز. برنده‌ی هر دست هیچ‌وقت broadcast نمی‌شه؛ هر کلاینت (خودم هم همینطور)
+   با hk3CardPower محلی حسابش می‌کنه — دقیقاً همون فرمولِ hokm_card_power تو SQL. کارتی که
+   پیرویِ خال رو نقض کنه یا نوبتِ من نباشه، تو UI کم‌رنگ/غیرقابل‌کلیکه؛ ولی تصمیمِ نهایی و
+   تنها مرجعِ واقعی همیشه خودِ hokm_play_card سمتِ سرورِه.
+
+   بخشِ STAGE 7 — بخشِ ۱ از ۴ (اضافه‌شده تو همین hk3EnsureHand، چون به hk3State نیاز داره):
+   وقتی تبِ حکم باز می‌شه/رفرش می‌شه و کاربر از قبل وسطِ یه گیمِ 'playing'ه، دیگه به‌جای
+   حدسِ «دستِ ۱، رهبری با حاکم» (که فقط بلافاصله بعدِ انتخابِ حکم درست بود)، تابعِ تازه‌ی
+   hk7RestoreLiveHand با یه RPC معمولی (hokm_get_room_state، از hokm_06 + پچِ کوچیکِ
+   hokm_07_reconnect_q1_fix.sql) وضعیتِ رسمیِ سرور رو می‌گیره و صفحه رو دقیقاً همون‌جا
+   بازسازی می‌کنه: کارت‌های خودم (بدونِ اونایی که قبلاً زدم)، کارت‌های رویِ میزِ دستِ جاری،
+   نوبتِ کی‌ست، و امتیازِ مسابقه.
+
+   بخشِ STAGE 7 — بخشِ ۲ از ۴ (hk7StartWatchdog/hk7WatchdogTick/hk7SilentResync، پایینِ
+   همینِ ماژول، درست قبلِ hk3EnsureHand): واچ‌داگِ سکوت. اگه ۷ ثانیه هیچ broadcastای نرسه
+   و نوبتِ خودم نباشه، یه‌بار (نه پیوسته/پولینگ) همون RPCِ بخشِ ۱ (از راهِ hk3EnsureHand)
+   رو دوباره صدا می‌زنه تا اگه یه broadcast گم شده بود — مخصوصاً کارتِ خودکاری که تایمرِ
+   سمتِ سرورِ بخشِ ۳ (تویِ hokm_play_card) برای seatِ معطل‌مونده زده، که اصلاً broadcast
+   نمی‌شه — state دوباره sync بشه.
+
+   بخشِ STAGE 7 — بخشِ ۳ از ۴ (hk7StartTurnTimer/hk7RenderTurnTimer، بعدِ واچ‌داگِ بخشِ ۲):
+   تایمرِ نوبت، فقط نمایشی. یه نشانِ گردِ شمارش‌معکوسِ ۲۵ثانیه‌ای پایینِ آواتارِ کسی که
+   نوبتشه (خودم هم شاملش می‌شه) — با conic-gradient، بدونِ SVG/کتابخونه‌ی جدید. رفعِ
+   واقعیِ نوبتِ معطل‌مونده هنوز فقط سمتِ سرورِه (بخشِ ۱+۳ که hokm_06 ساخته)؛ این تایمر
+   خودش هیچ RPCای صدا نمی‌زنه، فقط یه هشدارِ بصریه که کِی زمان داره تموم می‌شه. */
+(function(){
+  try{
+    if(typeof window === 'undefined') return;
+
+    const HK3_SUITS = ['♠', '♥', '♦', '♣'];
+    const HK3_SUIT_WORD = { '♠':'spade', '♥':'heart', '♦':'diamond', '♣':'club' };
+    const HK3_WORD_SUIT = { spade:'♠', heart:'♥', diamond:'♦', club:'♣' };
+    const HK3_LETTER_SUIT = { S:'♠', H:'♥', D:'♦', C:'♣' };
+    const HK3_SEAT_ORDER = ['bottom', 'right', 'top', 'left']; // چرخشِ نوبت (جهتِ ساعت)، پایین همیشه خودِ کاربره
+    // ---- STAGE 5: عیناً همون نگاشتِ حرف→خالِ hokm_04/05 (hokm_card_suit_word)، سمتِ کلاینت،
+    // فقط برای تشخیصِ خالِ رهبری/پیرویِ خال — محاسبه‌ی برنده دیگه این‌جا انجام نمی‌شه. ----
+    const HK3_LETTER_WORD = { S:'spade', H:'heart', D:'diamond', C:'club' };
+    // ---- تکه‌ی ۳ (سَرَس/نَرَس): این دوتا خالِ واقعیِ هیچ کارتی نیستن، پس تو
+    // HK3_WORD_SUIT (که فقط ۴ خالِ واقعی رو داره) جایی ندارن؛ برچسبِ نمایشی‌شون
+    // جداست. hk3TrumpLabel هر دو حالت رو با هم قاطی می‌کنه تا همه‌جا که قبلاً
+    // مستقیم HK3_WORD_SUIT[...] می‌خوندن (فقط ۲ جا)، یکجا درست بشن. ----
+    const HK3_SPECIAL_TRUMP_LABEL = { saras: 'سرس (بدونِ حکم)', naras: 'نرس (۲ برنده)', tak_naras: 'تک‌نرس (آس برنده)' };
+    function hk3TrumpLabel(trumpSuit){
+      if(!trumpSuit) return '؟';
+      return HK3_WORD_SUIT[trumpSuit] || HK3_SPECIAL_TRUMP_LABEL[trumpSuit] || '؟';
+    }
+
+    let hk3RoomChannel = null;
+    let hk3RoomId = null;
+    let hk3LobbyWatchChannel = null;
+    let hk3PollTimer = null;
+    let hk3TrickResolveTimer = null;
+    const hk3State = {
+      handId: null, handNumber: null, hakemSeat: null, mySeat: null,
+      status: null, trumpSuit: null, myCards: [],
+      // ---- STAGE 5: وضعیتِ محلیِ نوبت/دستِ جاری. فقط برای UI (راهنما/انیمیشن)؛
+      // منبعِ حقیقت همیشه hokm_play_card سمتِ سرورِه، این‌جا فقط آینه‌شه. ----
+      trickNumber: 0, trickLeadSeat: null, trickLedSuit: null, trickMoves: {},
+      turnSeat: null, remainingCounts: null, playBusy: false,
+      // ---- تعدادِ دستِ بردهٔ هر تیم تویِ گیمِ جاری — همیشه از سرور (نه محاسبهٔ محلی)،
+      // برایِ رندرِ دو تا «دست‌ِ جمع‌شده»یِ کنارِ میز (hk3RenderPiles). ----
+      team0Tricks: 0, team1Tricks: 0
+    };
+
+    function hk3El(id){ return document.getElementById(id); }
+
+    function hk3CardLabel(card){
+      const parts = String(card).split('-');
+      const sym = HK3_LETTER_SUIT[parts[0]] || parts[0];
+      return sym + (parts[1] || '');
+    }
+
+    function hk3Reset(){
+      hk3State.handId = null; hk3State.handNumber = null; hk3State.hakemSeat = null;
+      hk3State.mySeat = null; hk3State.status = null; hk3State.trumpSuit = null; hk3State.myCards = [];
+      hk3State.trickNumber = 0; hk3State.trickLeadSeat = null; hk3State.trickLedSuit = null;
+      hk3State.trickMoves = {}; hk3State.turnSeat = null; hk3State.remainingCounts = null; hk3State.playBusy = false;
+      hk3State.team0Tricks = 0; hk3State.team1Tricks = 0;
+      if(hk3TrickResolveTimer){ clearTimeout(hk3TrickResolveTimer); hk3TrickResolveTimer = null; }
+      hk7ClearTurnTimer(); // STAGE 7/۳: نشانِ تایمرِ نوبتِ گیمِ قبلی رو هم پاک کن
+      const panel = hk3El('hkHandPanel');
+      if(panel) panel.style.display = 'none';
+      const area = hk3El('hkTableArea');
+      if(area) area.style.display = 'none';
+      const hand = hk3El('hkMyHand'); if(hand) hand.innerHTML = '';
+      document.querySelectorAll('#tab-hokm .hk-hakem-crown').forEach(function(e){ e.remove(); });
+      document.querySelectorAll('#tab-hokm .hk-seat').forEach(function(s){ s.classList.remove('hk-hakem', 'hk-turn'); });
+      HK3_SEAT_ORDER.forEach(function(pos){
+        const slot = hk3El('hkSlot' + hk3Cap(pos));
+        if(slot){ slot.innerHTML = ''; slot.style.border = ''; }
+      });
+    }
+
+    // ---- پلِ گرافیکی: نگاشتِ seatِ واقعی (۰..۳) به موقعیتِ چیدمانِ میز، نسبی به خودِ کاربر ----
+    function hk3Cap(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+
+    function hk3SeatPos(seat){
+      if(hk3State.mySeat === null || hk3State.mySeat === undefined) return null;
+      if(seat === null || seat === undefined) return null;
+      const step = ((seat - hk3State.mySeat) % 4 + 4) % 4;
+      return HK3_SEAT_ORDER[step];
+    }
+
+    // معکوسِ hk3SeatPos — از رویِ موقعیتِ چیدمان (top/left/right/bottom)، seatِ واقعیِ ۰..۳ رو برمی‌گردونه.
+    function hk3SeatOfPos(pos){
+      if(hk3State.mySeat === null || hk3State.mySeat === undefined) return null;
+      const i = HK3_SEAT_ORDER.indexOf(pos);
+      if(i === -1) return null;
+      return (hk3State.mySeat + i) % 4;
+    }
+
+    function hk3CardObj(cardStr){
+      const parts = String(cardStr).split('-');
+      return { suit: HK3_LETTER_SUIT[parts[0]] || parts[0], rank: parts[1] || '' };
+    }
+
+    function hk3CardHTML(card, jitter){
+      const red = card.suit === '♥' || card.suit === '♦';
+      // STAGE — UI: jitter اختیاریه (فقط برای کارت‌های افتاده‌ی وسطِ میز، نه دستِ خودم)؛
+      // {dx,dy,rot} یه جابه‌جاییِ کوچیکِ نمایشیه، عینِ کارتِ واقعی که رویِ میز پرت می‌شه.
+      const style = jitter
+        ? ' style="transform:translate(' + jitter.dx + 'px,' + jitter.dy + 'px) rotate(' + jitter.rot + 'deg);"'
+        : '';
+      return '<div class="hk-card ' + (red ? 'hk-card-red' : 'hk-card-dark') + '"' + style + '>' +
+        '<span class="hk-card-corner hk-card-corner-tl">' + card.rank + '<br>' + card.suit + '</span>' +
+        '<span class="hk-card-pip">' + card.suit + '</span>' +
+        '<span class="hk-card-corner hk-card-corner-br">' + card.rank + '<br>' + card.suit + '</span>' +
+        '</div>';
+    }
+
+    // یه جابه‌جاییِ کوچیکِ رندومِ فرود — نه خیلی کم که همه دقیقاً وسطِ اسلات بشینن (غیرواقعی)،
+    // نه خیلی زیاد که از اسلاتِ seatِ خودشون بزنن بیرون یا رویِ دستِ کسِ دیگه بیفتن.
+    function hk3RandomJitter(){
+      return {
+        dx: Math.round(Math.random() * 26 - 13),
+        dy: Math.round(Math.random() * 18 - 9),
+        rot: Math.round(Math.random() * 34 - 17)
+      };
+    }
+
+    let hk3DragHintShown = false;
+
+    // کارتِ نشسته‌ی وسطِ میز رو با موس/انگشت کمی قابلِ‌کشیدن می‌کنه — کاملاً نمایشیه
+    // (هیچ داده‌ی بازی عوض نمی‌شه، فقط ظاهرِ رویِ صفحه‌ی خودِ همین کاربر)، برای وقتی
+    // چندتا کارت رویِ هم افتادن یا یه گوشه‌ای که ناخوناست. pointer events یعنی هم با
+    // موس هم با لمس کار می‌کنه؛ یه محدودیتِ نرم (±۷۰px) هم هست که کارت زیادی از
+    // اسلاتِ خودش دور نشه و گم نشه.
+    function hk3MakeCardLoose(cardEl, jitter){
+      try{
+        if(!cardEl || cardEl.dataset.hkLoose) return;
+        cardEl.dataset.hkLoose = '1';
+        cardEl.style.touchAction = 'none';
+        cardEl.style.cursor = 'grab';
+        let curDx = jitter.dx, curDy = jitter.dy;
+        let dragging = false, startX = 0, startY = 0;
+        const clamp = function(v){ return Math.max(-70, Math.min(70, v)); };
+        cardEl.addEventListener('pointerdown', function(e){
+          dragging = true;
+          try{ cardEl.setPointerCapture(e.pointerId); }catch(err){}
+          startX = e.clientX; startY = e.clientY;
+          cardEl.style.cursor = 'grabbing';
+          cardEl.style.zIndex = '30';
+          e.preventDefault();
+        });
+        cardEl.addEventListener('pointermove', function(e){
+          if(!dragging) return;
+          const dx = clamp(curDx + (e.clientX - startX));
+          const dy = clamp(curDy + (e.clientY - startY));
+          cardEl.style.transform = 'translate(' + dx + 'px,' + dy + 'px) rotate(' + jitter.rot + 'deg)';
+        });
+        function endDrag(e){
+          if(!dragging) return;
+          dragging = false;
+          curDx = clamp(curDx + (e.clientX - startX));
+          curDy = clamp(curDy + (e.clientY - startY));
+          cardEl.style.cursor = 'grab';
+          cardEl.style.zIndex = '';
+        }
+        cardEl.addEventListener('pointerup', endDrag);
+        cardEl.addEventListener('pointercancel', endDrag);
+
+        if(!hk3DragHintShown){
+          hk3DragHintShown = true;
+          if(typeof showToast === 'function'){
+            showToast('می‌تونی کارت‌های وسطِ میز رو با کشیدن، کمی جابه‌جا کنی 👆', 'info');
+          }
+        }
+      }catch(e){ console.warn('hk3MakeCardLoose failed', e); }
+    }
+
+    function hk3CardBackHTML(){ return '<div class="hk-card-back">♠</div>'; }
+
+    function hk3CardSuitWordOf(cardStr){
+      return HK3_LETTER_WORD[String(cardStr).split('-')[0]] || null;
+    }
+
+    function hk3RectRelative(el, containerEl){
+      const r = el.getBoundingClientRect(), c = containerEl.getBoundingClientRect();
+      return { left: r.left - c.left, top: r.top - c.top, width: r.width, height: r.height };
+    }
+
+    // کارتِ در حالِ پرواز، از یه نقطه (دستِ خودم یا آواتارِ یه seatِ دیگه) به سمتِ وسطِ میز.
+    // اگه faceUpAtStart=false باشه (کارتِ بقیه)، وسطِ راه از پشت به رو برمی‌گرده — دقیقاً
+    // همون تکنیکِ دموی مرحله‌ی ۴، این‌جا با کارتِ واقعی. رسیدنِ به مقصد، خودش کارت رو تو
+    // اسلاتِ نهایی می‌ذاره تا چیزی وسطِ راه گم نشه. jitterِ فرود از همون اول (نه فقط لحظه‌ی
+    // فرود) حساب می‌شه تا چرخشِ کارت تو کل مسیرِ پرواز یکدست باشه، بدونِ پرشِ ناگهانی.
+    function hk3FlyCard(opts){
+      try{
+        const fromEl = opts.fromEl, toEl = opts.toEl, container = opts.container;
+        const cardObj = opts.cardObj, faceUpAtStart = opts.faceUpAtStart;
+        if(!fromEl || !toEl || !container) return;
+        const from = hk3RectRelative(fromEl, container);
+        const to = hk3RectRelative(toEl, container);
+        const w = 58, h = 80;
+        const jitter = hk3RandomJitter();
+        const el = document.createElement('div');
+        el.className = 'hk-flying-card';
+        const startLeft = from.left + from.width / 2 - w / 2;
+        const startTop = from.top + from.height / 2 - h / 2;
+        el.style.left = startLeft + 'px';
+        el.style.top = startTop + 'px';
+        el.style.width = w + 'px';
+        el.style.height = h + 'px';
+        el.style.transform = 'translate(0,0) rotate(0deg)';
+        el.innerHTML = faceUpAtStart ? hk3CardHTML(cardObj) : hk3CardBackHTML();
+        container.appendChild(el);
+        void el.offsetWidth;
+        const travelDx = (to.left + to.width / 2 - w / 2) - startLeft;
+        const travelDy = (to.top + to.height / 2 - h / 2) - startTop;
+        requestAnimationFrame(function(){
+          el.style.transform = 'translate(' + (travelDx + jitter.dx) + 'px, ' + (travelDy + jitter.dy) + 'px) rotate(' + jitter.rot + 'deg)';
+        });
+        if(!faceUpAtStart){
+          setTimeout(function(){ if(el.isConnected) el.innerHTML = hk3CardHTML(cardObj); }, 230);
+        }
+        setTimeout(function(){
+          if(el.isConnected) el.remove();
+          toEl.innerHTML = hk3CardHTML(cardObj, jitter);
+          toEl.style.border = 'none';
+          hk3MakeCardLoose(toEl.firstElementChild, jitter);
+        }, 480);
+      }catch(e){ console.warn('hk3FlyCard failed', e); }
+    }
+
+    // پروازِ کارتِ یکی از ۳ نفرِ دیگه (از روی broadcast)، از آواتارش تا اسلاتِ خودش وسطِ میز.
+    function hk3FlyRemoteCard(seat, cardStr){
+      try{
+        const pos = hk3SeatPos(seat); if(!pos) return;
+        const container = hk3El('hkTableWrap');
+        const slot = hk3El('hkSlot' + hk3Cap(pos));
+        const fromEl = hk3El('hkAvatar' + hk3Cap(pos));
+        if(!container || !slot || !fromEl) return;
+        hk3FlyCard({ fromEl: fromEl, toEl: slot, container: container, cardObj: hk3CardObj(cardStr), faceUpAtStart: false });
+      }catch(e){ console.warn('hk3FlyRemoteCard failed', e); }
+    }
+
+    // پروازِ یه کارتِ وسطِ میز (که این دست باهاش تموم شده) به سمتِ دست‌ِ جمع‌شده‌ی تیمِ
+    // برنده — برخلافِ hk3FlyCard که مقصدش یه اسلاتِ ثابته و رو می‌مونه، این‌جا مقصد
+    // خودِ pileEl (badge)ه و کارت وسطِ راه به‌جای رو‌شدن، پشت می‌شه (دقیقاً مثلِ جمع‌کردنِ
+    // واقعیِ یه دست: برش می‌گردونی و می‌ذاری کنار)، و در آخر محو می‌شه — چیزی تویِ DOM
+    // نمی‌مونه، چون خودِ pile فقط یه شمارنده‌ست، نه انباشتِ کارت‌هایِ واقعی.
+    function hk3FlyCardToPile(fromEl, pileEl, container){
+      try{
+        if(!fromEl || !pileEl || !container) return;
+        const from = hk3RectRelative(fromEl, container);
+        const to = hk3RectRelative(pileEl, container);
+        const w = 40, h = 56;
+        const el = document.createElement('div');
+        el.className = 'hk-flying-card';
+        const startLeft = from.left + from.width / 2 - w / 2;
+        const startTop = from.top + from.height / 2 - h / 2;
+        el.style.left = startLeft + 'px';
+        el.style.top = startTop + 'px';
+        el.style.width = w + 'px';
+        el.style.height = h + 'px';
+        el.style.transform = 'translate(0,0) scale(1)';
+        el.style.opacity = '1';
+        el.innerHTML = hk3CardBackHTML();
+        container.appendChild(el);
+        void el.offsetWidth;
+        const travelDx = (to.left + to.width / 2 - w / 2) - startLeft;
+        const travelDy = (to.top + to.height / 2 - h / 2) - startTop;
+        requestAnimationFrame(function(){
+          el.style.transform = 'translate(' + travelDx + 'px,' + travelDy + 'px) scale(.35)';
+          el.style.opacity = '0';
+        });
+        setTimeout(function(){ if(el.isConnected) el.remove(); }, 460);
+      }catch(e){ console.warn('hk3FlyCardToPile failed', e); }
+    }
+
+    function hk3SetHakemUI(seat){
+      document.querySelectorAll('#tab-hokm .hk-hakem-crown').forEach(function(e){ e.remove(); });
+      document.querySelectorAll('#tab-hokm .hk-seat').forEach(function(s){ s.classList.remove('hk-hakem'); });
+      const pos = hk3SeatPos(seat); if(!pos) return;
+      const seatEl = hk3El('hkSeat' + hk3Cap(pos)); if(!seatEl) return;
+      seatEl.classList.add('hk-hakem');
+      const crown = document.createElement('div');
+      crown.className = 'hk-hakem-crown';
+      crown.textContent = '👑';
+      const avatar = seatEl.querySelector('.hk-seat-avatar');
+      if(avatar) avatar.appendChild(crown);
+    }
+
+    // برچسبِ نسبی («هم‌بازی»/«حریف») به‌جای اسمِ ساختگی — اسمِ واقعیِ بازیکن‌ها هنوز از
+    // بک‌اند اکسپوز نشده (فقط seat/user_id داریم)، پس چیزی که واقعی نیست نشون نمی‌دیم.
+    function hk3SetSeatLabels(){
+      const top = hk3El('hkSeatTop'), left = hk3El('hkSeatLeft'), right = hk3El('hkSeatRight');
+      const topName = top ? top.querySelector('.hk-seat-name') : null;
+      const leftName = left ? left.querySelector('.hk-seat-name') : null;
+      const rightName = right ? right.querySelector('.hk-seat-name') : null;
+      if(topName) topName.textContent = 'هم‌بازی';
+      if(leftName) leftName.textContent = 'حریف';
+      if(rightName) rightName.textContent = 'حریف';
+    }
+
+    function hk3RenderMyHandFan(){
+      const wrap = hk3El('hkMyHand'); if(!wrap) return;
+      wrap.innerHTML = '';
+      const list = hk3State.myCards; // [{card:'S-A', dealt_batch}]
+      const n = list.length;
+      const spread = n <= 1 ? 0 : Math.min(56, 7 * n);
+      // ---- STAGE 5: کدوم کارت‌ها الان واقعاً قابلِ‌زدنن (فقط راهنمای بصری؛ چکِ واقعی سمتِ سرورِه) ----
+      const canPlayAtAll = hk3State.status === 'playing' && hk3State.turnSeat === hk3State.mySeat && !hk3State.playBusy;
+      const led = hk3State.trickLedSuit;
+      const haveLed = led ? list.some(function(c){ return hk3CardSuitWordOf(c.card) === led; }) : false;
+      list.forEach(function(c, i){
+        const cardObj = hk3CardObj(c.card);
+        const deg = n <= 1 ? 0 : (-spread / 2 + spread * i / (n - 1));
+        const outer = document.createElement('div');
+        outer.className = 'hk-hand-card';
+        outer.style.transform = 'rotate(' + deg.toFixed(1) + 'deg)';
+        outer.style.zIndex = String(i + 1);
+        outer.dataset.card = c.card;
+        const box = document.createElement('div');
+        box.innerHTML = hk3CardHTML(cardObj);
+        const cardEl = box.firstElementChild;
+        cardEl.style.animationDelay = (i * 45) + 'ms';
+        outer.appendChild(cardEl);
+
+        const suitWord = hk3CardSuitWordOf(c.card);
+        const legal = !led || suitWord === led || !haveLed;
+        if(canPlayAtAll && legal){
+          outer.addEventListener('click', function(){ hk3PlayCard(c.card); });
+        } else {
+          outer.classList.add('hk-card-disabled');
+        }
+        wrap.appendChild(outer);
+      });
+    }
+
+    // بقیه‌ی بازیکن‌ها هم دستشون رو مثلِ خودمون می‌بینیم، منتها از پشت: یه فنِ کوچیکِ
+    // کارتِ پشت‌رو (نه چند تا مربعِ روی‌همِ قبلی)، دقیقاً هم‌سبکِ فنِ خودم پایینِ صفحه
+    // (hk3RenderMyHandFan) ولی خیلی کوچیک‌تر و بدونِ تعاملی‌بودن. تعدادِ باقی‌مونده‌ی هر
+    // seat از hk3State.remainingCounts میاد (چون از یه جایی به بعد ۴ نفر مساوی نیستن)؛
+    // شمارهٔ عددی هم گوشه‌ش می‌مونه چون تویِ این اندازه چشمی شمردن سخته.
+    function hk3RenderMiniCardsAll(){
+      ['top', 'left', 'right'].forEach(function(pos){
+        const el = hk3El('hkCards' + hk3Cap(pos)); if(!el) return;
+        const seat = hk3SeatOfPos(pos);
+        const count = (hk3State.remainingCounts && seat !== null && hk3State.remainingCounts[seat] !== undefined)
+          ? hk3State.remainingCounts[seat] : hk3State.myCards.length;
+        const show = Math.min(count, 7); // فقط برایِ نمایشِ فن؛ عددِ واقعی همیشه تویِ badge درسته
+        const spread = show <= 1 ? 0 : Math.min(40, 6 * show);
+        let html = '';
+        for(let i = 0; i < show; i++){
+          const deg = show <= 1 ? 0 : (-spread / 2 + spread * i / (show - 1));
+          html += '<div class="hk-mini-fan-card" style="transform:rotate(' + deg.toFixed(1) + 'deg);z-index:' + i + ';"></div>';
+        }
+        html += '<span class="hk-card-count">' + toFa(count) + '</span>';
+        el.innerHTML = html;
+      });
+    }
+
+    // شمارهٔ دستِ بردهٔ هر تیم رو رویِ دو تا «دست‌ِ جمع‌شده»یِ کنارِ میز نشون می‌ده —
+    // یکی کنارِ تیمِ خودم (بالا+پایین)، یکی کنارِ تیمِ حریف (چپ+راست). قبل از اولینِ دستِ
+    // بُرده مخفی می‌مونه تا وسطِ میزِ خالی شلوغ نشه. عمداً همیشه از hk3State.team0Tricks/
+    // team1Tricks (که همیشه از سرور میاد، نه محاسبهٔ محلی) می‌خونه.
+    function hk3RenderPiles(){
+      const myTeam = (hk3State.mySeat !== null && hk3State.mySeat !== undefined) ? (hk3State.mySeat % 2) : 0;
+      const t0 = hk3State.team0Tricks || 0, t1 = hk3State.team1Tricks || 0;
+      const mine = myTeam === 0 ? t0 : t1;
+      const opp = myTeam === 0 ? t1 : t0;
+      const mineWrap = hk3El('hkPileMine'), mineCount = hk3El('hkPileMineCount');
+      const oppWrap = hk3El('hkPileOpp'), oppCount = hk3El('hkPileOppCount');
+      if(mineWrap) mineWrap.style.display = mine > 0 ? 'flex' : 'none';
+      if(mineCount) mineCount.textContent = toFa(mine);
+      if(oppWrap) oppWrap.style.display = opp > 0 ? 'flex' : 'none';
+      if(oppCount) oppCount.textContent = toFa(opp);
+    }
+
+    // ---- STAGE 5: هالهٔ نوبت رو رویِ seatِ درست (نسبی به خودم) روشن می‌کنه ----
+    function hk3UpdateTurnUI(){
+      document.querySelectorAll('#tab-hokm .hk-seat').forEach(function(s){ s.classList.remove('hk-turn'); });
+      if(hk3State.status !== 'playing') return;
+      if(hk3State.turnSeat === null || hk3State.turnSeat === undefined) return;
+      const pos = hk3SeatPos(hk3State.turnSeat); if(!pos) return;
+      const seatEl = hk3El('hkSeat' + hk3Cap(pos));
+      if(seatEl) seatEl.classList.add('hk-turn');
+    }
+
+    function hk3RenderTable(){
+      try{
+        const area = hk3El('hkTableArea'); if(!area) return;
+        if(!hk3State.handId){ area.style.display = 'none'; return; }
+        area.style.display = '';
+        hk3SetSeatLabels();
+        if(hk3State.hakemSeat !== null && hk3State.hakemSeat !== undefined) hk3SetHakemUI(hk3State.hakemSeat);
+        hk3RenderMyHandFan();
+        hk3RenderMiniCardsAll();
+        hk3RenderPiles();
+        hk3UpdateTurnUI();
+        const chip = hk3El('hkTrumpChip');
+        if(chip) chip.textContent = hk3TrumpLabel(hk3State.trumpSuit);
+        const trick = hk3El('hkTrickCount');
+        if(trick){
+          if(hk3State.status === 'bidding'){
+            trick.textContent = (hk3State.mySeat === hk3State.hakemSeat) ? 'حکم رو انتخاب کن' : 'در انتظارِ انتخابِ حکم...';
+          } else if(hk3State.status === 'playing'){
+            const trickNo = hk3State.trickNumber || 1;
+            let turnLabel = '';
+            if(hk3State.turnSeat === hk3State.mySeat) turnLabel = 'نوبتِ شماست';
+            else if(hk3State.turnSeat !== null && hk3State.turnSeat !== undefined){
+              const pos = hk3SeatPos(hk3State.turnSeat);
+              turnLabel = 'نوبتِ ' + (pos === 'top' ? 'هم‌بازی' : 'حریف');
+            }
+            trick.textContent = 'دست ' + toFa(trickNo) + ' از ۱۳' + (turnLabel ? ' — ' + turnLabel : '');
+          } else if(hk3State.status === 'hand_done'){
+            trick.textContent = 'گیم تموم شد 🏁';
+          } else {
+            trick.textContent = '';
+          }
+        }
+      }catch(e){ console.warn('hk3RenderTable failed', e); }
+    }
+
+    function hk3Render(){
+      hk3RenderTable();
+      try{
+        const panel = hk3El('hkHandPanel');
+        const titleEl = hk3El('hkHandTitle');
+        const cardsEl = hk3El('hkHandCards');
+        const actionEl = hk3El('hkHandAction');
+        if(!panel || !titleEl || !cardsEl || !actionEl) return;
+
+        if(!hk3State.handId){ panel.style.display = 'none'; return; }
+        panel.style.display = 'block';
+
+        const isHakem = hk3State.mySeat !== null && hk3State.mySeat === hk3State.hakemSeat;
+        titleEl.innerHTML = '🃏 دست شما (' + toFa(hk3State.myCards.length) + ' کارت)'
+          + (isHakem ? ' <span class="hk-hakem-badge">— شما حاکمید 👑</span>' : '');
+
+        cardsEl.innerHTML = hk3State.myCards.map(function(c){
+          return '<span class="hk-hand-card-chip">' + escapeHtml(hk3CardLabel(c.card)) + '</span>';
+        }).join('');
+
+        if(hk3State.status === 'bidding'){
+          if(isHakem){
+            actionEl.innerHTML = '<div class="hk-trump-pick-label">حکم رو انتخاب کنید:</div>'
+              + '<div class="hk-trump-pick-row">' + HK3_SUITS.map(function(s){
+                return '<button type="button" class="hk-trump-pick-btn" data-suit="' + HK3_SUIT_WORD[s] + '">' + s + '</button>';
+              }).join('')
+              // تکه‌ی ۳: سه گزینه‌ی بدونِ‌حکم (سرس/نرس/تک‌نرس) — همون کلاسِ hk-trump-pick-btn
+              // رو دارن، پس handlerِ پایین (که با querySelectorAll همون کلاس رو می‌گیره) نیازی
+              // به تغییر نداره؛ فقط یه کلاسِ کمکی برای فونتِ کوچیک‌ترِ متن اضافه شده.
+              + '<button type="button" class="hk-trump-pick-btn hk-trump-pick-btn-special" data-suit="saras">سرس</button>'
+              + '<button type="button" class="hk-trump-pick-btn hk-trump-pick-btn-special" data-suit="naras">نرس</button>'
+              + '<button type="button" class="hk-trump-pick-btn hk-trump-pick-btn-special" data-suit="tak_naras">تک‌نرس</button>'
+              + '</div>';
+            actionEl.querySelectorAll('.hk-trump-pick-btn').forEach(function(btn){
+              btn.addEventListener('click', function(){ hk3ChooseTrump(btn.dataset.suit); });
+            });
+          } else {
+            actionEl.innerHTML = '<div class="hk-hand-waiting">در انتظار انتخابِ حکم توسط حاکم...</div>';
+          }
+        } else if(hk3State.status === 'playing'){
+          const trumpSym = hk3TrumpLabel(hk3State.trumpSuit);
+          actionEl.innerHTML = '<div class="hk-trump-chosen-row">حکم انتخاب‌شده: <span class="hk-trump-chosen-suit">' + trumpSym + '</span></div>';
+        } else {
+          actionEl.innerHTML = '';
+        }
+      }catch(e){ console.warn('hk3Render failed', e); }
+    }
+
+    async function hk3FetchMyCards(){
+      try{
+        if(!hk3State.handId) return;
+        const { data, error } = await sb.rpc('hokm_get_my_cards', { p_hand_id: hk3State.handId });
+        if(error) throw error;
+        hk3State.myCards = data || [];
+        hk3Render();
+      }catch(e){ console.warn('hk3FetchMyCards failed', e); }
+    }
+
+    function hk3SubscribeRoomChannel(roomId){
+      try{
+        if(hk3RoomChannel && hk3RoomId === roomId) return;
+        if(hk3RoomChannel){ try{ sb.removeChannel(hk3RoomChannel); }catch(e){} hk3RoomChannel = null; }
+        hk3RoomId = roomId;
+        hk3RoomChannel = sb.channel('hokm_room_' + roomId, { config: { broadcast: { self: false } } })
+          .on('broadcast', { event: 'hand_started' }, function(msg){ hk3HandleHandStarted(msg && msg.payload); })
+          .on('broadcast', { event: 'trump_chosen' }, function(msg){ hk3HandleTrumpChosen(msg && msg.payload); })
+          .on('broadcast', { event: 'card_played' }, function(msg){ hk3HandleCardPlayed(msg && msg.payload); })
+          .on('broadcast', { event: 'room_cancelled' }, function(msg){ hk7HandleRoomCancelled(msg && msg.payload && msg.payload.reason); })
+          .subscribe();
+      }catch(e){ console.warn('hk3SubscribeRoomChannel failed', e); }
+    }
+
+    function hk3UnsubscribeRoomChannel(){
+      try{ if(hk3RoomChannel) sb.removeChannel(hk3RoomChannel); }catch(e){}
+      hk3RoomChannel = null; hk3RoomId = null;
+    }
+
+    // =====================================================================
+    // STAGE 5 (نیمه‌ی دومِ نیمه‌ی دوم) — خودِ بازی‌کردنِ کارت.
+    // + اتصالِ STAGE 6 به داده‌ی واقعی (hokm_05_hand_scoring.sql).
+    //
+    // منبعِ حقیقتِ نوبت/پیرویِ خال/برنده/تالیِ دست/پایانِ گیم/امتیازِ مسابقه، همیشه
+    // خروجیِ خودِ hokm_play_card سمتِ سرورِه (که این فایل با DROP+CREATE جایگزینش کرده،
+    // امضای خروجی‌ش عوض شده). این‌جا هیچ‌جا برنده‌ی دست یا کت یا امتیاز محلی حدس زده
+    // نمی‌شه: کارتی که دست رو کامل می‌کنه، همیشه یه trickResultِ معتبر (یا مستقیم از
+    // پاسخِ RPC، برای خودم؛ یا سوارِ همون broadcastِ سبکِ کارت، برای بقیه) همراهشه.
+    // گیم معمولاً با ۱۳ دست تموم نمی‌شه — همین که یه تیم به ۷ دست برسه گیم تمومه؛
+    // این عدد رو هم فقط سرور می‌دونه (به همین خاطر دیگه هیچ حدسِ «>۱۳» تو این فایل نیست).
+    // =====================================================================
+
+    function hk3SnapshotTrick(){
+      return {
+        trickNumber: hk3State.trickNumber, trickLeadSeat: hk3State.trickLeadSeat,
+        trickLedSuit: hk3State.trickLedSuit, trickMoves: Object.assign({}, hk3State.trickMoves),
+        turnSeat: hk3State.turnSeat
+      };
+    }
+    function hk3RestoreTrickSnapshot(snap){
+      hk3State.trickNumber = snap.trickNumber; hk3State.trickLeadSeat = snap.trickLeadSeat;
+      hk3State.trickLedSuit = snap.trickLedSuit; hk3State.trickMoves = snap.trickMoves;
+      hk3State.turnSeat = snap.turnSeat;
+    }
+
+    // یه حرکتِ معتبر (خودم یا یکی دیگه) رو تو وضعیتِ محلی اعمال می‌کنه: خالِ رهبری (اگه
+    // اولین کارتِ دسته) و نوبتِ بعدی. عمداً هیچ برنده‌ای این‌جا حدس زده نمی‌شه — وقتی
+    // دست با این کارت کامل می‌شه، نوبت موقتاً null می‌مونه تا hk3ResolveTrickWithAuthority
+    // (با داده‌ی واقعیِ سرور) صداش بزنن.
+    function hk3ApplyMoveLocally(seat, cardStr){
+      try{
+        if(hk3State.trickLedSuit === null && Object.keys(hk3State.trickMoves).length === 0){
+          hk3State.trickLedSuit = hk3CardSuitWordOf(cardStr);
+          hk3State.trickLeadSeat = seat;
+        }
+        hk3State.trickMoves[seat] = cardStr;
+        if(hk3State.remainingCounts && hk3State.remainingCounts[seat] !== undefined){
+          hk3State.remainingCounts[seat] = Math.max(0, hk3State.remainingCounts[seat] - 1);
+        }
+        if(seat !== hk3State.mySeat) hk3FlyRemoteCard(seat, cardStr);
+
+        const movesCount = Object.keys(hk3State.trickMoves).length;
+        hk3State.turnSeat = movesCount >= 4 ? null : (seat + 1) % 4;
+        // STAGE 7/۳: نوبتِ جدید شروع شد → تایمرِ نمایشی رو صفر کن؛ اگه دست کامل شده
+        // (turnSeat=null، تا حلِ دست تویِ hk3ResolveTrickWithAuthority)، فعلاً مخفیش کن.
+        if(hk3State.turnSeat !== null) hk7SetTurnDeadline(Date.now() + HK7_TURN_SECONDS * 1000);
+        else hk7ClearTurnTimer();
+        hk3RenderTable();
+      }catch(e){ console.warn('hk3ApplyMoveLocally failed', e); }
+    }
+
+    // برنده‌ی دست رو (که همیشه از سرور اومده، نه محاسبه‌ی محلی) یه لحظه نشون می‌ده،
+    // ۴ کارت رو از وسطِ میز جمع می‌کنه، و بسته به این‌که گیم تموم شده یا نه، یا
+    // دستِ بعدی رو (با رهبریِ برنده) آماده می‌کنه یا hk3HandleHandDone رو صدا می‌زنه.
+    // result: {winnerSeat, handStatus, handTeam0Tricks, handTeam1Tricks, handDone,
+    //          handWinnerTeam, handIsKat, matchTeam0Score, matchTeam1Score,
+    //          matchStatus, matchWinnerTeam}
+    function hk3ResolveTrickWithAuthority(result){
+      try{
+        if(!result || result.winnerSeat === null || result.winnerSeat === undefined) return;
+        const winner = result.winnerSeat;
+        const winPos = hk3SeatPos(winner);
+        const winSeatEl = winPos ? hk3El('hkSeat' + hk3Cap(winPos)) : null;
+        if(winSeatEl) winSeatEl.classList.add('hk-turn');
+
+        // این دست رو کدوم تیم برده — نسبت به خودم، تا بفهمیم کارت‌ها باید سمتِ کدوم
+        // pile (hkPileMine/hkPileOpp) پرواز کنن.
+        const myTeam = (hk3State.mySeat !== null && hk3State.mySeat !== undefined) ? (hk3State.mySeat % 2) : 0;
+        const winnerTeam = winner % 2;
+        const pileEl = hk3El(winnerTeam === myTeam ? 'hkPileMine' : 'hkPileOpp');
+        const container = hk3El('hkTableWrap');
+
+        if(hk3TrickResolveTimer) clearTimeout(hk3TrickResolveTimer);
+        hk3TrickResolveTimer = setTimeout(function(){
+          // ۴ کارتِ وسطِ میز رو (به‌جای فقط محو‌شدنِ سرجاشون) به سمتِ دست‌ِ جمع‌شده‌ی
+          // تیمِ برنده پرواز می‌دیم؛ خودِ کارتِ ثابتِ تویِ اسلات همون لحظه مخفی می‌شه تا
+          // با کپیِ در حالِ پروازش دوبار دیده نشه.
+          HK3_SEAT_ORDER.forEach(function(pos){
+            const slot = hk3El('hkSlot' + hk3Cap(pos));
+            if(!slot || !slot.firstElementChild) return;
+            if(pileEl && container) hk3FlyCardToPile(slot, pileEl, container);
+            slot.firstElementChild.style.visibility = 'hidden';
+          });
+          hk3TrickResolveTimer = setTimeout(function(){
+            HK3_SEAT_ORDER.forEach(function(pos){
+              const slot = hk3El('hkSlot' + hk3Cap(pos));
+              if(slot){ slot.innerHTML = ''; slot.style.border = ''; }
+            });
+            if(winSeatEl) winSeatEl.classList.remove('hk-turn');
+
+            hk3State.trickLeadSeat = winner;
+            hk3State.trickLedSuit = null;
+            hk3State.trickMoves = {};
+            // شمارندهٔ دست‌هایِ بردهٔ هر تیم رو همین‌جا، دقیقاً هم‌زمان با رسیدنِ کارت‌ها
+            // به pile، به‌روز می‌کنیم — همیشه از عددِ رسمیِ سرور، نه شمارشِ محلی.
+            hk3State.team0Tricks = result.handTeam0Tricks;
+            hk3State.team1Tricks = result.handTeam1Tricks;
+            hk3RenderPiles();
+
+            if(result.handDone){
+              hk3HandleHandDone(result);
+            } else {
+              hk3State.trickNumber = (hk3State.trickNumber || 1) + 1;
+              hk3State.turnSeat = winner;
+              hk7SetTurnDeadline(Date.now() + HK7_TURN_SECONDS * 1000); // STAGE 7/۳: دستِ تازه، نوبتِ برنده
+              hk3RenderTable();
+            }
+          }, 420);
+        }, 500);
+      }catch(e){ console.warn('hk3ResolveTrickWithAuthority failed', e); }
+    }
+
+    // گیم تموم شد (یه تیم به ۷ دست رسید) — پنلِ پایانِ گیمِ STAGE 6 رو با داده‌ی
+    // واقعی نشون می‌ده؛ اگه مسابقه هم تموم شده، بعدش پایانِ مسابقه رو؛ وگرنه بعدِ یه
+    // مکث، خودش (idempotent، از رویِ همون hk3EnsureHand) گیمِ بعدی رو شروع می‌کنه.
+    function hk3HandleHandDone(result){
+      try{
+        hk3State.status = 'hand_done'; // یه وضعیتِ گذرا، تا گیمِ بعدی/پایانِ مسابقه معلوم بشه
+        hk3State.turnSeat = null;
+        hk7ClearTurnTimer(); // STAGE 7/۳: گیم تموم شد، دیگه تایمرِ نوبت معنی نداره
+        hk3RenderTable();
+
+        const myTeam = (hk3State.mySeat !== null && hk3State.mySeat !== undefined) ? (hk3State.mySeat % 2) : 0;
+
+        if(typeof window.hk6ShowHandEnd === 'function'){
+          window.hk6ShowHandEnd({
+            team0Tricks: result.handTeam0Tricks, team1Tricks: result.handTeam1Tricks,
+            winnerTeam: result.handWinnerTeam, isKat: result.handIsKat,
+            matchTeam0Score: result.matchTeam0Score, matchTeam1Score: result.matchTeam1Score,
+            myTeam: myTeam
+          });
+        }
+
+        if(hk3TrickResolveTimer) clearTimeout(hk3TrickResolveTimer);
+
+        if(result.matchStatus === 'finished'){
+          // یه‌کم بعدِ پنلِ پایانِ گیم، تا رویِ هم نیفتن؛ خودِ overlay تا کلیکِ کاربر می‌مونه.
+          hk3TrickResolveTimer = setTimeout(function(){
+            if(typeof window.hk6ShowMatchEnd === 'function'){
+              window.hk6ShowMatchEnd({
+                winnerTeam: result.matchWinnerTeam,
+                matchTeam0Score: result.matchTeam0Score, matchTeam1Score: result.matchTeam1Score,
+                myTeam: myTeam
+              });
+            }
+          }, 1200);
+        } else {
+          // مسابقه ادامه داره → گیمِ بعدی رو (idempotent؛ اگه یکی دیگه از ۴ نفر زودتر
+          // شروعش کرده باشه، همینجا فقط همون گیمِ تازه رو می‌گیریم) شروع کن.
+          hk3TrickResolveTimer = setTimeout(function(){
+            hk3EnsureHand(hk3RoomId, hk3State.mySeat);
+          }, 3400);
+        }
+      }catch(e){ console.warn('hk3HandleHandDone failed', e); }
+    }
+
+    // broadcastِ کارتِ یکی از ۳ نفرِ دیگه. اگه همین کارت دست رو کامل کرده باشه،
+    // trickResultِ واقعی (از پاسخِ RPCِ خودِ اون بازیکن) رو هم سوار همین پیام می‌کنه.
+    function hk3HandleCardPlayed(payload){
+      try{
+        if(!payload || payload.hand_id !== hk3State.handId) return;
+        if(payload.seat === hk3State.mySeat) return; // self:false هم اصلاً برای خودم نمیاد؛ این فقط یه محافظِ اضافه‌ست
+        if(typeof payload.seat !== 'number' || !payload.card) return;
+        hk7MarkActivity(); // STAGE 7/۲: broadcastِ واقعی رسید، واچ‌داگ صفر بشه
+        hk3ApplyMoveLocally(payload.seat, payload.card);
+        if(payload.trickResult) hk3ResolveTrickWithAuthority(payload.trickResult);
+      }catch(e){ console.warn('hk3HandleCardPlayed failed', e); }
+    }
+
+    // اگه RPC رد کرد (یا قطع شد)، کارت رو دقیقاً به‌جای قبلی‌ش تو دست برمی‌گردونه و
+    // وضعیتِ دست رو به قبل از این حرکت برمی‌گردونه — یعنی «rollback ظاهری». چون
+    // hk3ResolveTrickWithAuthority فقط بعدِ موفقیتِ RPC صدا زده می‌شه، هیچ‌وقت چیزی
+    // درموردِ پایانِ گیم/مسابقه لازم نیست این‌جا برگردونده بشه.
+    function hk3RollbackMyMove(removedCard, idx, trickSnapshotBefore){
+      try{
+        hk3RestoreTrickSnapshot(trickSnapshotBefore);
+        const list = hk3State.myCards.slice();
+        list.splice(Math.min(idx, list.length), 0, removedCard);
+        hk3State.myCards = list;
+        if(hk3State.remainingCounts && hk3State.mySeat !== null){
+          hk3State.remainingCounts[hk3State.mySeat] = Math.min(13, (hk3State.remainingCounts[hk3State.mySeat] || 0) + 1);
+        }
+        const slot = hk3El('hkSlotBottom');
+        if(slot){ slot.innerHTML = ''; slot.style.border = ''; }
+        hk3RenderTable();
+      }catch(e){ console.warn('hk3RollbackMyMove failed', e); }
+    }
+
+    // تنها نقطه‌ی ورودی برای زدنِ یه کارت (از رویِ کلیکِ رویِ فنِ دستِ خودم).
+    // ترتیب: اعتبارسنجیِ سبکِ محلی (فقط راهنما) → پروازِ optimistic + حذف از دست →
+    // اعمالِ محلیِ حرکت → صدا زدنِ hokm_play_card → موفق: broadcast (+trickResult اگه
+    // دست کامل شد) → اگه دست کامل شد، حل‌شدنش با همون داده‌ی واقعی؛ ناموفق: rollback.
+    async function hk3PlayCard(cardStr){
+      if(!hk3State.handId || hk3State.status !== 'playing') return;
+      if(hk3State.turnSeat !== hk3State.mySeat) return;
+      if(hk3State.playBusy) return;
+
+      const idx = hk3State.myCards.findIndex(function(c){ return c.card === cardStr; });
+      if(idx === -1) return;
+
+      const led = hk3State.trickLedSuit;
+      if(led){
+        const suitWord = hk3CardSuitWordOf(cardStr);
+        if(suitWord !== led){
+          const haveLed = hk3State.myCards.some(function(c){ return hk3CardSuitWordOf(c.card) === led; });
+          if(haveLed){
+            if(typeof showToast === 'function') showToast('باید همون خالِ شروع‌کننده رو بازی کنید.', 'error');
+            return;
+          }
+        }
+      }
+
+      hk3State.playBusy = true;
+      const trickSnapshotBefore = hk3SnapshotTrick();
+      const removedCard = hk3State.myCards[idx];
+
+      try{
+        const container = hk3El('hkTableWrap');
+        const slot = hk3El('hkSlotBottom');
+        const handWrap = hk3El('hkMyHand');
+        const outerEl = handWrap ? handWrap.querySelector('.hk-hand-card[data-card="' + cardStr + '"]') : null;
+        if(container && slot){
+          hk3FlyCard({ fromEl: outerEl || hk3El('hkAvatarBottom'), toEl: slot, container: container, cardObj: hk3CardObj(cardStr), faceUpAtStart: true });
+        }
+
+        hk3State.myCards = hk3State.myCards.slice(0, idx).concat(hk3State.myCards.slice(idx + 1));
+        hk3RenderMyHandFan();
+        hk3ApplyMoveLocally(hk3State.mySeat, cardStr);
+        hk7MarkActivity(); // STAGE 7/۲: خودم یه حرکتِ واقعی زدم، واچ‌داگ صفر بشه
+
+        const { data, error } = await sb.rpc('hokm_play_card', { p_hand_id: hk3State.handId, p_card: cardStr });
+        if(error) throw error;
+        const row = (data && data.length) ? data[0] : null;
+
+        const payload = { hand_id: hk3State.handId, seat: hk3State.mySeat, card: cardStr };
+        if(row && row.trick_complete){
+          payload.trickResult = {
+            winnerSeat: row.winner_seat, handStatus: row.hand_status,
+            handTeam0Tricks: row.hand_team0_tricks, handTeam1Tricks: row.hand_team1_tricks,
+            handDone: row.hand_done, handWinnerTeam: row.hand_winner_team, handIsKat: row.hand_is_kat,
+            matchTeam0Score: row.match_team0_score, matchTeam1Score: row.match_team1_score,
+            matchStatus: row.match_status, matchWinnerTeam: row.match_winner_team
+          };
+        }
+        if(hk3RoomChannel){
+          hk3RoomChannel.send({ type: 'broadcast', event: 'card_played', payload: payload });
+        }
+        if(payload.trickResult) hk3ResolveTrickWithAuthority(payload.trickResult);
+      }catch(e){
+        console.error('hk3PlayCard failed, rolling back', e);
+        hk3RollbackMyMove(removedCard, idx, trickSnapshotBefore);
+        // STAGE 7/۴: اگه سرور رد کرده چون میز از قبل لغو شده (مثلاً heartbeatِ یه
+        // نفرِ دیگه چند لحظه زودتر همینو تشخیص داده)، به‌جایِ «دوباره امتحان کن»یِ
+        // گمراه‌کننده، همون مسیرِ واقعیِ خروج از میز رو طی کن.
+        if(String((e && e.message) || '').indexOf('room_cancelled') > -1){
+          hk7HandleRoomCancelled('opponent_left');
+        } else if(typeof showToast === 'function'){
+          showToast('این حرکت قبول نشد؛ کارت رو براتون برگردوندیم.', 'error');
+        }
+      }finally{
+        hk3State.playBusy = false;
+      }
+    }
+
+    async function hk3HandleHandStarted(payload){
+      try{
+        if(!payload || !payload.hand_id) return;
+        hk7MarkActivity(); // STAGE 7/۲: broadcastِ واقعی رسید، واچ‌داگ صفر بشه
+        hk3State.handId = payload.hand_id;
+        hk3State.handNumber = payload.hand_number;
+        hk3State.hakemSeat = payload.hakem_seat;
+        hk3State.status = 'bidding';
+        hk3State.trumpSuit = null;
+        hk3StopPoll();
+        await hk3FetchMyCards();
+      }catch(e){ console.warn('hk3HandleHandStarted failed', e); }
+    }
+
+    async function hk3HandleTrumpChosen(payload){
+      try{
+        if(!payload || payload.hand_id !== hk3State.handId) return;
+        hk7MarkActivity(); // STAGE 7/۲: broadcastِ واقعی رسید، واچ‌داگ صفر بشه
+        hk3State.status = 'playing';
+        hk3State.trumpSuit = payload.suit;
+        // STAGE 5: دستِ اول همیشه با حاکم شروع می‌شه؛ هر ۴ نفر با ۱۳ کارت واردِ بازی می‌شن.
+        hk3State.trickNumber = 1; hk3State.trickLeadSeat = hk3State.hakemSeat;
+        hk3State.trickLedSuit = null; hk3State.trickMoves = {}; hk3State.turnSeat = hk3State.hakemSeat;
+        hk3State.remainingCounts = { 0:13, 1:13, 2:13, 3:13 };
+        hk3State.team0Tricks = 0; hk3State.team1Tricks = 0;
+        hk7SetTurnDeadline(Date.now() + HK7_TURN_SECONDS * 1000); // STAGE 7/۳: دستِ اول، نوبتِ حاکم
+        await hk3FetchMyCards();
+      }catch(e){ console.warn('hk3HandleTrumpChosen failed', e); }
+    }
+
+    async function hk3ChooseTrump(suit){
+      try{
+        if(!hk3State.handId) return;
+        const { error } = await sb.rpc('hokm_choose_trump', { p_hand_id: hk3State.handId, p_suit: suit });
+        if(error) throw error;
+        hk7MarkActivity(); // STAGE 7/۲: خودم حکم رو انتخاب کردم، فعالیتِ واقعیه
+        hk3State.status = 'playing';
+        hk3State.trumpSuit = suit;
+        // STAGE 5: دستِ اول همیشه با حاکم شروع می‌شه؛ هر ۴ نفر با ۱۳ کارت واردِ بازی می‌شن.
+        hk3State.trickNumber = 1; hk3State.trickLeadSeat = hk3State.hakemSeat;
+        hk3State.trickLedSuit = null; hk3State.trickMoves = {}; hk3State.turnSeat = hk3State.hakemSeat;
+        hk3State.remainingCounts = { 0:13, 1:13, 2:13, 3:13 };
+        hk3State.team0Tricks = 0; hk3State.team1Tricks = 0;
+        hk7SetTurnDeadline(Date.now() + HK7_TURN_SECONDS * 1000); // STAGE 7/۳: دستِ اول، نوبتِ حاکم (خودم)
+        await hk3FetchMyCards();
+        if(hk3RoomChannel){
+          hk3RoomChannel.send({ type: 'broadcast', event: 'trump_chosen', payload: { hand_id: hk3State.handId, suit: suit } });
+        }
+      }catch(e){
+        console.error('hk3ChooseTrump failed', e);
+        if(String((e && e.message) || '').indexOf('room_cancelled') > -1){
+          hk7HandleRoomCancelled('opponent_left');
+        } else if(typeof showToast === 'function'){
+          showToast('مشکلی تو ثبتِ حکم پیش اومد، دوباره امتحان کن.', 'error');
+        }
+      }
+    }
+
+    // =====================================================================
+    // STAGE 7 — بخشِ ۱ از ۴ (بازگشت بعد از رفرش/قطعی): جایگزینِ همون best-effort
+    // حدسِ قدیمی (که همیشه فرض می‌کرد «دستِ ۱، رهبری با حاکم»). حالا با
+    // hokm_get_room_state (که خودِ hokm_06 ساخته بود ولی تا الان هیچ‌جای UI
+    // صداش نمی‌زد) وضعیتِ رسمیِ سرور رو می‌گیره: کارت‌های خودم (بدونِ اونایی که
+    // قبلاً زدم)، کارت‌های رویِ میزِ دستِ جاری، نوبتِ کی‌ست، و امتیازِ مسابقه —
+    // و صفحه رو دقیقاً همون‌جا بازسازی می‌کنه. فقط یه RPC معمولی، نه realtime.
+    // =====================================================================
+    async function hk7RestoreLiveHand(roomId, handId){
+      try{
+        const { data, error } = await sb.rpc('hokm_get_room_state', { p_room_id: roomId });
+        if(error) throw error;
+        const state = (data && data.length) ? data[0] : null;
+        if(!state || state.hand_id !== handId || state.hand_status !== 'playing') return false;
+
+        // کارت‌های خودم: فقط اونایی که هنوز نزدم (my_cards شاملِ is_played هم هست).
+        hk3State.myCards = (state.my_cards || [])
+          .filter(function(c){ return !c.is_played; })
+          .map(function(c){ return { card: c.card, dealt_batch: c.dealt_batch }; });
+
+        // چون هر دستِ کامل دقیقاً ۱ کارت از هر ۴ seat کم می‌کنه، تعدادِ باقی‌مونده‌ی
+        // هر seat = ۱۳ − تعدادِ دستهای تمام‌شده − (۱ اگه تو دستِ جاری زده باشه).
+        const completed = (state.team0_tricks || 0) + (state.team1_tricks || 0);
+        const counts = { 0: 13 - completed, 1: 13 - completed, 2: 13 - completed, 3: 13 - completed };
+        const moves = {};
+        let leadSeat = null;
+        (state.current_trick || []).forEach(function(m){
+          moves[m.seat] = m.card;
+          if(counts[m.seat] !== undefined) counts[m.seat] = Math.max(0, counts[m.seat] - 1);
+          if(m.play_order === 1) leadSeat = m.seat;
+        });
+
+        hk3State.trickNumber = completed + 1;
+        hk3State.trickMoves = moves;
+        hk3State.trickLedSuit = state.turn_led_suit || null;
+        hk3State.trickLeadSeat = (leadSeat !== null) ? leadSeat : state.turn_seat;
+        hk3State.turnSeat = state.turn_seat;
+        hk3State.remainingCounts = counts;
+        // برخلافِ بقیه‌ی جاها که صفر می‌کنیم، این‌جا بازسازیِ وسطِ یه گیمِ در حالِ بازیه —
+        // پس تعدادِ واقعیِ دست‌هایِ بردهٔ هر تیم رو مستقیم از سرور می‌گیریم، نه صفر.
+        hk3State.team0Tricks = state.team0_tricks || 0;
+        hk3State.team1Tricks = state.team1_tricks || 0;
+        // STAGE 7/۳: این‌جا (برخلافِ بقیه‌ی جاها) deadlineِ واقعیِ سرور رو داریم
+        // (turn_deadline، از hokm_get_room_state)، نه یه حدسِ محلی — دقیق‌ترین حالتِ ممکنه.
+        if(state.turn_seat !== null && state.turn_seat !== undefined && state.turn_deadline){
+          hk7SetTurnDeadline(new Date(state.turn_deadline).getTime());
+        } else {
+          hk7ClearTurnTimer();
+        }
+
+        // کارت‌های از قبل روی میزِ دستِ جاری رو بی‌انیمیشن مستقیم تو اسلاتِ خودشون
+        // می‌ذاریم — تازه صفحه بازشده، پروازِ نمایشی لازم نیست؛ ولی همون jitterِ
+        // پراکندگی/قابلیتِ‌کشیدن رو دارن، وگرنه بعدِ رفرش دوباره مرتب می‌شینن وسط.
+        Object.keys(moves).forEach(function(seatKey){
+          const seat = Number(seatKey);
+          const pos = hk3SeatPos(seat);
+          const slot = pos ? hk3El('hkSlot' + hk3Cap(pos)) : null;
+          if(slot){
+            const jit = hk3RandomJitter();
+            slot.innerHTML = hk3CardHTML(hk3CardObj(moves[seat]), jit);
+            slot.style.border = 'none';
+            hk3MakeCardLoose(slot.firstElementChild, jit);
+          }
+        });
+
+        // نوارِ امتیازِ مسابقه (hkScoreA=خودم/هم‌بازی، hkScoreB=حریف‌ها — همون قراردادِ
+        // STAGE 6) هم این‌جا از داده‌ی واقعی پر می‌شه، نه هر‌چی از قبل تو HTML بوده.
+        const scoreA = hk3El('hkScoreA'), scoreB = hk3El('hkScoreB');
+        if(scoreA) scoreA.textContent = toFa(state.my_team === 0 ? state.match_team0_score : state.match_team1_score);
+        if(scoreB) scoreB.textContent = toFa(state.my_team === 0 ? state.match_team1_score : state.match_team0_score);
+
+        return true;
+      }catch(e){ console.warn('hk7RestoreLiveHand failed', e); return false; }
+    }
+
+    // =====================================================================
+    // STAGE 7 — بخشِ ۲ از ۴: واچ‌داگِ سکوت.
+    //
+    // چرا لازمه (نه فقط برای رفرش‌کردنِ تبِ خودم): وقتی تایمرِ سمتِ سرور (بخشِ ۱+۳،
+    // تویِ hokm_play_card) یه seatِ معطل‌مونده رو خودکار بازی می‌کنه، این اتفاق فقط
+    // «سمتِ همون caller» جواب می‌گیره — هیچ broadcastی برای اون کارتِ خودکار به بقیه‌ی
+    // میز نمی‌ره (چون broadcast رو فقط hk3PlayCard، بعدِ موفقیتِ RPCِ *خودِ* کاربر،
+    // می‌فرسته). یعنی اگه seatِ من مستقیماً درگیرِ اون RPC نبوده، دستِ محلیِ من
+    // (hk3State) اصلاً نمی‌فهمه یه کارت اضافه شده — تا وقتی یه‌بار state رسمی رو
+    // (با همون RPCِ بخشِ ۱، hokm_get_room_state) دوباره نگیرم.
+    //
+    // منطق: اگه ۷ ثانیه (بینِ بازه‌ی ۶-۸ ثانیه‌ی سند) هیچ broadcastای نگرفتم و نوبتِ
+    // خودم نیست، یه‌بار (نه پیوسته) یه resyncِ ساکت بزنم؛ بعدش تا فعالیتِ واقعیِ بعدی
+    // (broadcast یا حرکتِ خودم) نرسه، دیگه دوباره صدا نمی‌زنم — پولینگِ مداوم نمی‌شه.
+    // ری‌سینک، دقیقاً همون مسیرِ آزموده‌ی hk3EnsureHand→hk7RestoreLiveHand رو دوباره
+    // صدا می‌زنه (DRY، هیچ منطقِ جدیدی برای «بازسازیِ state» نوشته نشده) — که هم
+    // دست/نوبتِ جاری رو تازه می‌کنه، هم اگه گیم/مسابقه در سکوت تموم و گیمِ بعدی
+    // شروع شده بود (بازم چون broadcastاش به من نرسیده)، درست می‌گیرتش.
+    // این یه تایمرِ محلیِ سبکه (فقط مقایسه‌ی timestamp، هر ۱ ثانیه)، خودِ RPC فقط
+    // وقتی واقعاً لازم باشه صدا زده می‌شه — به بودجه‌ی realtime هیچی اضافه نمی‌کنه.
+    // =====================================================================
+    const HK7_WATCHDOG_SILENCE_MS = 7000; // وسطِ بازه‌ی ۶-۸ ثانیه‌ی سندِ معماری
+    let hk7LastActivityAt = Date.now();
+    let hk7WatchdogFiredThisWait = false;
+    let hk7WatchdogTimer = null;
+
+    // هر رویدادِ «واقعی» (broadcastِ رسیده یا حرکتِ خودم) این رو صدا می‌زنه تا
+    // ساعتِ سکوت صفر بشه و اجازه‌ی یه resyncِ تازه (برای دفعه‌ی بعدِ سکوت) داده بشه.
+    function hk7MarkActivity(){
+      hk7LastActivityAt = Date.now();
+      hk7WatchdogFiredThisWait = false;
+    }
+
+    async function hk7SilentResync(){
+      try{
+        if(!hk3RoomId || hk3State.mySeat === null || hk3State.mySeat === undefined) return;
+        await hk3EnsureHand(hk3RoomId, hk3State.mySeat); // idempotent؛ خودش hk7MarkActivity رو هم دوباره صدا می‌زنه
+      }catch(e){ console.warn('hk7SilentResync failed', e); }
+    }
+
+    function hk7WatchdogTick(){
+      try{
+        if(!hk3State.handId || hk3State.status !== 'playing' || !hk3RoomChannel) return;
+        if(hk3State.turnSeat === hk3State.mySeat) return; // نوبتِ خودمه، لازم نیست
+        if(hk7WatchdogFiredThisWait) return; // این دوره‌ی سکوت قبلاً یه‌بار resync شده
+        if(Date.now() - hk7LastActivityAt < HK7_WATCHDOG_SILENCE_MS) return;
+        hk7WatchdogFiredThisWait = true; // «یه‌بار» — تا فعالیتِ واقعیِ بعدی دیگه صدا زده نمی‌شه
+        hk7SilentResync();
+      }catch(e){ console.warn('hk7WatchdogTick failed', e); }
+    }
+    function hk7StartWatchdog(){
+      if(hk7WatchdogTimer) return;
+      hk7WatchdogTimer = setInterval(hk7WatchdogTick, 1000);
+    }
+
+    // =====================================================================
+    // STAGE 7 — بخشِ ۳ از ۴: تایمرِ نوبت (فقط نمایشی، سمتِ کلاینت).
+    //
+    // hokm_06 از قبل رفعِ واقعیِ نوبتِ معطل‌مونده رو سمتِ سرور انجام می‌ده (بخشِ ۱+۳،
+    // همون سوئیپِ داخلِ hokm_play_card). این بخش فقط چیزی که سند خواسته رو اضافه می‌کنه:
+    // «تایمر فقط سمتِ کلاینت نشون داده بشه» — یه نشانِ گردِ کوچیکِ شمارش‌معکوس، پایینِ
+    // آواتارِ کسی که الان نوبتشه (چه من، چه یکی دیگه)، طبقِ همون ۲۵ ثانیه‌ی سندِ معماری
+    // (که hokm_06 هم دقیقاً همینو رعایت کرده: interval '25 seconds'). این تایمر خودش
+    // هیچ RPCای صدا نمی‌زنه و هیچ اتفاقی نمی‌افته اگه به صفر برسه — فقط یه هشدارِ بصریه؛
+    // مرجعِ رسمی همیشه سرورِه. deadlineِ دقیق، وقتی از رویِ resync (بخشِ ۱ یا واچ‌داگِ
+    // بخشِ ۲) میاد، از خودِ turn_deadlineِ سرور خونده می‌شه (دقیق‌ترین حالت)؛ وقتی از رویِ
+    // یه broadcastِ محلی (کارتِ خودم یا کارتِ کسِ دیگه) میاد، از همون لحظه ۲۵ ثانیه
+    // حساب می‌شه (تقریباً همون لحظه‌ای که سرور هم last_action_at رو ثبت کرده).
+    // =====================================================================
+    const HK7_TURN_SECONDS = 25; // دقیقاً هم‌عددِ interval '25 seconds' تویِ hokm_06
+    let hk7TurnDeadline = null; // timestamp (ms) — null یعنی الان تایمرِ فعالی نیست
+    let hk7TurnTimerInterval = null;
+
+    function hk7ClearTurnTimer(){
+      hk7TurnDeadline = null;
+      document.querySelectorAll('#tab-hokm .hk-turn-timer').forEach(function(e){ e.remove(); });
+    }
+    function hk7SetTurnDeadline(deadlineMs){
+      hk7TurnDeadline = (typeof deadlineMs === 'number' && deadlineMs > Date.now()) ? deadlineMs : null;
+      hk7RenderTurnTimer();
+    }
+    function hk7RenderTurnTimer(){
+      try{
+        document.querySelectorAll('#tab-hokm .hk-turn-timer').forEach(function(e){ e.remove(); });
+        if(hk3State.status !== 'playing' || !hk7TurnDeadline) return;
+        if(hk3State.turnSeat === null || hk3State.turnSeat === undefined) return;
+        const remainingMs = hk7TurnDeadline - Date.now();
+        if(remainingMs <= 0) return; // زمان تموم شده — رفعِ واقعی سمتِ سرورِه، این‌جا فقط مخفیش می‌کنیم
+        const pos = hk3SeatPos(hk3State.turnSeat); if(!pos) return;
+        const seatEl = hk3El('hkSeat' + hk3Cap(pos)); if(!seatEl) return;
+        const avatar = seatEl.querySelector('.hk-seat-avatar'); if(!avatar) return;
+        const remainingSec = Math.max(1, Math.ceil(remainingMs / 1000));
+        const pct = Math.max(0, Math.min(100, Math.round((remainingMs / (HK7_TURN_SECONDS * 1000)) * 100)));
+        const badge = document.createElement('div');
+        badge.className = 'hk-turn-timer' + (remainingSec <= 5 ? ' hk-timer-warn' : '');
+        badge.style.setProperty('--hk-timer-pct', String(pct));
+        badge.innerHTML = '<span>' + toFa(remainingSec) + '</span>';
+        avatar.appendChild(badge);
+      }catch(e){ console.warn('hk7RenderTurnTimer failed', e); }
+    }
+    function hk7TurnTimerTick(){
+      try{
+        if(!hk3State.handId || hk3State.status !== 'playing' || !hk7TurnDeadline) return;
+        if(Date.now() >= hk7TurnDeadline){ hk7ClearTurnTimer(); return; }
+        hk7RenderTurnTimer();
+      }catch(e){ console.warn('hk7TurnTimerTick failed', e); }
+    }
+    function hk7StartTurnTimer(){
+      if(hk7TurnTimerInterval) return;
+      hk7TurnTimerInterval = setInterval(hk7TurnTimerTick, 1000);
+    }
+
+    // =====================================================================
+    // STAGE 7 — بخشِ ۴ از ۴ (آخرین کوارتر): خروجِ کاملِ یه بازیکن وسطِ بازی.
+    //
+    // hokm_06 صریحاً گفته بود این بخش رو صادقانه برای بعد گذاشته (چون نیاز به
+    // heartbeatِ یه UIِ زنده داره — که الان داریم). طراحی، دقیقاً طبقِ بندِ ۵ی
+    // خودِ مرحله‌ی ۷ («چیزِ اضافه‌ای به بودجه‌ی realtime اضافه نکن»): هیچ
+    // پولینگ/broadcastِ پیوسته‌ای نیست — فقط یه RPCِ سبک (hokm_heartbeat)، هر
+    // ۲۰ ثانیه، فقط وقتی واقعاً وسطِ یه میزِ 'playing'ایم. خودِ اون RPC هم
+    // last_seen_atِ من رو تازه می‌کنه، هم چک می‌کنه seatِ دیگه‌ای >۲دقیقه
+    // بی‌خبر نمونده باشه؛ اگه بوده، سرور خودش میز/مسابقه رو 'finished' می‌کنه
+    // و به همین caller خبر می‌ده. caller هم یه broadcastِ یه‌باره (نه پیوسته —
+    // در طولِ عمرِ کلِ میز فقط یه‌بار اتفاق می‌افته) رویِ همون کانالِ همیشگیِ
+    // room می‌فرسته تا بقیه‌ی کلاینت‌های وصل هم فوری بفهمن، نه فقط با
+    // heartbeatِ بعدیِ خودشون. کلاینتی که دیر resync می‌شه (یا رفرش می‌کنه)
+    // هم از رویِ hokm_get_room_state.cancelled_reason (hokm_08) می‌فهمه.
+    // =====================================================================
+    const HK7_HEARTBEAT_MS = 20000;
+    let hk7HeartbeatTimer = null;
+
+    function hk7HandleRoomCancelled(reason){
+      try{
+        if(!hk3RoomId) return; // قبلاً reset شده (مثلاً خودمون همین الان پردازشش کردیم)
+        if(typeof showToast === 'function'){
+          showToast(reason === 'opponent_left'
+            ? 'یکی از بازیکن‌ها بیش از ۲ دقیقه بی‌خبر موند؛ این میز لغو شد.'
+            : 'این میز لغو شد.', 'error');
+        }
+        hk3UnsubscribeRoomChannel();
+        hk3Reset();
+        // نوارِ لابیِ STAGE ۲ («میز شما») هم رفرش بشه تا کاربر رو برگردونه به
+        // لیستِ میزهای باز، نه اینکه یه میزِ لغوشده رو stale نشون بده.
+        if(typeof window.hkLoadLobby === 'function') window.hkLoadLobby();
+      }catch(e){ console.warn('hk7HandleRoomCancelled failed', e); }
+    }
+
+    async function hk7HeartbeatTick(){
+      try{
+        if(!hk3RoomId || hk3State.mySeat === null || hk3State.mySeat === undefined) return;
+        const roomIdAtCall = hk3RoomId;
+        const { data, error } = await sb.rpc('hokm_heartbeat', { p_room_id: roomIdAtCall });
+        if(error) throw error;
+        if(hk3RoomId !== roomIdAtCall) return; // تا رفتنِ RPC، از میز دیگه‌ای رد شدیم؛ نتیجه دیگه معتبر نیست
+        const row = (data && data.length) ? data[0] : null;
+        if(row && row.room_cancelled){
+          if(hk3RoomChannel){
+            hk3RoomChannel.send({ type: 'broadcast', event: 'room_cancelled', payload: { reason: row.cancel_reason } });
+          }
+          hk7HandleRoomCancelled(row.cancel_reason);
+        }
+      }catch(e){ console.warn('hk7HeartbeatTick failed', e); }
+    }
+    function hk7StartHeartbeat(){
+      if(hk7HeartbeatTimer) return;
+      hk7HeartbeatTimer = setInterval(hk7HeartbeatTick, HK7_HEARTBEAT_MS);
+      hk7HeartbeatTick(); // یه‌بار فوری؛ لازم نیست ۲۰ ثانیه‌ی اول منتظرِ اولین tick بمونیم
+    }
+
+    async function hk3EnsureHand(roomId, mySeat){
+      try{
+        hk3State.mySeat = mySeat;
+        hk7MarkActivity(); // STAGE 7/۲: ورود یا سینکِ یه دست هم فعالیتِ واقعیه، واچ‌داگ رو صفر کن
+        const { data, error } = await sb.rpc('hokm_deal_hand', { p_room_id: roomId });
+        if(error) throw error;
+        const row = (data && data.length) ? data[0] : null;
+        if(!row) return;
+        hk3State.handId = row.hand_id;
+        hk3State.handNumber = row.hand_number;
+        hk3State.hakemSeat = row.hakem_seat;
+        hk3State.status = row.status;
+        hk3State.trumpSuit = row.trump_suit;
+        // هر بار گیمِ تازه‌ای fetch/deal می‌شه (چه اولین گیمِ یه match، چه بعدِ یه hand_done)،
+        // اول همه‌ی وضعیتِ محلیِ دست/نوبت رو پاک می‌کنیم — وگرنه تویِ فازِ bidding (قبل از
+        // انتخابِ حکم) داده‌های گیمِ *قبلی* لحظه‌ای باقی می‌مونه (مثلاً تعدادِ کارتِ باقی‌مونده).
+        hk3State.trickNumber = 0; hk3State.trickLeadSeat = null; hk3State.trickLedSuit = null;
+        hk3State.trickMoves = {}; hk3State.turnSeat = null; hk3State.remainingCounts = null;
+        hk3State.team0Tricks = 0; hk3State.team1Tricks = 0;
+        hk7ClearTurnTimer(); // STAGE 7/۳: تا وقتی بازسازی/فازِ بعدی مشخص بشه، تایمرِ گیمِ قبلی رو نگه نداریم
+        if(row.status === 'playing'){
+          // STAGE 7 (بخشِ ۱ از ۴): به‌جای حدسِ قدیمی، بازسازیِ واقعی از رویِ سرور.
+          const restored = await hk7RestoreLiveHand(roomId, row.hand_id);
+          if(restored){ hk3Render(); return; }
+          // نتونستیم بازسازی کنیم (نباید پیش بیاد، ولی محافظِ دفاعی) — حداقل یه
+          // حدسِ منطقی بهتر از هیچیه، دقیقاً همون رفتارِ قبلی.
+          hk3State.trickNumber = 1; hk3State.trickLeadSeat = hk3State.hakemSeat;
+          hk3State.trickLedSuit = null; hk3State.trickMoves = {}; hk3State.turnSeat = hk3State.hakemSeat;
+          hk3State.remainingCounts = { 0:13, 1:13, 2:13, 3:13 };
+          hk7SetTurnDeadline(Date.now() + HK7_TURN_SECONDS * 1000); // STAGE 7/۳: حدسِ محافظه‌کارانه، نه deadlineِ دقیقِ سرور
+        }
+        await hk3FetchMyCards();
+        if(row.is_new && hk3RoomChannel){
+          hk3RoomChannel.send({
+            type: 'broadcast', event: 'hand_started',
+            payload: { hand_id: row.hand_id, hand_number: row.hand_number, hakem_seat: row.hakem_seat }
+          });
+        }
+      }catch(e){ console.warn('hk3EnsureHand failed', e); }
+    }
+
+    async function hk3CheckRoom(){
+      try{
+        if(!sb || !publicChatUser) return;
+        const { data, error } = await sb.rpc('hokm_my_active_room');
+        if(error) throw error;
+        const room = (data && data.length) ? data[0] : null;
+        if(!room || room.room_status !== 'playing'){
+          hk3UnsubscribeRoomChannel();
+          hk3Reset();
+          return;
+        }
+        hk3SubscribeRoomChannel(room.room_id);
+        if(!hk3State.handId){
+          await hk3EnsureHand(room.room_id, room.my_seat);
+        }
+        if(hk3State.handId) hk3StopPoll();
+      }catch(e){ console.warn('hk3CheckRoom failed', e); }
+    }
+
+    function hk3WatchLobby(){
+      try{
+        if(hk3LobbyWatchChannel || !sb) return;
+        // یه subscriptionِ جدا رو همون تاپیکِ hokm_lobby (مرحله‌ی ۲) — پیامِ اضافه‌ای
+        // به بودجه‌ی realtime اضافه نمی‌کنه، فقط یه شنونده‌ی بیشتره رو همون broadcastها.
+        hk3LobbyWatchChannel = sb.channel('hokm_lobby', { config: { broadcast: { self: false } } })
+          .on('broadcast', { event: 'update' }, function(){ hk3CheckRoom(); })
+          .subscribe();
+      }catch(e){ console.warn('hk3WatchLobby failed', e); }
+    }
+
+    function hk3StartPoll(){
+      // فقط تا وقتی هنوز دستی شروع نشده (لابیِ در انتظار)، هر ۴ ثانیه چک می‌کنه — چون
+      // broadcastِ self:false ممکنه به خودِ کلاینتی که چهارمین‌نفر شد نرسه. به‌محضِ
+      // ساخته‌شدنِ دست (hk3State.handId) خودش متوقف می‌شه؛ پولینگِ دائمی نیست.
+      if(hk3PollTimer) return;
+      hk3PollTimer = setInterval(function(){
+        try{
+          const panel = hk3El('tab-hokm');
+          if(!panel || !panel.classList.contains('active') || hk3State.handId){
+            hk3StopPoll();
+            return;
+          }
+          hk3CheckRoom();
+        }catch(e){}
+      }, 4000);
+    }
+    function hk3StopPoll(){
+      if(hk3PollTimer){ clearInterval(hk3PollTimer); hk3PollTimer = null; }
+    }
+
+    function hk3Init(){
+      try{
+        hk3WatchLobby();
+        hk3CheckRoom();
+        hk3StartPoll();
+        hk7StartWatchdog(); // STAGE 7/۲: تایمرِ سبکِ محلی، فقط وقتی سکوتِ واقعی دید RPC می‌زنه
+        hk7StartTurnTimer(); // STAGE 7/۳: تیکِ هر ثانیه‌ی نشانِ شمارش‌معکوسِ نوبت
+        hk7StartHeartbeat(); // STAGE 7/۴: هر ۲۰ ثانیه، فقط وقتی واقعاً وسطِ یه میزِ در حالِ بازی‌ایم
+      }catch(e){ console.warn('hk3Init failed', e); }
+    }
+
+    // قلاب‌زدنِ non-invasive به نقطه‌ی ورودیِ عمومیِ لابیِ مرحله‌ی ۲ — بدونِ دست‌زدن به
+    // خودِ تعریفِ اونجا؛ فقط اگه از قبل تعریف شده، دورش رو می‌گیریم تا هر بار تبِ حکم
+    // باز می‌شه، موتورِ مرحله‌ی ۳ هم چک کنه.
+    const hk3PrevLoadLobby = (typeof window.hkLoadLobby === 'function') ? window.hkLoadLobby : null;
+    window.hkLoadLobby = function(){
+      try{ if(hk3PrevLoadLobby) hk3PrevLoadLobby(); }catch(e){ console.warn('hk3 wrapped hkLoadLobby failed', e); }
+      hk3Init();
+    };
+
+    // اکسپوزِ محدود برای دکمه‌ی «بازیِ دوباره»یِ STAGE 6 (بعدِ پایانِ مسابقه): همون مسیرِ
+    // idempotentِ همیشگی (hk3EnsureHand → hokm_deal_hand) رو دوباره صدا می‌زنه؛ چون match
+    // قبلی finished شده، طبقِ خودِ hokm_05_hand_scoring.sql خودکار یه match تازه می‌سازه.
+    window.hk3PlayAgain = function(){
+      try{
+        if(!hk3RoomId || hk3State.mySeat === null || hk3State.mySeat === undefined) return;
+        hk3EnsureHand(hk3RoomId, hk3State.mySeat);
+      }catch(e){ console.warn('hk3PlayAgain failed', e); }
+    };
+
+  }catch(e){ console.warn('Hokm hand-engine module failed to load', e); }
+})();
+/* ===================== HOKM — STAGE 6، نیمه‌ی دوم (پایانِ گیم/مسابقه) =====================
+   فقط اضافه شده؛ به هیچ متغیر/تابعِ مراحلِ قبل (۲/۳/۴/۵) دست نزده — IIFE کاملاً جدا، پیشوندِ
+   hk6، try/catch تا اگه خطا داد بقیه‌ی اپ کار کنه.
+
+   ✅ الان به بازیِ واقعی وصله: hk3PlayCard (تویِ IIFEِ مرحله‌ی ۳+۵)، وقتی hokm_play_card
+   (از hokm_05_hand_scoring.sql) خبر از تمومِ گیم/مسابقه بده، دقیقاً همین دو تابع
+   (window.hk6ShowHandEnd / window.hk6ShowMatchEnd) رو با داده‌ی واقعیِ سرور صدا می‌زنه —
+   دیگه هیچ دکمه‌ی 🧪 فیک نیست.
+
+   دکمه‌ی «بازیِ دوباره» (فقط بعدِ پایانِ مسابقه): window.hk3PlayAgain رو صدا می‌زنه (اکسپوزِ
+   IIFEِ مرحله‌ی ۳+۵)، که خودش hokm_deal_hand رو دوباره صدا می‌زنه — چون match قبلی
+   finished شده، طبقِ کامنتِ خودِ hokm_05، خودکار یه match تازه تو همون room می‌سازه.
+   دکمه‌ی «بازگشت به لابی»: چون hokm_leave_room فقط تو وضعیتِ waiting کار می‌کنه (خروج وسطِ
+   یه میزِ playing عمداً موضوعِ مرحله‌ی ۷ه، نه این‌جا)، فعلاً فقط یه پیامِ صادقانه نشون
+   می‌ده و overlay رو می‌بنده — قولِ دروغ نمی‌ده که واقعاً از میز خارج کرده. */
+(function(){
+  try{
+    if(typeof window === 'undefined') return;
+
+    function hk6El(id){ return document.getElementById(id); }
+
+    let hk6HandEndTimer = null;
+
+    function hk6ShowHandEnd(d){
+      try{
+        const panel = hk6El('hkHandEndPanel'); if(!panel) return;
+        const iWon = d.winnerTeam === d.myTeam;
+        const teamLabel = iWon ? 'شما و هم‌بازی' : 'حریف‌ها';
+
+        // آپدیتِ همون نوارِ امتیازِ بالای میز (hkScoreA/hkScoreB از STAGE 4 — عوضشون نکردیم، فقط پرشون می‌کنیم)
+        const scoreA = hk6El('hkScoreA'), scoreB = hk6El('hkScoreB');
+        if(scoreA) scoreA.textContent = toFa(d.myTeam === 0 ? d.matchTeam0Score : d.matchTeam1Score);
+        if(scoreB) scoreB.textContent = toFa(d.myTeam === 0 ? d.matchTeam1Score : d.matchTeam0Score);
+
+        if(d.isKat){
+          const flag = hk6El('hkKatFlag');
+          if(flag){
+            flag.textContent = 'کت! 🔥 ' + teamLabel;
+            flag.classList.remove('hk-show'); void flag.offsetWidth; flag.classList.add('hk-show');
+          }
+        }
+
+        const myTricks = d.myTeam === 0 ? d.team0Tricks : d.team1Tricks;
+        const oppTricks = d.myTeam === 0 ? d.team1Tricks : d.team0Tricks;
+
+        panel.innerHTML =
+          '<div class="hk-handend-title ' + (iWon ? 'hk-handend-win' : 'hk-handend-lose') + '">' +
+            (iWon ? '🎉 این گیم رو بردید!' : '😕 این گیم رو باختید') +
+          '</div>' +
+          '<div class="hk-handend-tricks">' + toFa(myTricks) + '<span>—</span>' + toFa(oppTricks) + '</div>' +
+          '<div class="hk-handend-sub">' + (d.isKat ? 'کت شد — دو امتیاز 🔥' : 'یک امتیاز') + '</div>' +
+          '<div class="hk-handend-match">امتیازِ مسابقه: ' + toFa(d.matchTeam0Score) + ' - ' + toFa(d.matchTeam1Score) + '</div>';
+
+        panel.style.display = 'block';
+        panel.classList.remove('hk-show'); void panel.offsetWidth; panel.classList.add('hk-show');
+
+        if(hk6HandEndTimer) clearTimeout(hk6HandEndTimer);
+        hk6HandEndTimer = setTimeout(function(){
+          panel.classList.remove('hk-show');
+          setTimeout(function(){ panel.style.display = 'none'; }, 220);
+        }, 3200);
+      }catch(e){ console.warn('hk6ShowHandEnd failed', e); }
+    }
+
+    function hk6ShowMatchEnd(d){
+      try{
+        const overlay = hk6El('hkMatchEndOverlay'); if(!overlay) return;
+        const iWon = d.winnerTeam === d.myTeam;
+        const myScore = d.myTeam === 0 ? d.matchTeam0Score : d.matchTeam1Score;
+        const oppScore = d.myTeam === 0 ? d.matchTeam1Score : d.matchTeam0Score;
+
+        overlay.innerHTML =
+          '<div class="hk-matchend-card">' +
+            '<div class="hk-matchend-emoji">' + (iWon ? '🏆' : '🙁') + '</div>' +
+            '<div class="hk-matchend-title">' + (iWon ? 'بردید!' : 'باختید') + '</div>' +
+            '<div class="hk-matchend-score">' + toFa(myScore) + ' - ' + toFa(oppScore) + '</div>' +
+            '<div class="hk-matchend-actions">' +
+              '<button type="button" class="hk-matchend-btn hk-matchend-btn-primary" id="hk6PlayAgainBtn">بازیِ دوباره</button>' +
+              '<button type="button" class="hk-matchend-btn hk-matchend-btn-secondary" id="hk6BackLobbyBtn">بازگشت به لابی</button>' +
+            '</div>' +
+          '</div>';
+
+        overlay.style.display = 'flex';
+        overlay.classList.remove('hk-show'); void overlay.offsetWidth; overlay.classList.add('hk-show');
+
+        const hk6CloseOverlay = function(){
+          overlay.classList.remove('hk-show');
+          setTimeout(function(){ overlay.style.display = 'none'; }, 220);
+        };
+        const playAgainBtn = hk6El('hk6PlayAgainBtn');
+        const backBtn = hk6El('hk6BackLobbyBtn');
+        if(playAgainBtn){
+          playAgainBtn.addEventListener('click', function(){
+            hk6CloseOverlay();
+            // hk3PlayAgain (اکسپوزِ IIFEِ مرحله‌ی ۳+۵) خودش hokm_deal_hand رو صدا می‌زنه؛
+            // چون match قبلی finished شده، خودکار یه match تازه تو همون room می‌سازه.
+            if(typeof window.hk3PlayAgain === 'function') window.hk3PlayAgain();
+          });
+        }
+        if(backBtn){
+          backBtn.addEventListener('click', function(){
+            hk6CloseOverlay();
+            // hokm_leave_room فقط تو وضعیتِ waiting کار می‌کنه؛ خروج وسطِ میزِ playing
+            // عمداً موضوعِ مرحله‌ی ۷ه. این‌جا به‌جایِ ادعای دروغِ «خارج شدید»، صادقانه می‌گیم.
+            if(typeof showToast === 'function') showToast('خروج از میز بعدِ پایانِ مسابقه هنوز آماده نیست؛ فعلاً می‌تونی «بازیِ دوباره» رو بزنی.');
+          });
+        }
+      }catch(e){ console.warn('hk6ShowMatchEnd failed', e); }
+    }
+
+    window.hk6ShowHandEnd = hk6ShowHandEnd;
+    window.hk6ShowMatchEnd = hk6ShowMatchEnd;
+
+  }catch(e){ console.warn('Hokm hand/match-end module failed to load', e); }
+})();
+
+/* ===================== HOKM — STAGE 8 (صدا/انیمیشن/نوتیف) =====================
+   فقط اضافه شده؛ IIFEِ کاملاً جدا، پیشوندِ hk8، try/catch. عمداً هیچ تابع/متغیرِ
+   داخلیِ IIFEِ مراحلِ ۳/۵/۷ رو دست نزده و صداشون نمی‌زنه — چون اون بخش الان دستِ
+   یه توسعه‌ی دیگه‌ست (مرحله‌ی ۷) و لمس‌نکردنش ریسکِ تداخل رو صفر می‌کنه. به‌جاش
+   کاملاً observational کار می‌کنه: با MutationObserver رو همون عناصرِ DOMی که
+   مراحلِ قبل از قبل ساختن (hkSlotBottom/Right/Top/Left، hkMyHand، hk-hakem-crown،
+   کلاسِ hk-turn رو صندلیِ خودم) — یعنی هر چیزی که مراحلِ بعدی تویِ اون ناحیه
+   عوض کنن، به‌شرطیِ که همون id/کلاس‌ها بمونن، این ماژول بازم درست کار می‌کنه.
+
+   صداها از همون سیستمِ سینتتیکِ موجود (sfxTone/sfxNoiseSweep) استفاده می‌کنن،
+   یعنی خودکار از تنظیماتِ «صدا» تو ظاهر (sfxEnabled/sfxVolume) پیروی می‌کنن —
+   کدِ جدیدی برای اون لازم نبود.
+
+   نوتیفِ «نوبتِ شماست»: به سیستمِ زنگِ SOS/Buddy (که داده‌ی خودشو داره) دست
+   نزدیم؛ فقط همون کلاسِ عمومیِ .ring رو رویِ notifBellBtn لحظه‌ای اضافه می‌کنیم
+   (دقیقاً همون افکتِ بصری‌ای که اون سیستم هم استفاده می‌کنه) + یه چایمِ کوتاه —
+   وقتی نوبتِ منه و تبِ اپ در پس‌زمینه/بدونِ‌فوکوسه.
+
+   حکم فعلاً رایگانه؛ اگه بعداً خواستی پرمیومش کنی، فقط یه سطر تو PREMIUM_ONLY_TABS
+   اضافه کن — این فایل کاری باهاش نداره.
+*/
+(function(){
+  try{
+    if(typeof window === 'undefined' || typeof MutationObserver === 'undefined') return;
+
+    function hk8El(id){ return document.getElementById(id); }
+
+    // ---------- صداهای کوتاه (روی همون سیستمِ سینتتیکِ موجود) ----------
+    function hk8SoundCardPlay(){
+      try{ sfxTone(720 + Math.random()*140, 0.07, 'triangle'); }catch(e){}
+    }
+    function hk8SoundTrickWin(){
+      try{
+        sfxTone(660, 0.09, 'sine', 0);
+        sfxTone(1000, 0.14, 'sine', 0.08);
+      }catch(e){}
+    }
+    function hk8SoundDeal(){
+      try{ sfxNoiseSweep(0.32, 220, 1100); }catch(e){}
+    }
+    function hk8SoundHakem(){
+      try{ sfxTone(520, 0.1, 'sine', 0, 780); }catch(e){}
+    }
+    function hk8SoundHandEnd(won){
+      try{
+        if(won){ sfxTone(660,0.1,'sine',0); sfxTone(880,0.12,'sine',0.09); sfxTone(1100,0.16,'sine',0.18); }
+        else{ sfxTone(520,0.14,'sine',0); sfxTone(400,0.18,'sine',0.1); }
+      }catch(e){}
+    }
+    function hk8SoundMatchEnd(won){
+      try{
+        if(won){
+          sfxTone(660,0.11,'sine',0); sfxTone(880,0.12,'sine',0.1);
+          sfxTone(1100,0.13,'sine',0.2); sfxTone(1320,0.22,'sine',0.32);
+        }else{
+          sfxTone(440,0.16,'sine',0); sfxTone(330,0.16,'sine',0.14); sfxTone(260,0.24,'sine',0.28);
+        }
+      }catch(e){}
+    }
+    function hk8SoundYourTurn(){
+      try{ sfxTone(880,0.12,'sine',0); sfxTone(1174,0.16,'sine',0.1); }catch(e){}
+    }
+
+    // ---------- کارت‌های بازی‌شده‌ی دستِ جاری: hkSlotBottom/Right/Top/Left ----------
+    const HK8_SLOT_IDS = ['hkSlotBottom','hkSlotRight','hkSlotTop','hkSlotLeft'];
+    let hk8TrickFired = false;
+
+    function hk8AllSlotsFilled(){
+      return HK8_SLOT_IDS.every(function(id){
+        const el = hk8El(id);
+        return el && el.children && el.children.length > 0;
+      });
+    }
+
+    function hk8WireSlotObservers(){
+      HK8_SLOT_IDS.forEach(function(id){
+        const el = hk8El(id);
+        if(!el || el.dataset.hk8Wired) return;
+        el.dataset.hk8Wired = '1';
+        const obs = new MutationObserver(function(mutList){
+          let added = false;
+          mutList.forEach(function(m){ if(m.addedNodes && m.addedNodes.length) added = true; });
+          if(added){
+            hk8SoundCardPlay();
+            if(!hk8TrickFired && hk8AllSlotsFilled()){
+              hk8TrickFired = true;
+              setTimeout(hk8SoundTrickWin, 420); // یه‌کمی بعدِ افتادنِ کارتِ چهارم، تا با تیکِ خودِ کارت قاطی نشه
+            }
+          }
+          if(!hk8AllSlotsFilled()) hk8TrickFired = false; // دست جمع شد/پاک شد → برای دستِ بعدی آماده
+        });
+        obs.observe(el, { childList: true });
+      });
+    }
+
+    // ---------- دستِ خودم (hkMyHand): از خالی به پر → صدای پخشِ کارت ----------
+    function hk8WireMyHandObserver(){
+      const el = hk8El('hkMyHand');
+      if(!el || el.dataset.hk8Wired) return;
+      el.dataset.hk8Wired = '1';
+      let prevCount = el.children.length;
+      const obs = new MutationObserver(function(){
+        const now = el.children.length;
+        if(prevCount === 0 && now > 0) hk8SoundDeal();
+        prevCount = now;
+      });
+      obs.observe(el, { childList: true });
+    }
+
+    // ---------- تاجِ حاکم (hk-hakem-crown) هرجایی تویِ میز ظاهر بشه ----------
+    function hk8WireHakemCrownObserver(){
+      const panel = hk8El('tab-hokm');
+      if(!panel || panel.dataset.hk8CrownWired) return;
+      panel.dataset.hk8CrownWired = '1';
+      const obs = new MutationObserver(function(mutList){
+        mutList.forEach(function(m){
+          (m.addedNodes || []).forEach(function(n){
+            try{
+              if(n.nodeType === 1 && n.classList && n.classList.contains('hk-hakem-crown')) hk8SoundHakem();
+            }catch(e){}
+          });
+        });
+      });
+      obs.observe(panel, { childList: true, subtree: true });
+    }
+
+    // ---------- نوبتِ من: کلاسِ hk-turn رویِ صندلیِ پایین (خودم) ----------
+    function hk8WireTurnObserver(){
+      const panel = hk8El('tab-hokm');
+      if(!panel) return;
+      const seatBottom = panel.querySelector('.hk-seat-bottom');
+      if(!seatBottom || seatBottom.dataset.hk8TurnWired) return;
+      seatBottom.dataset.hk8TurnWired = '1';
+      let wasMyTurn = seatBottom.classList.contains('hk-turn');
+      const obs = new MutationObserver(function(){
+        const isMyTurn = seatBottom.classList.contains('hk-turn');
+        if(isMyTurn && !wasMyTurn){
+          const backgrounded = document.hidden || !document.hasFocus();
+          if(backgrounded){
+            hk8SoundYourTurn();
+            const bellBtn = hk8El('notifBellBtn');
+            if(bellBtn){
+              bellBtn.classList.add('ring');
+              setTimeout(function(){ bellBtn.classList.remove('ring'); }, 2200);
+            }
+          }
+        }
+        wasMyTurn = isMyTurn;
+      });
+      obs.observe(seatBottom, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    // ---------- قلاب‌زدنِ صدا به پایانِ گیم/مسابقه (اکسپوزهای خودِ STAGE 6) ----------
+    function hk8WireHandMatchEndSounds(){
+      if(typeof window.hk6ShowHandEnd === 'function' && !window.hk6ShowHandEnd.__hk8Wrapped){
+        const prev = window.hk6ShowHandEnd;
+        const wrapped = function(d){
+          try{ hk8SoundHandEnd(d && d.winnerTeam === d.myTeam); }catch(e){}
+          return prev(d);
+        };
+        wrapped.__hk8Wrapped = true;
+        window.hk6ShowHandEnd = wrapped;
+      }
+      if(typeof window.hk6ShowMatchEnd === 'function' && !window.hk6ShowMatchEnd.__hk8Wrapped){
+        const prev = window.hk6ShowMatchEnd;
+        const wrapped = function(d){
+          try{ hk8SoundMatchEnd(d && d.winnerTeam === d.myTeam); }catch(e){}
+          return prev(d);
+        };
+        wrapped.__hk8Wrapped = true;
+        window.hk6ShowMatchEnd = wrapped;
+      }
+    }
+
+    // همه‌ی observerها ممکنه اولین‌بار هنوز DOMِ لازم آماده نباشه (تبِ حکم هنوز باز
+    // نشده)، پس به‌جای یه‌بار تلاش، هر ۱.۵ ثانیه دوباره چک می‌کنیم (سبک — فقط
+    // querySelector، هیچ درخواستِ شبکه‌ای نیست) تا هر ۵ تا وایر بشن؛ به‌محضِ وایرشدنِ
+    // همه متوقف می‌شه.
+    function hk8TryWireAll(){
+      try{
+        hk8WireSlotObservers();
+        hk8WireMyHandObserver();
+        hk8WireHakemCrownObserver();
+        hk8WireTurnObserver();
+        hk8WireHandMatchEndSounds();
+      }catch(e){}
+    }
+    hk8TryWireAll();
+    const hk8WireInterval = setInterval(function(){
+      hk8TryWireAll();
+      const allDone = HK8_SLOT_IDS.every(function(id){ const el = hk8El(id); return el && el.dataset.hk8Wired; })
+        && hk8El('hkMyHand') && hk8El('hkMyHand').dataset.hk8Wired
+        && hk8El('tab-hokm') && hk8El('tab-hokm').dataset.hk8CrownWired
+        && (typeof window.hk6ShowHandEnd !== 'function' || window.hk6ShowHandEnd.__hk8Wrapped);
+      if(allDone) clearInterval(hk8WireInterval);
+    }, 1500);
+
+  }catch(e){ console.warn('Hokm sound/notif module (STAGE 8) failed to load', e); }
+})();
