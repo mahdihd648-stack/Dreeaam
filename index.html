@@ -3160,13 +3160,6 @@
   .prem-compare-table td.pct-no{color:var(--muted);}
   .prem-compare-table td.pct-yes{color:#0b8a52;background:rgba(63,184,127,.1);}
 
-  /* ---- non-comparative premium description: replaces the free/premium table with a short
-     flowing paragraph ordered by feature importance, no per-row free-vs-premium breakdown. ---- */
-  .prem-desc-wrap{margin:16px 0;border-radius:18px;padding:16px 15px;
-    background:var(--pc-glass-strong);border:1px solid var(--pc-border);
-    box-shadow:0 10px 24px -18px var(--pc-shadow);}
-  .prem-desc-text{margin:0;font-size:12.5px;font-weight:600;color:var(--text);line-height:2;}
-
   /* ---- exclusive perks pill grid ---- */
   .prem-perks-title{font-size:12.5px;font-weight:800;color:var(--text);margin:2px 4px 10px;}
   .prem-perks-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px;}
@@ -3174,14 +3167,25 @@
     background:var(--pc-glass);border:1px solid var(--pc-border-soft);font-size:11.5px;font-weight:700;color:var(--text);}
   .prem-perk-pill .emoji{font-size:16px;flex-shrink:0;}
 
-  /* ---- friendly benefit sentences: replaces the free/premium comparison table + perk-pill
-     grid with a short, warm list of what premium actually gives you, one caring sentence
-     per item instead of a dry feature checklist. ---- */
-  .prem-benefit-list{display:flex;flex-direction:column;gap:10px;margin:16px 0 20px;}
-  .prem-benefit-item{display:flex;align-items:flex-start;gap:10px;padding:13px 14px;border-radius:16px;
-    background:var(--pc-glass-strong);border:1px solid var(--pc-border);font-size:12.5px;font-weight:600;
-    color:var(--text);line-height:1.9;box-shadow:0 10px 24px -18px var(--pc-shadow);}
-  .prem-benefit-item .emoji{font-size:17px;flex-shrink:0;margin-top:1px;}
+  /* ---- friendly benefit sentences: each promise gets its OWN frosted glassmorphism
+     card (instead of being grouped inside one flat block), so every sentence reads
+     as its own separate, tappable reason to upgrade. backdrop-filter gives the actual
+     frosted-glass blur; the closing sentence gets a gold tint to read as the CTA line. ---- */
+  .prem-benefit-list{display:flex;flex-direction:column;gap:12px;margin:16px 0 20px;}
+  .prem-benefit-item{position:relative;display:flex;align-items:flex-start;gap:12px;
+    padding:15px 16px;border-radius:20px;
+    background:var(--pc-glass-strong);border:1px solid var(--pc-border);
+    box-shadow:inset 0 1px 0 color-mix(in srgb, white 45%, transparent), 0 10px 24px -18px var(--pc-shadow);
+    backdrop-filter:blur(16px) saturate(160%);-webkit-backdrop-filter:blur(16px) saturate(160%);
+    transition:transform .15s ease;}
+  .prem-benefit-item:active{transform:scale(.98);}
+  .prem-benefit-item .emoji{font-size:19px;flex-shrink:0;margin-top:1px;
+    filter:drop-shadow(0 2px 5px rgba(0,0,0,.14));}
+  .prem-benefit-item p{margin:0;font-size:12.5px;font-weight:600;color:var(--text);line-height:1.9;}
+  .prem-benefit-item:last-child{
+    background:color-mix(in srgb, var(--pc-gold) 20%, var(--pc-glass-strong));
+    border-color:color-mix(in srgb, var(--pc-gold) 55%, var(--pc-border));}
+  .prem-benefit-item:last-child p{font-weight:800;}
 
   /* ---- price card: the whole point of the page ---- */
   .prem-price-card{position:relative;text-align:center;border-radius:22px;padding:22px 16px 18px;margin-bottom:14px;
@@ -3348,36 +3352,39 @@
 
   /* ---- fixed header: community icon / title / member indicator / user chip / actions ---- */
   #tab-chat .chat-user-row{
-    display:flex;align-items:center;justify-content:space-between;gap:10px;
-    padding:16px 18px 12px;border-bottom:1px solid var(--pc-border-soft);
+    display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;
+    padding:14px 16px 10px;border-bottom:1px solid var(--pc-border-soft);
   }
-  #tab-chat .cph-id{display:flex;align-items:center;gap:10px;min-width:0;}
+  #tab-chat .cph-id{display:flex;align-items:center;gap:9px;min-width:0;flex-shrink:0;}
   #tab-chat .cph-icon{
-    width:38px;height:38px;border-radius:14px;flex-shrink:0;font-size:17px;
+    width:34px;height:34px;border-radius:12px;flex-shrink:0;font-size:15px;
     display:flex;align-items:center;justify-content:center;
     background:var(--pc-grad);box-shadow:0 6px 16px -6px var(--pc-glow-a);
   }
   #tab-chat .cph-id-text{min-width:0;}
-  #tab-chat .cph-title{font-size:15px;font-weight:800;color:var(--text);letter-spacing:.2px;}
+  #tab-chat .cph-title{font-size:14px;font-weight:800;color:var(--text);letter-spacing:.2px;}
   #tab-chat .chat-user-row .cu-name{
-    display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--muted);
+    display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--muted);
     margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
   #tab-chat .chat-user-row .cu-name span{color:var(--pc-primary);font-weight:800;}
   #tab-chat .chat-user-row .cu-name #chatOnlineText{color:var(--muted);font-weight:600;}
   #tab-chat .cph-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:var(--good);
     box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 30%, transparent);}
-  #tab-chat .cph-actions{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+  #tab-chat .cph-actions{display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end;flex:1 1 auto;min-width:0;}
   #tab-chat .chat-pill-btn{
-    display:inline-flex;align-items:center;gap:4px;
+    display:inline-flex;align-items:center;gap:3px;
     background:var(--pc-glass-strong);border:1px solid var(--pc-border);color:var(--text);
-    font-family:inherit;font-size:11px;font-weight:700;padding:8px 12px;border-radius:14px;
-    cursor:pointer;transition:transform .15s ease, background .2s ease;
+    font-family:inherit;font-size:10px;font-weight:700;padding:6px 9px;border-radius:11px;
+    cursor:pointer;transition:transform .15s ease, background .2s ease;white-space:nowrap;
   }
+  #tab-chat .chat-pill-btn .ci{width:14px;height:14px;flex-shrink:0;}
+  #tab-chat .chat-pill-btn .ci svg{width:100%;height:100%;}
   #tab-chat .chat-pill-btn:active{transform:scale(.93);}
   #tab-chat .chat-pill-btn-danger{color:var(--avoid);border-color:color-mix(in srgb, var(--avoid) 40%, transparent);}
   #tab-chat .cpb-label{white-space:nowrap;}
-  @media (max-width:370px){ #tab-chat .cpb-label{display:none;} #tab-chat .chat-pill-btn{padding:8px;} }
+  @media (max-width:460px){ #tab-chat .cpb-label{display:none;} #tab-chat .chat-pill-btn{padding:7px;} }
+  @media (max-width:340px){ #tab-chat .cph-id-text .cu-name{display:none;} }
   #tab-chat .chat-privacy-note{padding:0 18px 12px;font-size:10.5px;color:var(--muted);line-height:1.8;}
   #tab-chat .group-streak-banner{margin:0 18px 10px;border-radius:16px;background:var(--pc-grad);
     box-shadow:0 8px 20px -10px var(--pc-glow-a);border:none;}
@@ -4677,7 +4684,7 @@ overflow:hidden;
   /* ---- پرمیوم: کادرهای شیشه‌ای (pc-*) رنگ/گرادینت خودشون رو کامل حفظ می‌کنن،
      فقط سایه‌ی برجسته و لعاب اضافه می‌شه؛ سایه‌ی رنگیِ قبلیشون هم می‌مونه ---- */
   #tab-premium .prem-compare-wrap,
-  #tab-premium .prem-desc-wrap,
+  #tab-premium .prem-benefit-item,
   #tab-premium .premium-loss-banner,
   #tab-premium .prem-scarcity-box{
     box-shadow: var(--elev-lift-sm), 0 10px 24px -18px var(--pc-shadow) !important;
@@ -7973,7 +7980,7 @@ overflow:hidden;
           <button type="button" data-act="media"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.3"/><circle cx="8.3" cy="9.3" r="1.6"/><path d="M4 16.5l5-4.7 3.5 3 3-3.3 4.5 4.9"/></svg></span> عکس یا ویدیو</button>
           <button type="button" data-act="gif"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5l1.3-4.2a1.6 1.6 0 0 1 2-1.1l11 3.3-4 1.3z"/><rect x="3.5" y="9.5" width="17" height="10.5" rx="2"/><path d="M9 9.5L11 5M14 9.5L16 5"/></svg></span> گیف</button>
         </div>
-        <div class="chat-report-hint" id="reportBtnHint"></div>
+
       </div>
       <div class="cm-action-menu-backdrop" id="cmActionMenuBackdrop"></div>
       <div class="cm-action-menu" id="cmActionMenu"></div>
@@ -8109,8 +8116,17 @@ overflow:hidden;
       <button type="button" class="narration-play-btn narration-play-btn-inline" id="narrationPremiumBtn">🔊 توضیح صوتی اشتراک پرمیوم</button>
     </div>
 
-    <div class="prem-desc-wrap">
-      <p class="prem-desc-text">با پرمیوم اول از همه «هم‌مسیر» باز می‌شه — هر شب گزارش روزتو با هم‌مسیرهات به اشتراک می‌ذاری و دیگه تنها این راهو نمی‌ری. کوچ هوش مصنوعی هم نامحدود در اختیارته: هر شب حرف بزن، تحلیل شب و گزارش پیشرفت بگیر، بدون هیچ سقفی. طول و شدت برنامه‌ت هم کاملاً دست خودته، نه محدود به ۶۰ روز و شدت سبک. کل کتابخونه‌ی محتوا، چت عمومی نامحدود و همه‌ی تم‌ها و شخصی‌سازی‌ها هم برات باز می‌شه. همه‌ی اینا با یه پرداخت یک‌بار برای همیشه فعال می‌شه، نه اشتراک ماهانه. پرمیوم فقط چندتا قفل باز نمی‌کنه؛ اپو از یه ابزار محدود به یه همراه واقعی تو این مسیر تبدیل می‌کنه.</p>
+    <div class="prem-benefit-list">
+      <div class="prem-benefit-item"><span class="emoji">🤝</span><p>با پرمیوم دیگه تنها این مسیرو نمی‌ری — «هم‌مسیر» برات باز می‌شه تا هر شب گزارش روزتو با کسی به اشتراک بذاری که واقعاً کنارته.</p></div>
+      <div class="prem-benefit-item"><span class="emoji">🧠</span><p>کوچ هوش مصنوعیت کاملاً بی‌سقف می‌شه: هر شب هرچقدر لازم داری حرف بزن، تحلیل عمیق شب و گزارش پیشرفت بگیر — انگار یه مربی شخصی همیشه در دسترسته.</p></div>
+      <div class="prem-benefit-item"><span class="emoji">⏳</span><p>دیگه محدود به ۶۰ روز و شدت سبکِ نسخه‌ی رایگان نیستی؛ طول و شدت برنامه‌ت کاملاً دست خودته، دقیقاً مطابق هدف و توان خودت.</p></div>
+      <div class="prem-benefit-item"><span class="emoji">📚</span><p>کل کتابخونه‌ی محتوا — همه‌ی درس‌ها، تمرین‌ها و منابع — بدون هیچ قفلی جلوی پاته و هر وقت لازم داشتی در دسترسته.</p></div>
+      <div class="prem-benefit-item"><span class="emoji">💬</span><p>چت عمومی هم برات کاملاً بی‌محدودیته؛ هر چقدر خواستی با بقیه‌ی اعضا در ارتباط باش، بدون هیچ سقفی.</p></div>
+      <div class="prem-benefit-item"><span class="emoji">🎨</span><p>همه‌ی تم‌ها و گزینه‌های شخصی‌سازی ظاهر اپ هم باز می‌شن؛ اپو دقیقاً مطابق سلیقه‌ی خودت می‌سازی.</p></div>
+      <div class="prem-benefit-item"><span class="emoji">🧘</span><p>حالت‌های تمرکز بیشتر — باشگاه، امتحان، سفر و بقیه — که تو نسخه‌ی رایگان قفلن، کاملاً در اختیارت قرار می‌گیرن.</p></div>
+      <div class="prem-benefit-item"><span class="emoji">💳</span><p>همه‌ی این‌ها فقط با یه پرداخت یک‌بار برای همیشه فعال می‌شه — نه اشتراک ماهانه، نه تمدید دوره‌ای، نه هیچ هزینه‌ی پنهون.</p></div>
+      <div class="prem-benefit-item"><span class="emoji">✨</span><p>پرمیوم فقط چندتا قفل باز نمی‌کنه؛ اپو از یه ابزار محدود به یه همراه واقعی تو این مسیر تبدیل می‌کنه — همراهی که هر شب کنارته.</p></div>
+      <div class="prem-benefit-item"><span class="emoji">🌟</span><p>همین حالا، با یه خرید یک‌بار، نسخه‌ی کامل رو فعال کن و بدون هیچ محدودیتی مسیرتو ادامه بده — بهترین نسخه‌ی خودت منتظرته.</p></div>
     </div>
 
     <!-- Real remaining-slots widget: numbers come from Supabase (premium_capacity table),

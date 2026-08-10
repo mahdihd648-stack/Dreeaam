@@ -17306,13 +17306,10 @@ const WO_DURATION_REST = {30:25, 45:35, 60:40, 90:55};
 
 /* ==================== سوپرست / تری‌ست ====================
    بعد از اینکه حرکتِ اولِ هر عضله (سنگین‌ترین/فرم‌محورترین حرکت اون عضله تو استخر
-   چرخشی) به‌صورت مجزا انجام شد، حرکت‌های فرعیِ باقی‌موندهٔ همون عضله (نه عضله‌های
-   دیگه) می‌تونن به‌صورت زوجی (سوپرست) یا سه‌تایی (تری‌ست) پشتِ سرهم و بدون استراحتِ
-   واقعی ترکیب بشن — دقیقاً همون کاری که یه مربی برای فشرده‌کردنِ جلسه و بالابردنِ
-   فشارِ متابولیک انجام می‌ده. مهم: سوپرست/تری‌ست همیشه محدود به یه عضله/گروه‌عضله
-   می‌مونه (مثلاً بالاسینه + زیرسینه)، هیچ‌وقت بینِ دو عضله‌ی متفاوت (مثل سینه +
-   جلوبازو) ترکیب نمی‌شه — این دقیقاً همون قاعده‌ای‌ست که یه بدنسازِ واقعی رعایت
-   می‌کنه. دو قاعده‌ی اصلی:
+   چرخشی) به‌صورت مجزا انجام شد، حرکت‌های فرعیِ باقی‌موندهٔ عضله‌های مختلفِ همون روز
+   می‌تونن به‌صورت زوجی (سوپرست، ۲ عضله) یا سه‌تایی (تری‌ست، ۳ عضله) پشتِ سرهم و
+   بدون استراحتِ واقعی ترکیب بشن — دقیقاً همون کاری که یه مربی برای فشرده‌کردنِ جلسه
+   و بالابردنِ فشارِ متابولیک انجام می‌ده. دو قاعده‌ی اصلی:
 
    ۱) کِی فعال بشه: این آپشن روی برنامه‌ی اولِ کاربرِ مبتدی/متوسط خاموشه — چون قدمِ
       اول یادگیریِ فرمِ درستِ هر حرکت با تمرکز کامله، نه فشردهسازی. از دوره‌ای که طبقِ
@@ -17337,28 +17334,24 @@ function woSupersetGroupSize(){
   return 2;                            // بالک/فیت: سوپرستِ سبک‌تر، تمرکز روی کیفیتِ هر حرکت
 }
 /* perMuscleLists: به ترتیبِ day.muscles، هرکدوم آرایه‌ای از حرکت‌های فرعیِ همون عضله.
-   گروه‌بندی همیشه داخلِ لیستِ خودِ یه عضله انجام می‌شه (نه بینِ عضله‌های مختلف)، چون
-   سوپرست/تری‌ستِ درست باید رویِ یه عضله یا زیرگروهِ همون عضله باشه (مثلاً بالاسینه با
-   زیرسینه، نه سینه با جلوبازو). حرکت‌های پشتِ‌سرهمِ همون لیست به‌ترتیب تا سقفِ maxSize
-   تو یه گروه جمع می‌شن؛ اگه از یه عضله فقط ۱ حرکتِ فرعی مونده باشه (جفت‌شدن ممکن
-   نیست)، همون یکی به‌صورت تکی (leftover) برمی‌گرده. */
+   هر دور، از میانِ عضله‌هایی که هنوز حرکتِ فرعی دارن (با چرخشِ نقطه‌ی شروع برای توزیعِ
+   عادلانه‌ی زوج‌ها)، حداکثر maxSize تا رو برمی‌داره؛ اگه فقط ۱ عضله باقی مونده باشه
+   (یعنی جفت/سه‌تاییِ واقعی ممکن نیست)، بقیه‌ی حرکت‌هاش به‌صورت تکی (leftover) برمی‌گردن. */
 function buildWoSupersetGroups(perMuscleLists, maxSize){
+  const n = perMuscleLists.length;
+  const queues = perMuscleLists.map(l=> l.slice());
   const groups = [];
+  let start = 0;
+  while(true){
+    const order = []; for(let k=0;k<n;k++) order.push((start+k)%n);
+    const available = order.filter(i=> queues[i].length>0);
+    if(available.length < 2) break;
+    const chosen = available.slice(0, maxSize);
+    groups.push(chosen.map(i=> queues[i].shift()));
+    start = (start+1)%n;
+  }
   const leftovers = [];
-  perMuscleLists.forEach(list=>{
-    let i = 0;
-    while(i < list.length){
-      const remaining = list.length - i;
-      if(remaining >= 2){
-        const size = Math.min(maxSize, remaining);
-        groups.push(list.slice(i, i+size));
-        i += size;
-      } else {
-        leftovers.push(list[i]);
-        i++;
-      }
-    }
-  });
+  queues.forEach(q=> leftovers.push(...q));
   return { groups, leftovers };
 }
 
@@ -17531,7 +17524,7 @@ function woGroupBlockHtml(items, groupNumber){
   const kind = WO_GROUP_LABELS[items.length] || 'سوپرست';
   const groupId = 'g' + groupNumber;
   const label = kind + ' ' + toFa(groupNumber);
-  const musclesTxt = MUSCLE_LABELS[items[0].muscle] || '';
+  const musclesTxt = items.map(it=>MUSCLE_LABELS[it.muscle]).join(' + ');
   const cardsHtml = items.map((it,i)=>{
     const card = woExerciseCardHtml(it, { id:groupId, last:i===items.length-1, label });
     const connector = i < items.length-1 ? `<div class="wo-superset-connector">بدون استراحت</div>` : '';
@@ -17612,11 +17605,10 @@ function renderWoExercises(){
     accessoryByMuscle.push(accList);
   });
 
-  // سوپرست/تری‌ست فقط وقتی معنا داره که، طبق سطح/دوره‌ی برنامه‌ی کاربر، واقعاً وقتش
-  // رسیده باشه؛ خودِ buildWoSupersetGroups فقط از حرکت‌های فرعیِ باقی‌موندهٔ همون
-  // عضله گروه می‌سازه، پس نیازی به حداقل تعداد عضله‌ی روز نیست.
+  // سوپرست/تری‌ست فقط وقتی معنا داره که روز حداقل ۲ عضله داشته باشه (نمی‌شه یه عضله رو
+  // با خودش ترکیب کرد) و طبق سطح/دوره‌ی برنامه‌ی کاربر واقعاً وقتش رسیده باشه.
   let groups = [], leftovers = [];
-  if(woSupersetsEnabled()){
+  if(day.muscles.length >= 2 && woSupersetsEnabled()){
     const built = buildWoSupersetGroups(accessoryByMuscle, woSupersetGroupSize());
     groups = built.groups;
     leftovers = built.leftovers;
