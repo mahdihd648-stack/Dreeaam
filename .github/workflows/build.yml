@@ -42,6 +42,18 @@ jobs:
             npm install @capacitor/local-notifications
           fi
 
+      - name: Ensure push-notifications plugin is present
+        # Same safety net as above, for @capacitor/push-notifications — the plugin that
+        # index.html/app.js already calls (Capacitor.Plugins.PushNotifications, see
+        # initPushNotifications) but that had no native counterpart in the project yet.
+        # Capacitor auto-discovers this via its own gradle registration on `npx cap sync
+        # android` — unlike MarketBillingPlugin/TaskWidgetPlugin below, no manual
+        # registerPlugin() call is needed for it in MainActivity.
+        run: |
+          if ! node -e "require.resolve('@capacitor/push-notifications')" 2>/dev/null; then
+            npm install @capacitor/push-notifications
+          fi
+
       - name: Locate icon source at repo root
         # Single source of truth for every generated icon (web + native). Looks directly
         # in the repo root instead of resources/icon-only.png (which wasn't being found),
@@ -130,6 +142,67 @@ jobs:
 
       - name: Add Android platform
         run: npx cap add android
+
+      - name: Wire up Firebase (google-services.json + Gradle plugin)
+        # google-services.json sitting at the repo root does NOTHING on its own — the Android
+        # Gradle build only picks it up once (a) the file is copied into android/app/ and
+        # (b) the com.google.gms.google-services Gradle plugin is applied, which is what
+        # actually generates the FCM sender/project config that @capacitor/push-notifications
+        # reads at runtime. Without this step, google-services.json was present in the repo
+        # but silently unused — push registration would fail with no sender ID.
+        run: |
+          set -e
+          if [ ! -f google-services.json ]; then
+            echo "::error::google-services.json not found at repo root"
+            exit 1
+          fi
+          cp google-services.json android/app/google-services.json
+
+          ROOT_GRADLE="android/build.gradle"
+          python3 - "$ROOT_GRADLE" <<'PYEOF'
+          import sys, re
+          path = sys.argv[1]
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+          classpath_line = "        classpath 'com.google.gms:google-services:4.4.2'\n"
+          if 'com.google.gms:google-services' not in src:
+              # Capacitor's generated root build.gradle always has a buildscript { dependencies { ... } }
+              # block with at least the Android Gradle Plugin classpath already in it.
+              new_src, n = re.subn(
+                  r'(buildscript\s*\{[^}]*?dependencies\s*\{)',
+                  r'\1\n' + classpath_line,
+                  src, count=1, flags=re.S
+              )
+              if n == 0:
+                  print("::error::could not find buildscript{ dependencies{ } } block in android/build.gradle")
+                  sys.exit(1)
+              src = new_src
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(src)
+          PYEOF
+          if ! grep -q 'com.google.gms:google-services' "$ROOT_GRADLE"; then
+            echo "::error::google-services classpath was not added to android/build.gradle"
+            exit 1
+          fi
+
+          APP_GRADLE="android/app/build.gradle"
+          python3 - "$APP_GRADLE" <<'PYEOF'
+          import sys
+          path = sys.argv[1]
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+          plugin_line = "apply plugin: 'com.google.gms.google-services'\n"
+          if 'com.google.gms.google-services' not in src:
+              # Applied at the very top, same convention Capacitor itself uses for
+              # 'com.android.application' / 'kotlin-android' at the top of this file.
+              src = plugin_line + src
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(src)
+          PYEOF
+          if ! grep -q 'com.google.gms.google-services' "$APP_GRADLE"; then
+            echo "::error::google-services plugin was not applied in android/app/build.gradle"
+            exit 1
+          fi
 
       - name: Disable Capacitor's native splash/intro screen (app has its own JS intro)
         # کاپاسیتور به‌طور پیش‌فرض یه اسپلش‌اسکرین بومی می‌سازه (همون که تو اسکرین‌شات دیدی:
@@ -519,6 +592,487 @@ jobs:
             exit 1
           fi
 
+      - name: Create Android notification channel for chat push messages
+        # Android 8+ (API 26+) silently drops any notification whose channel_id was never
+        # created on-device — the Worker's FCM payload (see /notify-new-message) sets
+        # android.notification.channel_id = "chat_messages", so without this the whole push
+        # pipeline would build, deploy, and run with no error anywhere, but no notification
+        # would ever actually appear. Registering the channel once in MainActivity.onCreate
+        # (createNotificationChannel is itself idempotent — safe to call every launch) is the
+        # standard fix.
+        run: |
+          set -e
+          APP_ID="com.mahdihd648.dreamlifeapp"
+          APP_PATH="${APP_ID//./\/}"
+          MAIN_ACTIVITY="android/app/src/main/java/${APP_PATH}/MainActivity.java"
+          python3 - "$MAIN_ACTIVITY" <<'PYEOF'
+          import sys, re
+          path = sys.argv[1]
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+
+          if 'chat_messages' in src:
+              sys.exit(0)  # already patched
+
+          imports_to_add = (
+              "import android.app.NotificationChannel;\n"
+              "import android.app.NotificationManager;\n"
+              "import android.os.Build;\n"
+          )
+          # Insert new imports right after the package line.
+          src, n = re.subn(r'(package [^\n]+;\n)', r'\1' + '\n' + imports_to_add, src, count=1)
+          if n == 0:
+              print("::error::could not find package declaration in MainActivity.java")
+              sys.exit(1)
+
+          channel_code = (
+              "\n"
+              "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {\n"
+              "            NotificationChannel channel = new NotificationChannel(\n"
+              "                \"chat_messages\", \"پیام‌های چت عمومی\", NotificationManager.IMPORTANCE_HIGH);\n"
+              "            NotificationManager nm = getSystemService(NotificationManager.class);\n"
+              "            if (nm != null) nm.createNotificationChannel(channel);\n"
+              "        }\n"
+          )
+          # Runs right after super.onCreate(...) inside onCreate, alongside the plugin
+          # registrations this same file already sets up above.
+          new_src, n2 = re.subn(
+              r'(super\.onCreate\(savedInstanceState\);\n)',
+              r'\1' + channel_code,
+              src, count=1
+          )
+          if n2 == 0:
+              print("::error::could not find super.onCreate(savedInstanceState) in MainActivity.java")
+              sys.exit(1)
+
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(new_src)
+          PYEOF
+          if ! grep -q 'chat_messages' "$MAIN_ACTIVITY"; then
+            echo "::error::chat_messages notification channel was not registered in MainActivity.java"
+            exit 1
+          fi
+
+      - name: Inject chat push-reply support (data-only push + notification RemoteInput + AuthBridge)
+        # داستان کامل: /notify-new-message تو worker حالا یه پیام FCM «data-only» می‌فرسته
+        # (نه notification معمولی) — یعنی سیستم‌عامل دیگه خودش نوتیف رو نمی‌سازه، و
+        # هر پیام از ChatReplyMessagingService (زیر) رد می‌شه. اونجا خودمون نوتیف رو با
+        # یه Action شامل RemoteInput («ریپلای مستقیم») می‌سازیم. وقتی کاربر همون‌جا
+        # تایپ و ارسال می‌کنه، ChatReplyReceiver (بدون باز کردنِ اپ) از AuthBridgePrefs
+        # (که app.js با پلاگین AuthBridge هر بار سشن عوض می‌شه پر می‌کنه — ببین
+        # pushAuthSessionToNative تو app.js) توکن رو می‌خونه، لازم شد رفرشش می‌کنه، و
+        # مستقیم یه INSERT رو جدول messages به Supabase می‌زنه.
+        # پیش‌نیاز مهم: چون یه FirebaseMessagingService دیگه (خودِ @capacitor/push-notifications)
+        # از قبل تو مانیفست ثبت شده و FCM فقط یکی رو صدا می‌زنه، سرویسِ خودِ پلاگین رو
+        # صریحاً حذف (tools:node="remove") و با سرویسِ خودمون جایگزین می‌کنیم.
+        run: |
+          set -e
+          APP_ID="com.mahdihd648.dreamlifeapp"
+          APP_PATH="${APP_ID//./\/}"
+          JAVA_DIR="android/app/src/main/java/${APP_PATH}"
+          AUTH_DIR="${JAVA_DIR}/auth"
+          mkdir -p "$AUTH_DIR"
+
+          # ---- AuthBridgePlugin.java (JS <-> native: کپیِ توکنِ سشن + پرچمِ «باز کردنِ چت») ----
+          cat > "$AUTH_DIR/AuthBridgePlugin.java" <<JAVAEOF
+          package ${APP_ID}.auth;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          @CapacitorPlugin(name = "AuthBridge")
+          public class AuthBridgePlugin extends Plugin {
+              public static final String PREFS_NAME = "AuthBridgePrefs";
+              public static final String KEY_ACCESS_TOKEN = "access_token";
+              public static final String KEY_REFRESH_TOKEN = "refresh_token";
+              public static final String KEY_EXPIRES_AT = "expires_at";
+              public static final String KEY_USER_ID = "user_id";
+              public static final String KEY_USERNAME = "username";
+              public static final String KEY_PENDING_OPEN_CHAT = "pending_open_chat";
+
+              private SharedPreferences prefs() {
+                  return getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+              }
+
+              @PluginMethod
+              public void saveSession(PluginCall call) {
+                  prefs().edit()
+                      .putString(KEY_ACCESS_TOKEN, call.getString("accessToken", ""))
+                      .putString(KEY_REFRESH_TOKEN, call.getString("refreshToken", ""))
+                      .putString(KEY_EXPIRES_AT, call.getString("expiresAt", "0"))
+                      .putString(KEY_USER_ID, call.getString("userId", ""))
+                      .putString(KEY_USERNAME, call.getString("username", ""))
+                      .apply();
+                  call.resolve();
+              }
+
+              @PluginMethod
+              public void clearSession(PluginCall call) {
+                  // پرچمِ pending_open_chat عمداً پاک نمی‌شه — لاگ‌اوت نباید یه تپِ نوتیفِ
+                  // قبلی رو که هنوز مصرف نشده گم کنه.
+                  prefs().edit()
+                      .remove(KEY_ACCESS_TOKEN).remove(KEY_REFRESH_TOKEN)
+                      .remove(KEY_EXPIRES_AT).remove(KEY_USER_ID).remove(KEY_USERNAME)
+                      .apply();
+                  call.resolve();
+              }
+
+              // MainActivity وقتی از رویِ تپِ نوتیف باز می‌شه این پرچم رو ست می‌کنه (چون
+              // اون لحظه ممکنه WebView/JS هنوز کامل لود نشده باشه)؛ app.js موقعِ start-up
+              // و هر resume این متد رو صدا می‌زنه تا اگه پرچم ست بود بره تبِ چت — همون
+              // الگویی که TaskWidgetPlugin.getPendingToggles برای ویجت استفاده می‌کنه.
+              @PluginMethod
+              public void getPendingOpenChat(PluginCall call) {
+                  boolean pending = prefs().getBoolean(KEY_PENDING_OPEN_CHAT, false);
+                  if (pending) prefs().edit().remove(KEY_PENDING_OPEN_CHAT).apply();
+                  JSObject ret = new JSObject();
+                  ret.put("pending", pending);
+                  call.resolve(ret);
+              }
+          }
+          JAVAEOF
+
+          # ---- ChatReplyMessagingService.java (می‌سازه/نشون می‌ده نوتیفِ قابل‌ریپلای) ----
+          cat > "$AUTH_DIR/ChatReplyMessagingService.java" <<JAVAEOF
+          package ${APP_ID}.auth;
+
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.content.Context;
+          import android.content.Intent;
+          import androidx.core.app.NotificationCompat;
+          import androidx.core.app.RemoteInput;
+          import com.google.firebase.messaging.FirebaseMessagingService;
+          import com.google.firebase.messaging.RemoteMessage;
+          import ${APP_ID}.MainActivity;
+          import ${APP_ID}.R;
+          import java.util.Map;
+
+          public class ChatReplyMessagingService extends FirebaseMessagingService {
+              public static final int NOTIF_ID = 5001;
+              public static final String ACTION_REPLY = "${APP_ID}.ACTION_CHAT_REPLY";
+              public static final String KEY_REPLY_TEXT = "chat_reply_text";
+
+              @Override
+              public void onMessageReceived(RemoteMessage message) {
+                  Map<String, String> data = message.getData();
+                  if (data == null || !"chat_message".equals(data.get("type"))) return;
+                  String title = data.containsKey("title") ? data.get("title") : "چت عمومی";
+                  String body = data.containsKey("body") ? data.get("body") : "یه پیام جدید فرستاد";
+                  showReplyableNotification(this, title, body);
+              }
+
+              static void showReplyableNotification(Context context, String title, String body) {
+                  RemoteInput remoteInput = new RemoteInput.Builder(KEY_REPLY_TEXT)
+                          .setLabel("پاسخت رو بنویس...")
+                          .build();
+
+                  Intent replyIntent = new Intent(context, ChatReplyReceiver.class);
+                  replyIntent.setAction(ACTION_REPLY);
+                  // FLAG_MUTABLE اجباریه — سیستم باید بتونه نتیجه‌ی RemoteInput رو به این
+                  // Intent اضافه کنه؛ با FLAG_IMMUTABLE متنِ تایپ‌شده هیچ‌وقت به ما نمی‌رسه.
+                  PendingIntent replyPendingIntent = PendingIntent.getBroadcast(
+                          context, NOTIF_ID, replyIntent,
+                          PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
+                  NotificationCompat.Action replyAction =
+                          new NotificationCompat.Action.Builder(
+                                  android.R.drawable.ic_menu_send, "پاسخ", replyPendingIntent)
+                                  .addRemoteInput(remoteInput)
+                                  .setAllowGeneratedReplies(true)
+                                  .build();
+
+                  Intent tapIntent = new Intent(context, MainActivity.class);
+                  tapIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                  tapIntent.putExtra("openChat", true);
+                  PendingIntent tapPendingIntent = PendingIntent.getActivity(
+                          context, NOTIF_ID, tapIntent,
+                          PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
+                  NotificationCompat.Builder builder = new NotificationCompat.Builder(context, "chat_messages")
+                          .setSmallIcon(R.drawable.ic_stat_icon)
+                          .setContentTitle(title)
+                          .setContentText(body)
+                          .setAutoCancel(true)
+                          .setPriority(NotificationCompat.PRIORITY_HIGH)
+                          .setContentIntent(tapPendingIntent)
+                          .addAction(replyAction);
+
+                  NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+                  if (nm != null) nm.notify(NOTIF_ID, builder.build());
+              }
+          }
+          JAVAEOF
+
+          # ---- ChatReplyReceiver.java (دستِ ریپلای — بدونِ باز کردنِ اپ اجرا می‌شه) ----
+          cat > "$AUTH_DIR/ChatReplyReceiver.java" <<JAVAEOF
+          package ${APP_ID}.auth;
+
+          import android.app.NotificationManager;
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.os.Bundle;
+          import androidx.core.app.NotificationCompat;
+          import androidx.core.app.RemoteInput;
+          import ${APP_ID}.R;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.nio.charset.StandardCharsets;
+          import java.util.Scanner;
+          import org.json.JSONObject;
+
+          public class ChatReplyReceiver extends BroadcastReceiver {
+              // همون مقادیرِ SUPABASE_URL / SUPABASE_ANON_KEY که بالای app.js تعریف شدن —
+              // چون این کد جدا از WebView اجرا می‌شه، نمی‌تونه از اونجا بخونتشون.
+              private static final String SUPABASE_URL = "https://elrctpacwmsplxkbhlur.supabase.co";
+              private static final String SUPABASE_ANON_KEY = "sb_publishable_W0gxlYFD1uWfn3LGn4MvAA_qJUlJ5xs";
+
+              @Override
+              public void onReceive(Context context, Intent intent) {
+                  if (!ChatReplyMessagingService.ACTION_REPLY.equals(intent.getAction())) return;
+
+                  Bundle results = RemoteInput.getResultsFromIntent(intent);
+                  CharSequence replyText = results != null
+                          ? results.getCharSequence(ChatReplyMessagingService.KEY_REPLY_TEXT)
+                          : null;
+                  if (replyText == null || replyText.toString().trim().isEmpty()) return;
+                  final String content = replyText.toString().trim();
+
+                  // onReceive باید سریع برگرده؛ کارِ شبکه‌ای (و بالقوه رفرشِ توکن) رو تو یه
+                  // ترد جدا انجام می‌دیم و با goAsync به سیستم می‌گیم صبر کنه تا finish().
+                  final PendingResult pendingResult = goAsync();
+                  final Context appContext = context.getApplicationContext();
+                  new Thread(new Runnable() {
+                      @Override public void run() {
+                          try { sendReply(appContext, content); }
+                          catch (Exception e) { showResultNotification(appContext, false, "ارسال نشد — دوباره از داخل اپ امتحان کن."); }
+                          finally { pendingResult.finish(); }
+                      }
+                  }).start();
+              }
+
+              private void sendReply(Context context, String content) throws Exception {
+                  SharedPreferences prefs = context.getSharedPreferences(AuthBridgePlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  String accessToken = prefs.getString(AuthBridgePlugin.KEY_ACCESS_TOKEN, "");
+                  String refreshToken = prefs.getString(AuthBridgePlugin.KEY_REFRESH_TOKEN, "");
+                  String userId = prefs.getString(AuthBridgePlugin.KEY_USER_ID, "");
+                  String username = prefs.getString(AuthBridgePlugin.KEY_USERNAME, "");
+                  long expiresAt = parseLongSafe(prefs.getString(AuthBridgePlugin.KEY_EXPIRES_AT, "0"));
+
+                  if (accessToken.isEmpty() || userId.isEmpty()) {
+                      showResultNotification(context, false, "برای ریپلای از تو نوتیف، یه‌بار اپ رو باز کن و وارد شو.");
+                      return;
+                  }
+
+                  long nowSec = System.currentTimeMillis() / 1000L;
+                  // ۶۰ ثانیه حاشیه‌ی اطمینان تا وسطِ درخواستِ اینسرت منقضی نشه.
+                  if (expiresAt > 0 && nowSec >= expiresAt - 60 && !refreshToken.isEmpty()) {
+                      String[] refreshed = refreshAccessToken(refreshToken);
+                      if (refreshed != null) {
+                          accessToken = refreshed[0];
+                          prefs.edit()
+                              .putString(AuthBridgePlugin.KEY_ACCESS_TOKEN, refreshed[0])
+                              .putString(AuthBridgePlugin.KEY_REFRESH_TOKEN, refreshed[1])
+                              .putString(AuthBridgePlugin.KEY_EXPIRES_AT, refreshed[2])
+                              .apply();
+                      }
+                      // اگه رفرش هم شکست خورد، همون توکنِ (احتمالاً منقضی‌شده‌ی) قبلی رو امتحان
+                      // می‌کنیم — بدتر از این نمی‌شه؛ Supabase خودش با 401 ردش می‌کنه.
+                  }
+
+                  JSONObject body = new JSONObject();
+                  body.put("user_id", userId);
+                  body.put("username", username);
+                  body.put("content", content);
+
+                  URL url = new URL(SUPABASE_URL + "/rest/v1/messages");
+                  HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                  conn.setRequestMethod("POST");
+                  conn.setDoOutput(true);
+                  conn.setConnectTimeout(15000);
+                  conn.setReadTimeout(15000);
+                  conn.setRequestProperty("apikey", SUPABASE_ANON_KEY);
+                  conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+                  conn.setRequestProperty("Content-Type", "application/json");
+                  conn.setRequestProperty("Prefer", "return=minimal");
+                  OutputStream os = conn.getOutputStream();
+                  os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                  os.close();
+                  int status = conn.getResponseCode();
+                  conn.disconnect();
+
+                  if (status >= 200 && status < 300) {
+                      showResultNotification(context, true, content);
+                  } else {
+                      showResultNotification(context, false, "ارسال نشد — دوباره از داخل اپ امتحان کن.");
+                  }
+              }
+
+              /** رفرشِ access_token با refresh_token. برمی‌گردونه {accessToken, refreshToken, expiresAt} یا null. */
+              private String[] refreshAccessToken(String refreshToken) {
+                  HttpURLConnection conn = null;
+                  try {
+                      URL url = new URL(SUPABASE_URL + "/auth/v1/token?grant_type=refresh_token");
+                      conn = (HttpURLConnection) url.openConnection();
+                      conn.setRequestMethod("POST");
+                      conn.setDoOutput(true);
+                      conn.setConnectTimeout(15000);
+                      conn.setReadTimeout(15000);
+                      conn.setRequestProperty("apikey", SUPABASE_ANON_KEY);
+                      conn.setRequestProperty("Content-Type", "application/json");
+                      JSONObject body = new JSONObject();
+                      body.put("refresh_token", refreshToken);
+                      OutputStream os = conn.getOutputStream();
+                      os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                      os.close();
+                      int status = conn.getResponseCode();
+                      if (status < 200 || status >= 300) return null;
+                      InputStream is = conn.getInputStream();
+                      Scanner scanner = new Scanner(is, "UTF-8").useDelimiter("\\\\A");
+                      String responseBody = scanner.hasNext() ? scanner.next() : "";
+                      JSONObject json = new JSONObject(responseBody);
+                      String newAccess = json.optString("access_token", "");
+                      String newRefresh = json.optString("refresh_token", refreshToken);
+                      long expiresAtNew = json.optLong("expires_at", 0);
+                      if (newAccess.isEmpty()) return null;
+                      return new String[]{newAccess, newRefresh, String.valueOf(expiresAtNew)};
+                  } catch (Exception e) {
+                      return null;
+                  } finally {
+                      if (conn != null) conn.disconnect();
+                  }
+              }
+
+              private long parseLongSafe(String s) {
+                  try { return Long.parseLong(s); } catch (Exception e) { return 0; }
+              }
+
+              /** بعد از تمومِ کار (موفق یا شکست)، نوتیف رو آپدیت می‌کنه — هم اسپینرِ «در حالِ
+               *  ارسال» بسته بشه، هم کاربر مطمئن بشه پیامش واقعاً رفت یا نرفت. */
+              private void showResultNotification(Context context, boolean success, String message) {
+                  NotificationCompat.Builder builder = new NotificationCompat.Builder(context, "chat_messages")
+                          .setSmallIcon(R.drawable.ic_stat_icon)
+                          .setContentTitle(success ? "پیامت ارسال شد" : "ارسال نشد")
+                          .setContentText(message)
+                          .setAutoCancel(true)
+                          .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+                  NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+                  if (nm != null) nm.notify(ChatReplyMessagingService.NOTIF_ID, builder.build());
+              }
+          }
+          JAVAEOF
+
+          # ---- MainActivity.java: بازنویسیِ کامل (همون الگویِ خودِ استپِ Myket بالاتر) تا
+          #      هم پلاگین‌های قبلی (Billing/Widget) هم چنل‌سازیِ نوتیف هم رجیستریِ AuthBridge
+          #      هم دستگیره‌ی «تپِ نوتیف → یادداشتِ pending_open_chat» همه با هم و بدون
+          #      برخوردِ regex سرِ جاشون باشن.
+          MAIN_ACTIVITY="${JAVA_DIR}/MainActivity.java"
+          cat > "$MAIN_ACTIVITY" <<JAVAEOF
+          package ${APP_ID};
+
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.os.Build;
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+          import ${APP_ID}.billing.MarketBillingPlugin;
+          import ${APP_ID}.widget.TaskWidgetPlugin;
+          import ${APP_ID}.auth.AuthBridgePlugin;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  registerPlugin(MarketBillingPlugin.class);
+                  registerPlugin(TaskWidgetPlugin.class);
+                  registerPlugin(AuthBridgePlugin.class);
+                  super.onCreate(savedInstanceState);
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel channel = new NotificationChannel(
+                          "chat_messages", "پیام‌های چت عمومی", NotificationManager.IMPORTANCE_HIGH);
+                      NotificationManager nm = getSystemService(NotificationManager.class);
+                      if (nm != null) nm.createNotificationChannel(channel);
+                  }
+
+                  handleOpenChatIntent(getIntent());
+              }
+
+              @Override
+              public void onNewIntent(Intent intent) {
+                  super.onNewIntent(intent);
+                  setIntent(intent);
+                  handleOpenChatIntent(intent);
+              }
+
+              // تپ‌کردن روی بدنه‌ی نوتیفِ چت (نه دکمه‌ی ریپلای) از اینجا رد می‌شه —
+              // ChatReplyMessagingService.showReplyableNotification همین اکسترا رو ست کرده.
+              // چون این لحظه ممکنه WebView/JS هنوز کامل لود نشده باشه، مستقیم JS صدا
+              // نمی‌زنیم؛ فقط یه پرچم تو SharedPreferences می‌ذاریم — app.js موقعِ
+              // start-up/resume با AuthBridge.getPendingOpenChat() این پرچم رو می‌خونه.
+              private void handleOpenChatIntent(Intent intent) {
+                  if (intent == null || !intent.getBooleanExtra("openChat", false)) return;
+                  intent.removeExtra("openChat");
+                  SharedPreferences prefs = getSharedPreferences(AuthBridgePlugin.PREFS_NAME, MODE_PRIVATE);
+                  prefs.edit().putBoolean(AuthBridgePlugin.KEY_PENDING_OPEN_CHAT, true).apply();
+              }
+          }
+          JAVAEOF
+
+          if ! grep -q 'registerPlugin(AuthBridgePlugin.class)' "$MAIN_ACTIVITY"; then
+            echo "::error::AuthBridgePlugin was not registered in MainActivity.java"
+            exit 1
+          fi
+
+          # ---- مانیفست: حذفِ سرویسِ داخلیِ پلاگینِ پوش (تا فقط سرویسِ خودمون FCM رو بگیره)
+          #      و ثبتِ سرویس/ریسیورِ تازه ----
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          python3 - "$MANIFEST" "$APP_ID" <<'WIDGETPYEOF'
+          import sys, re
+          path = sys.argv[1]
+          app_id = sys.argv[2]
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+
+          # tools:node="remove" نیاز به xmlns:tools رو ریشه‌ی <manifest> داره.
+          if 'xmlns:tools=' not in src:
+              src = re.sub(r'(<manifest\b)', r'\1 xmlns:tools="http://schemas.android.com/tools"', src, count=1)
+
+          if 'ChatReplyMessagingService' not in src:
+              block = (
+                  # سرویسِ خودِ @capacitor/push-notifications رو صریح غیرفعال می‌کنیم تا
+                  # FCM فقط سرویسِ ما رو صدا بزنه (اندروید فقط یه FirebaseMessagingService
+                  # فعال در هر اپ رو پشتیبانی می‌کنه). اگه اسمِ کلاسِ پلاگین تو نسخه‌ی نصب‌شده
+                  # فرق کنه، این tag صرفاً بی‌اثره (چون match نمی‌شه) — و بازم سرویسِ ما پایین
+                  # اضافه می‌شه؛ فقط اون‌وقت باید احتمالِ دوتا سرویسِ فعال رو دستی چک کنی.\n'
+                  '    <service android:name="com.capacitorjs.plugins.pushnotifications.MessagingService" tools:node="remove" />\n'
+                  '    <service android:name="' + app_id + '.auth.ChatReplyMessagingService" android:exported="false">\n'
+                  '        <intent-filter>\n'
+                  '            <action android:name="com.google.firebase.MESSAGING_EVENT" />\n'
+                  '        </intent-filter>\n'
+                  '    </service>\n'
+                  '    <receiver android:name="' + app_id + '.auth.ChatReplyReceiver" android:exported="false" />\n'
+              )
+              src = src.replace('</application>', block + '</application>', 1)
+
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(src)
+          WIDGETPYEOF
+          if ! grep -q 'ChatReplyMessagingService' "$MANIFEST"; then
+            echo "::error::ChatReplyMessagingService was not registered in AndroidManifest.xml"
+            exit 1
+          fi
+
       - name: Inject DreamLife home-screen widgets (checklist + day progress)
         # Adds the native other half of window.Capacitor.Plugins.TaskWidget, which index.html
         # already calls (syncTaskWidget / applyPendingWidgetToggles) but that previously had
@@ -679,7 +1233,7 @@ jobs:
            *  current theme or use its own independent color/background/shape. */
           class WidgetStyle {
               final int accent, accent2, card, text, muted;
-              final String bg;        // "opaque" | "glass" | "transparent"
+              final String bg;        // "opaque" | "glass" | "gradient" | "outline" | "transparent"
               final String shape;     // "rounded" | "pill" | "sharp" (checklist widget)
               final String thickness; // "thin" | "medium" | "thick" (day-progress widget)
               final String pattern;   // "none" | "dots" | "stripes" | "grid" | "waves" — decorative overlay tinted with accent2
@@ -1232,7 +1786,17 @@ jobs:
           import android.content.Context;
           import android.content.Intent;
           import android.content.SharedPreferences;
+          import android.graphics.Bitmap;
+          import android.graphics.BlurMaskFilter;
+          import android.graphics.Canvas;
           import android.graphics.Color;
+          import android.graphics.LinearGradient;
+          import android.graphics.Paint;
+          import android.graphics.Path;
+          import android.graphics.RadialGradient;
+          import android.graphics.RectF;
+          import android.graphics.Shader;
+          import android.os.Bundle;
           import android.view.View;
           import android.widget.RemoteViews;
           import org.json.JSONArray;
@@ -1255,6 +1819,154 @@ jobs:
                   updateOne(context, AppWidgetManager.getInstance(context), widgetId);
               }
 
+              // Small color-math helpers, mirrored from DayProgressWidgetProvider so the checklist
+              // widget's hand-drawn accents (progress bar, check medallions) share the same premium
+              // gradient/glow language as the rest of the widget family instead of looking bolted on.
+              private static int withAlpha(int color, int alpha) {
+                  return (color & 0x00FFFFFF) | (alpha << 24);
+              }
+              private static int lighten(int color, float factor) {
+                  int a = Color.alpha(color);
+                  int r = Math.min(255, (int) (Color.red(color) + (255 - Color.red(color)) * factor));
+                  int g = Math.min(255, (int) (Color.green(color) + (255 - Color.green(color)) * factor));
+                  int b = Math.min(255, (int) (Color.blue(color) + (255 - Color.blue(color)) * factor));
+                  return Color.argb(a, r, g, b);
+              }
+              private static int darken(int color, float factor) {
+                  int a = Color.alpha(color);
+                  int r = (int) (Color.red(color) * (1 - factor));
+                  int g = (int) (Color.green(color) * (1 - factor));
+                  int b = (int) (Color.blue(color) * (1 - factor));
+                  return Color.argb(a, r, g, b);
+              }
+
+              // Slim gradient progress bar for the header. Baked into a fixed-reference-width bitmap
+              // and stretched via the ImageView's scaleType="fitXY" -- the same trick cardBg/cardShadow
+              // already use to fill an unknown widget width. Bitmap height matches the layout height
+              // exactly, so fitXY only ever stretches the width axis, never the height.
+              static Bitmap progressBarBitmap(float pct, int widthDp, int heightDp, Context context,
+                                               int accent, int accent2, int trackColor) {
+                  float density = context.getResources().getDisplayMetrics().density;
+                  int w = Math.max(1, (int) (widthDp * density));
+                  int h = Math.max(1, (int) (heightDp * density));
+                  Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                  Canvas canvas = new Canvas(bmp);
+                  float r = h / 2f;
+
+                  Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                  trackPaint.setColor(trackColor);
+                  canvas.drawRoundRect(new RectF(0, 0, w, h), r, r, trackPaint);
+
+                  float fillW = Math.max(h, w * Math.max(0f, Math.min(1f, pct)));
+                  if (pct > 0.01f) {
+                      RectF fillRect = new RectF(0, 0, fillW, h);
+
+                      Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      glow.setColor(withAlpha(accent2, 110));
+                      glow.setMaskFilter(new BlurMaskFilter(h * 0.7f, BlurMaskFilter.Blur.NORMAL));
+                      canvas.drawRoundRect(fillRect, r, r, glow);
+
+                      Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      fill.setShader(new LinearGradient(0, 0, fillW, 0,
+                          new int[]{ accent, accent2 }, null, Shader.TileMode.CLAMP));
+                      canvas.drawRoundRect(fillRect, r, r, fill);
+
+                      Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      sheen.setShader(new LinearGradient(0, 0, 0, h,
+                          new int[]{ withAlpha(Color.WHITE, 100), withAlpha(Color.WHITE, 0) },
+                          new float[]{ 0f, 1f }, Shader.TileMode.CLAMP));
+                      canvas.save();
+                      canvas.clipRect(0, 0, fillW, h * 0.55f);
+                      canvas.drawRoundRect(fillRect, r, r, sheen);
+                      canvas.restore();
+                  }
+                  return bmp;
+              }
+
+              // Per-row check "medallion": a glowing gradient jewel when done, a light outline ring
+              // when pending -- drawn twice per data refresh (see ChecklistRemoteViewsService) and
+              // reused across every row of that state, so scrolling never re-runs the drawing code.
+              static Bitmap checkMedallion(boolean done, int sizeDp, Context context, int accent, int accent2, int muted) {
+                  float density = context.getResources().getDisplayMetrics().density;
+                  int size = Math.max(1, (int) (sizeDp * density));
+                  Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+                  Canvas canvas = new Canvas(bmp);
+                  float cx = size / 2f, cy = size / 2f, r = size / 2f - size * 0.09f;
+
+                  if (done) {
+                      Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      glow.setShader(new RadialGradient(cx, cy, size * 0.62f,
+                          new int[]{ withAlpha(accent2, 120), withAlpha(accent2, 0) },
+                          new float[]{ 0.5f, 1f }, Shader.TileMode.CLAMP));
+                      canvas.drawCircle(cx, cy, size * 0.62f, glow);
+
+                      Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      fill.setShader(new RadialGradient(cx - r * 0.3f, cy - r * 0.3f, r * 1.4f,
+                          new int[]{ lighten(accent2, 0.28f), accent, darken(accent, 0.12f) },
+                          new float[]{ 0f, 0.55f, 1f }, Shader.TileMode.CLAMP));
+                      canvas.drawCircle(cx, cy, r, fill);
+
+                      Paint check = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      check.setStyle(Paint.Style.STROKE);
+                      check.setStrokeWidth(size * 0.09f);
+                      check.setStrokeCap(Paint.Cap.ROUND);
+                      check.setStrokeJoin(Paint.Join.ROUND);
+                      check.setColor(Color.WHITE);
+                      Path path = new Path();
+                      path.moveTo(cx - r * 0.5f, cy + r * 0.02f);
+                      path.lineTo(cx - r * 0.12f, cy + r * 0.4f);
+                      path.lineTo(cx + r * 0.55f, cy - r * 0.32f);
+                      canvas.drawPath(path, check);
+                  } else {
+                      Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      ring.setStyle(Paint.Style.STROKE);
+                      ring.setStrokeWidth(size * 0.075f);
+                      ring.setColor(withAlpha(muted, 190));
+                      canvas.drawCircle(cx, cy, r, ring);
+                  }
+                  return bmp;
+              }
+
+              // کارتِ گرادیانتِ پرمیوم برایِ حالتِ bg="gradient": به‌جایِ یه شکلِ تخت با یه رنگ،
+              // یه بیت‌مپِ واقعی با گرادیانتِ دوتُنِ accent→accent2، سیهنِ نوریِ بالا (همون تکنیکِ
+              // progressBarBitmap) و یه خطِ باریکِ روشن دورِ لبه می‌کشه -- چون RemoteViews هیچ راهی
+              // برایِ ست‌کردنِ یه GradientDrawable واقعی نداره (فقط setColorFilter تک‌رنگ رو
+              // می‌شناسه)، تنها راهِ گرادیانتِ واقعی رو پیشِ‌رو، رندرِ دستیِ یه Bitmap ه.
+              // اندازه‌ی بیت‌مپ دقیقاً از رویِ سایزِ فعلیِ خودِ ویجت (getAppWidgetOptions) گرفته
+              // می‌شه -- نه یه سایزِ ثابتِ حدسی -- تا با کشیده‌شدنِ fitXY، گوشه‌های گردِ بیضی/کج
+              // نشن.
+              static Bitmap cardGradientBitmap(int widthDp, int heightDp, Context context,
+                                                int accent, int accent2, float cornerRadiusDp) {
+                  float density = context.getResources().getDisplayMetrics().density;
+                  int w = Math.max(1, (int) (widthDp * density));
+                  int h = Math.max(1, (int) (heightDp * density));
+                  float r = Math.min(cornerRadiusDp * density, Math.min(w, h) / 2f);
+                  Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                  Canvas canvas = new Canvas(bmp);
+                  RectF rect = new RectF(0, 0, w, h);
+
+                  Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+                  fill.setShader(new LinearGradient(0, 0, w, h, accent, accent2, Shader.TileMode.CLAMP));
+                  canvas.drawRoundRect(rect, r, r, fill);
+
+                  Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
+                  sheen.setShader(new LinearGradient(0, 0, 0, h * 0.55f,
+                      new int[]{ withAlpha(Color.WHITE, 70), withAlpha(Color.WHITE, 0) },
+                      new float[]{ 0f, 1f }, Shader.TileMode.CLAMP));
+                  canvas.save();
+                  canvas.clipRect(0, 0, w, h * 0.55f);
+                  canvas.drawRoundRect(rect, r, r, sheen);
+                  canvas.restore();
+
+                  Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
+                  edge.setStyle(Paint.Style.STROKE);
+                  edge.setStrokeWidth(density * 1f);
+                  edge.setColor(withAlpha(Color.WHITE, 90));
+                  canvas.drawRoundRect(new RectF(1, 1, w - 1, h - 1), r, r, edge);
+
+                  return bmp;
+              }
+
               private static void updateOne(Context context, AppWidgetManager mgr, int widgetId) {
                   SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
                   RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_checklist);
@@ -1263,6 +1975,33 @@ jobs:
                   if ("transparent".equals(st.bg)) {
                       views.setViewVisibility(R.id.cardShadow, View.GONE);
                       views.setViewVisibility(R.id.cardBg, View.GONE);
+                  } else if ("outline".equals(st.bg)) {
+                      // مینیمالِ پرمیوم: بدونِ پرِ رنگ، فقط یه حاشیه‌ی رنگیِ تمیز -- سایه هم لازم
+                      // نداره چون داخلش شفافه، سایه‌ی زیرِ یه چیزِ شفاف عجیب می‌شد.
+                      int outlineRes = "pill".equals(st.shape) ? R.drawable.widget_card_outline_pill
+                                     : "sharp".equals(st.shape) ? R.drawable.widget_card_outline_sharp
+                                     : R.drawable.widget_card_outline;
+                      views.setViewVisibility(R.id.cardShadow, View.GONE);
+                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardBg, outlineRes);
+                      views.setInt(R.id.cardBg, "setColorFilter", st.accent);
+                      views.setInt(R.id.cardBg, "setImageAlpha", 255);
+                  } else if ("gradient".equals(st.bg)) {
+                      // گرادیانتِ واقعیِ دوتُن -- تنها حالتی که به‌جایِ یه شکلِ XML رنگ‌شده، یه
+                      // Bitmap واقعی رندر می‌شه (توضیح کامل بالایِ cardGradientBitmap).
+                      float cornerRadiusDp = "pill".equals(st.shape) ? 999f : "sharp".equals(st.shape) ? 4f : 24f;
+                      Bundle sizeOpts = mgr.getAppWidgetOptions(widgetId);
+                      int wDp = Math.max(120, sizeOpts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250));
+                      int hDp = Math.max(90, sizeOpts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 180));
+                      int shadowRes = "pill".equals(st.shape) ? R.drawable.widget_card_shadow_pill
+                                    : "sharp".equals(st.shape) ? R.drawable.widget_card_shadow_sharp
+                                    : R.drawable.widget_card_shadow;
+                      views.setViewVisibility(R.id.cardShadow, View.VISIBLE);
+                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardShadow, shadowRes);
+                      views.setInt(R.id.cardShadow, "setImageAlpha", 150);
+                      views.setImageViewBitmap(R.id.cardBg, cardGradientBitmap(wDp, hDp, context, st.accent, st.accent2, cornerRadiusDp));
+                      views.setInt(R.id.cardBg, "setImageAlpha", 255);
                   } else {
                       int shapeRes = "pill".equals(st.shape) ? R.drawable.widget_card_shape_pill
                                    : "sharp".equals(st.shape) ? R.drawable.widget_card_shape_sharp
@@ -1296,6 +2035,33 @@ jobs:
 
                   views.setInt(R.id.title, "setTextColor", st.text);
                   views.setInt(R.id.emptyView, "setTextColor", st.muted);
+                  views.setInt(R.id.emptyIcon, "setColorFilter", st.muted);
+                  views.setInt(R.id.emptyIcon, "setImageAlpha", 140);
+
+                  // Count today's progress purely for the header's "done/total" jewel badge and its
+                  // gradient bar -- cosmetic only, the ListView below still owns the real task data.
+                  int done = 0, total = 0;
+                  try {
+                      JSONArray countTasks = new JSONArray(prefs.getString(TaskWidgetPlugin.KEY_TASKS, "[]"));
+                      total = countTasks.length();
+                      for (int i = 0; i < total; i++) {
+                          if (countTasks.getJSONObject(i).optBoolean("done", false)) done++;
+                      }
+                  } catch (Exception e) { /* keep done=0, total=0 -- badge/bar just hide below */ }
+
+                  if (total > 0) {
+                      float pct = Math.max(0f, Math.min(1f, done / (float) total));
+                      views.setViewVisibility(R.id.progressBadgeWrap, View.VISIBLE);
+                      views.setViewVisibility(R.id.progressBar, View.VISIBLE);
+                      views.setTextViewText(R.id.progressBadgeText, done + "/" + total);
+                      views.setInt(R.id.progressBadgeBg, "setColorFilter", st.accent);
+                      views.setInt(R.id.progressBadgeBg, "setImageAlpha", 225);
+                      int track = (st.muted & 0x00FFFFFF) | 0x33000000;
+                      views.setImageViewBitmap(R.id.progressBar, progressBarBitmap(pct, 300, 7, context, st.accent, st.accent2, track));
+                  } else {
+                      views.setViewVisibility(R.id.progressBadgeWrap, View.GONE);
+                      views.setViewVisibility(R.id.progressBar, View.GONE);
+                  }
 
                   // Scrollable task list: the row views themselves are built on demand by
                   // ChecklistRemoteViewsFactory (one instance per widgetId), so any number of
@@ -1306,7 +2072,7 @@ jobs:
                   // identical/cached intent by the framework (a well-known RemoteViewsService gotcha).
                   adapterIntent.setData(android.net.Uri.parse("widget://checklist/" + widgetId));
                   views.setRemoteAdapter(R.id.checklistListView, adapterIntent);
-                  views.setEmptyView(R.id.checklistListView, R.id.emptyView);
+                  views.setEmptyView(R.id.checklistListView, R.id.emptyViewWrap);
 
                   // One shared click template for every row; each row supplies its own task_id via
                   // a fill-in intent (RemoteViewsFactory#getViewAt). Requires FLAG_MUTABLE so the
@@ -1369,6 +2135,8 @@ jobs:
           import android.content.Context;
           import android.content.Intent;
           import android.content.SharedPreferences;
+          import android.graphics.Bitmap;
+          import android.graphics.Paint;
           import android.widget.RemoteViews;
           import android.widget.RemoteViewsService;
           import org.json.JSONArray;
@@ -1385,6 +2153,8 @@ jobs:
                   private final int widgetId;
                   private JSONArray tasks = new JSONArray();
                   private WidgetStyle style;
+                  private Bitmap doneMedallion;
+                  private Bitmap pendingMedallion;
 
                   Factory(Context context, Intent intent) {
                       this.context = context;
@@ -1405,6 +2175,11 @@ jobs:
                       } catch (Exception e) {
                           tasks = new JSONArray();
                       }
+                      // Both check-medallion states are drawn once per data refresh and reused for
+                      // every row below, so scrolling through a long list never re-runs the
+                      // gradient/glow drawing code -- it just stamps one of two cached bitmaps.
+                      doneMedallion = ChecklistWidgetProvider.checkMedallion(true, 22, context, style.accent, style.accent2, style.muted);
+                      pendingMedallion = ChecklistWidgetProvider.checkMedallion(false, 22, context, style.accent, style.accent2, style.muted);
                   }
 
                   @Override
@@ -1420,10 +2195,20 @@ jobs:
                           JSONObject t = tasks.getJSONObject(position);
                           int taskId = t.optInt("id", position);
                           boolean done = t.optBoolean("done", false);
+
                           item.setTextViewText(R.id.itemLabel, t.optString("label"));
                           item.setInt(R.id.itemLabel, "setTextColor", style.text);
-                          item.setImageViewResource(R.id.itemCheck, done ? R.drawable.widget_check_on : R.drawable.widget_check_off);
-                          item.setInt(R.id.itemCheck, "setColorFilter", done ? style.accent : style.muted);
+                          // Strikethrough + soft fade for completed tasks; crisp full color for pending.
+                          item.setInt(R.id.itemLabel, "setPaintFlags",
+                              done ? (Paint.ANTI_ALIAS_FLAG | Paint.STRIKE_THRU_TEXT_FLAG) : Paint.ANTI_ALIAS_FLAG);
+                          item.setFloat(R.id.itemRow, "setAlpha", done ? 0.55f : 1f);
+
+                          item.setImageViewBitmap(R.id.itemCheck, done ? doneMedallion : pendingMedallion);
+
+                          // Soft accent-tinted capsule glow behind completed rows only; alpha 0 keeps
+                          // it fully invisible behind pending rows without a visibility toggle.
+                          item.setInt(R.id.itemHighlight, "setColorFilter", style.accent);
+                          item.setInt(R.id.itemHighlight, "setImageAlpha", done ? 34 : 0);
 
                           // Only the task_id differs row to row — merged into the provider's shared
                           // PendingIntentTemplate at click time.
@@ -1465,10 +2250,13 @@ jobs:
           import android.content.Intent;
           import android.content.SharedPreferences;
           import android.graphics.Bitmap;
+          import android.graphics.BlurMaskFilter;
           import android.graphics.Canvas;
           import android.graphics.Color;
           import android.graphics.Paint;
+          import android.graphics.RadialGradient;
           import android.graphics.RectF;
+          import android.graphics.Shader;
           import android.graphics.SweepGradient;
           import android.view.View;
           import android.widget.RemoteViews;
@@ -1559,32 +2347,163 @@ jobs:
                   }
               }
 
-              // Draws the ring as a soft two-color gradient sweep (accent -> accent2) that fills one
-              // full lap every 24 hours (resetting at midnight), instead of the old day/90 fraction.
-              private static Bitmap ringBitmap(float pct, int sizeDp, Context context, int accent, int accent2, int trackColor, float strokeFactor) {
+              // Small color-math helpers used only by dialBitmap() below.
+              private static int withAlpha(int color, int alpha) {
+                  return (color & 0x00FFFFFF) | (alpha << 24);
+              }
+              private static int lighten(int color, float factor) {
+                  int a = Color.alpha(color);
+                  int r = Math.min(255, (int) (Color.red(color) + (255 - Color.red(color)) * factor));
+                  int g = Math.min(255, (int) (Color.green(color) + (255 - Color.green(color)) * factor));
+                  int b = Math.min(255, (int) (Color.blue(color) + (255 - Color.blue(color)) * factor));
+                  return Color.argb(a, r, g, b);
+              }
+              private static int darken(int color, float factor) {
+                  int a = Color.alpha(color);
+                  int r = (int) (Color.red(color) * (1 - factor));
+                  int g = (int) (Color.green(color) * (1 - factor));
+                  int b = (int) (Color.blue(color) * (1 - factor));
+                  return Color.argb(a, r, g, b);
+              }
+
+              // Renders the whole widget face as one bitmap — a premium circular gauge/medallion
+              // instead of a flat ring: ambient colored glow, an embossed metal bezel + dial face
+              // (skipped in "transparent" bg mode so the ring floats directly on the wallpaper),
+              // twelve chronograph-style tick marks, a grooved track, a rich multi-stop gradient
+              // progress arc with its own soft glow underneath, a bright jewel-like tip marker at
+              // the current progress point, and a soft glass sheen across the upper dome.
+              static Bitmap dialBitmap(float pct, int sizeDp, Context context, int accent, int accent2,
+                                                int trackColor, float strokeFactor, String bgMode, int faceColor) {
                   float density = context.getResources().getDisplayMetrics().density;
                   int size = Math.max(1, (int) (sizeDp * density));
                   Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
                   Canvas canvas = new Canvas(bmp);
-                  float stroke = size * strokeFactor;
-                  RectF rect = new RectF(stroke, stroke, size - stroke, size - stroke);
                   float cx = size / 2f, cy = size / 2f;
+                  boolean transparent = "transparent".equals(bgMode);
+                  boolean glass = "glass".equals(bgMode);
+
+                  float stroke = size * strokeFactor;
+                  float ringR = size / 2f - size * 0.16f;
+                  RectF ringRect = new RectF(cx - ringR, cy - ringR, cx + ringR, cy + ringR);
+
+                  // ---- Layer 1: ambient outer glow, colored with the accent — reads as a soft
+                  // halo even in transparent mode, so the widget still feels "lit" on any wallpaper.
+                  Paint glowBg = new Paint(Paint.ANTI_ALIAS_FLAG);
+                  glowBg.setShader(new RadialGradient(cx, cy, size * 0.5f,
+                      new int[]{ withAlpha(accent2, 90), withAlpha(accent2, 0) },
+                      new float[]{ 0.55f, 1f }, Shader.TileMode.CLAMP));
+                  canvas.drawCircle(cx, cy, size * 0.5f, glowBg);
+
+                  // ---- Layer 2: dial face + embossed metal bezel (opaque/glass modes only) ----
+                  if (!transparent) {
+                      float faceR = size / 2f - size * 0.05f;
+                      Paint face = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      int faceCenter = lighten(faceColor, 0.10f);
+                      int faceEdge = darken(faceColor, glass ? 0.22f : 0.10f);
+                      face.setShader(new RadialGradient(cx, cy - faceR * 0.15f, faceR * 1.15f,
+                          new int[]{ faceCenter, faceEdge },
+                          new float[]{ 0f, 1f }, Shader.TileMode.CLAMP));
+                      face.setAlpha(glass ? 190 : 255);
+                      canvas.drawCircle(cx, cy, faceR, face);
+
+                      Paint bezelOuter = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      bezelOuter.setStyle(Paint.Style.STROKE);
+                      bezelOuter.setStrokeWidth(size * 0.012f);
+                      bezelOuter.setColor(withAlpha(darken(faceColor, 0.35f), 140));
+                      canvas.drawCircle(cx, cy, faceR - size * 0.006f, bezelOuter);
+
+                      Paint bezelInner = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      bezelInner.setStyle(Paint.Style.STROKE);
+                      bezelInner.setStrokeWidth(size * 0.008f);
+                      bezelInner.setColor(withAlpha(Color.WHITE, 60));
+                      canvas.drawCircle(cx, cy, faceR - size * 0.024f, bezelInner);
+                  }
+
+                  // ---- Layer 3: twelve chronograph tick marks, heavier every 90° ----
+                  float tickOuter = ringR + stroke * 0.62f;
+                  for (int i = 0; i < 12; i++) {
+                      boolean major = i % 3 == 0;
+                      float tickLen = major ? size * 0.045f : size * 0.025f;
+                      Paint tickPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      tickPaint.setStrokeWidth(major ? size * 0.014f : size * 0.008f);
+                      tickPaint.setColor(withAlpha(trackColor, major ? 150 : 90));
+                      tickPaint.setStrokeCap(Paint.Cap.ROUND);
+                      canvas.save();
+                      canvas.rotate(i * 30f, cx, cy);
+                      canvas.drawLine(cx, cy - tickOuter, cx, cy - tickOuter + tickLen, tickPaint);
+                      canvas.restore();
+                  }
+
+                  // ---- Layer 4: grooved track (dark under-stroke + lighter top stroke = inset feel) ----
+                  Paint grooveShadow = new Paint(Paint.ANTI_ALIAS_FLAG);
+                  grooveShadow.setStyle(Paint.Style.STROKE);
+                  grooveShadow.setStrokeWidth(stroke + size * 0.01f);
+                  grooveShadow.setColor(withAlpha(Color.BLACK, 45));
+                  canvas.drawArc(ringRect, 0f, 360f, false, grooveShadow);
 
                   Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
                   track.setStyle(Paint.Style.STROKE);
                   track.setStrokeWidth(stroke);
                   track.setColor(trackColor);
                   track.setStrokeCap(Paint.Cap.ROUND);
-                  canvas.drawArc(rect, 0f, 360f, false, track);
+                  canvas.drawArc(ringRect, 0f, 360f, false, track);
 
+                  // ---- Layer 5: soft blurred glow directly under the progress arc (neon feel) ----
+                  Paint glowArc = new Paint(Paint.ANTI_ALIAS_FLAG);
+                  glowArc.setStyle(Paint.Style.STROKE);
+                  glowArc.setStrokeWidth(stroke * 1.9f);
+                  glowArc.setStrokeCap(Paint.Cap.ROUND);
+                  glowArc.setColor(withAlpha(accent, 130));
+                  glowArc.setMaskFilter(new BlurMaskFilter(stroke * 0.9f, BlurMaskFilter.Blur.NORMAL));
+                  canvas.drawArc(ringRect, -90f, 360f * pct, false, glowArc);
+
+                  // ---- Layer 6: the crisp progress arc — rich 5-stop gradient with a bright core ----
                   Paint fg = new Paint(Paint.ANTI_ALIAS_FLAG);
                   fg.setStyle(Paint.Style.STROKE);
                   fg.setStrokeWidth(stroke);
                   fg.setStrokeCap(Paint.Cap.ROUND);
+                  int coreHighlight = lighten(accent2, 0.55f);
                   SweepGradient gradient = new SweepGradient(cx, cy,
-                      new int[]{ accent, accent2, accent }, new float[]{ 0f, 0.5f, 1f });
+                      new int[]{ accent, accent2, coreHighlight, accent2, accent },
+                      new float[]{ 0f, 0.4f, 0.72f, 0.86f, 1f });
                   fg.setShader(gradient);
-                  canvas.drawArc(rect, -90f, 360f * pct, false, fg);
+                  canvas.drawArc(ringRect, -90f, 360f * pct, false, fg);
+
+                  // ---- Layer 7: soft glass sheen across the upper dome ----
+                  if (!transparent) {
+                      Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      sheen.setShader(new RadialGradient(cx, cy - size * 0.22f, size * 0.42f,
+                          new int[]{ withAlpha(Color.WHITE, 70), withAlpha(Color.WHITE, 0) },
+                          new float[]{ 0f, 1f }, Shader.TileMode.CLAMP));
+                      canvas.save();
+                      canvas.clipRect(0, 0, size, size * 0.5f);
+                      canvas.drawCircle(cx, cy, size / 2f - size * 0.05f, sheen);
+                      canvas.restore();
+                  }
+
+                  // ---- Layer 8: bright jewel-like marker exactly at the current progress point ----
+                  if (pct > 0.01f) {
+                      double angleRad = Math.toRadians(-90 + 360 * pct);
+                      float tipX = (float) (cx + ringR * Math.cos(angleRad));
+                      float tipY = (float) (cy + ringR * Math.sin(angleRad));
+
+                      Paint tipGlow = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      tipGlow.setShader(new RadialGradient(tipX, tipY, stroke * 1.6f,
+                          new int[]{ withAlpha(Color.WHITE, 200), withAlpha(accent2, 0) },
+                          new float[]{ 0f, 1f }, Shader.TileMode.CLAMP));
+                      canvas.drawCircle(tipX, tipY, stroke * 1.6f, tipGlow);
+
+                      Paint tipDot = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      tipDot.setColor(Color.WHITE);
+                      canvas.drawCircle(tipX, tipY, stroke * 0.34f, tipDot);
+
+                      Paint tipRing = new Paint(Paint.ANTI_ALIAS_FLAG);
+                      tipRing.setStyle(Paint.Style.STROKE);
+                      tipRing.setStrokeWidth(stroke * 0.12f);
+                      tipRing.setColor(accent2);
+                      canvas.drawCircle(tipX, tipY, stroke * 0.34f, tipRing);
+                  }
+
                   return bmp;
               }
 
@@ -1600,32 +2519,19 @@ jobs:
 
                   RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_day_progress);
 
-                  if ("transparent".equals(st.bg)) {
-                      views.setViewVisibility(R.id.cardShadow, View.GONE);
-                      views.setViewVisibility(R.id.cardBg, View.GONE);
-                  } else {
-                      views.setViewVisibility(R.id.cardShadow, View.VISIBLE);
-                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
-                      views.setInt(R.id.cardBg, "setColorFilter", st.card);
-                      boolean glass = "glass".equals(st.bg);
-                      views.setInt(R.id.cardBg, "setImageAlpha", glass ? 165 : 255);
-                      views.setInt(R.id.cardShadow, "setImageAlpha", glass ? 90 : 140);
-                  }
+                  // The whole face (glow, bezel, dial, ring, tick marks, sheen) is now baked into
+                  // one bitmap by dialBitmap() below, so the old flat card/shadow/pattern layers
+                  // are no longer used for this widget — they stay GONE unconditionally.
+                  views.setViewVisibility(R.id.cardShadow, View.GONE);
+                  views.setViewVisibility(R.id.cardBg, View.GONE);
+                  views.setViewVisibility(R.id.cardPattern, View.GONE);
 
-                  int patternRes = "transparent".equals(st.bg) ? 0 : WidgetStyle.patternDrawableRes(context, st.pattern);
-                  if (patternRes != 0) {
-                      views.setViewVisibility(R.id.cardPattern, View.VISIBLE);
-                      views.setImageViewResource(R.id.cardPattern, patternRes);
-                      views.setInt(R.id.cardPattern, "setColorFilter", st.accent2);
-                      views.setInt(R.id.cardPattern, "setImageAlpha", 46);
-                  } else {
-                      views.setViewVisibility(R.id.cardPattern, View.GONE);
-                  }
-
-                  int track = (st.muted & 0x00FFFFFF) | 0x33000000;
-                  views.setImageViewBitmap(R.id.ring, ringBitmap(pct, 96, context, st.accent, st.accent2, track, strokeFactor));
-                  views.setTextViewText(R.id.dayLabel, "روز " + day);
-                  views.setInt(R.id.dayLabel, "setTextColor", st.text);
+                  int track = (st.muted & 0x00FFFFFF) | 0x40000000;
+                  views.setImageViewBitmap(R.id.ring, dialBitmap(pct, 128, context, st.accent, st.accent2, track, strokeFactor, st.bg, st.card));
+                  views.setTextViewText(R.id.dayCaptionLabel, "روز");
+                  views.setInt(R.id.dayCaptionLabel, "setTextColor", st.muted);
+                  views.setTextViewText(R.id.dayNumberLabel, String.valueOf(day));
+                  views.setInt(R.id.dayNumberLabel, "setTextColor", st.text);
 
                   if (st.showHour || st.showMinute) {
                       String clockText;
@@ -1681,6 +2587,8 @@ jobs:
           import android.content.ComponentName;
           import android.content.Context;
           import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.os.Bundle;
           import android.view.View;
           import android.widget.RemoteViews;
           import java.util.Calendar;
@@ -1696,6 +2604,13 @@ jobs:
           public class QuoteWidgetProvider extends AppWidgetProvider {
 
               public static final String ACTION_QUOTE_TICK = "${APP_ID}.ACTION_QUOTE_TICK";
+              // Fired when the user taps the widget card -- swaps in a different random quote
+              // from the pool (distinct from the one currently shown), same behavior as the
+              // in-app "Library" quote-of-the-day card. The override only lasts for the rest of
+              // the calendar day: once the stored epoch day no longer matches "today" (checked in
+              // currentIndex()), it's ignored and the widget falls back to the deterministic
+              // daily quote again -- no separate reset logic needed at midnight.
+              public static final String ACTION_QUOTE_NEXT = "${APP_ID}.ACTION_QUOTE_NEXT";
 
               public static void refreshAll(Context context) {
                   AppWidgetManager mgr = AppWidgetManager.getInstance(context);
@@ -1711,6 +2626,17 @@ jobs:
                   Intent intent = new Intent(context, QuoteWidgetProvider.class);
                   intent.setAction(ACTION_QUOTE_TICK);
                   return PendingIntent.getBroadcast(context, 0, intent,
+                          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+              }
+
+              // requestCode is the widgetId itself so every widget instance gets its own distinct
+              // PendingIntent (otherwise FLAG_UPDATE_CURRENT would make separate instances share
+              // one extra bundle and stomp on each other's widgetId).
+              private static PendingIntent nextIntent(Context context, int widgetId) {
+                  Intent intent = new Intent(context, QuoteWidgetProvider.class);
+                  intent.setAction(ACTION_QUOTE_NEXT);
+                  intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
+                  return PendingIntent.getBroadcast(context, widgetId, intent,
                           PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
               }
 
@@ -1756,6 +2682,13 @@ jobs:
                   if (ACTION_QUOTE_TICK.equals(intent.getAction())) {
                       refreshAll(context);
                       scheduleMidnightAlarm(context); // reschedule for the following midnight
+                  } else if (ACTION_QUOTE_NEXT.equals(intent.getAction())) {
+                      int widgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID,
+                              AppWidgetManager.INVALID_APPWIDGET_ID);
+                      if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+                          rollOverrideIndex(context, widgetId);
+                          refreshOne(context, widgetId);
+                      }
                   }
               }
 
@@ -1769,15 +2702,75 @@ jobs:
                   return ((epochDay % n) + n) % n;
               }
 
+              private static int currentEpochDay() {
+                  Calendar cal = Calendar.getInstance();
+                  return cal.get(Calendar.YEAR) * 366 + cal.get(Calendar.DAY_OF_YEAR);
+              }
+
+              /** Picks a fresh random quote (never the one currently on screen) and stores it as
+               *  today's override, so tapping the widget again keeps cycling instead of undoing
+               *  itself. Stored per-widget-instance (multiple widgets can each be on a different
+               *  quote) and tagged with today's epoch day so currentIndex() below stops honoring it
+               *  once the calendar day rolls over -- at that point it's simply stale data that's
+               *  never read again, not something that needs an explicit clear. */
+              private static void rollOverrideIndex(Context context, int widgetId) {
+                  SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  int n = QuoteCatalog.QUOTES.length;
+                  if (n < 2) return;
+                  int current = currentIndex(context, widgetId);
+                  int next = current;
+                  while (next == current) next = (int) (Math.random() * n);
+                  prefs.edit()
+                          .putInt("quoteOverrideIdx_" + widgetId, next)
+                          .putInt("quoteOverrideDay_" + widgetId, currentEpochDay())
+                          .apply();
+              }
+
+              /** The index actually shown: today's tap-driven override if there is one, otherwise
+               *  the deterministic daily quote. */
+              private static int currentIndex(Context context, int widgetId) {
+                  SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  int storedDay = prefs.getInt("quoteOverrideDay_" + widgetId, -1);
+                  if (storedDay == currentEpochDay()) {
+                      return prefs.getInt("quoteOverrideIdx_" + widgetId, todayIndex());
+                  }
+                  return todayIndex();
+              }
+
               private static void updateOne(Context context, AppWidgetManager mgr, int widgetId) {
                   WidgetStyle st = WidgetStyle.resolve(context, widgetId);
                   RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_quote);
 
                   // Same recolorable card treatment as the checklist widget (rounded/pill/sharp,
-                  // opaque/glass/transparent), so a quote widget dropped next to the others matches.
+                  // opaque/glass/transparent/gradient/outline), so a quote widget dropped next to
+                  // the others matches. cardGradientBitmap is reused from ChecklistWidgetProvider
+                  // (same package) instead of duplicating the whole Canvas/Paint drawing code here.
                   if ("transparent".equals(st.bg)) {
                       views.setViewVisibility(R.id.cardShadow, View.GONE);
                       views.setViewVisibility(R.id.cardBg, View.GONE);
+                  } else if ("outline".equals(st.bg)) {
+                      int outlineRes = "pill".equals(st.shape) ? R.drawable.widget_card_outline_pill
+                                     : "sharp".equals(st.shape) ? R.drawable.widget_card_outline_sharp
+                                     : R.drawable.widget_card_outline;
+                      views.setViewVisibility(R.id.cardShadow, View.GONE);
+                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardBg, outlineRes);
+                      views.setInt(R.id.cardBg, "setColorFilter", st.accent);
+                      views.setInt(R.id.cardBg, "setImageAlpha", 255);
+                  } else if ("gradient".equals(st.bg)) {
+                      float cornerRadiusDp = "pill".equals(st.shape) ? 999f : "sharp".equals(st.shape) ? 4f : 24f;
+                      Bundle sizeOpts = mgr.getAppWidgetOptions(widgetId);
+                      int wDp = Math.max(120, sizeOpts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250));
+                      int hDp = Math.max(90, sizeOpts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 180));
+                      int shadowRes = "pill".equals(st.shape) ? R.drawable.widget_card_shadow_pill
+                                    : "sharp".equals(st.shape) ? R.drawable.widget_card_shadow_sharp
+                                    : R.drawable.widget_card_shadow;
+                      views.setViewVisibility(R.id.cardShadow, View.VISIBLE);
+                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardShadow, shadowRes);
+                      views.setInt(R.id.cardShadow, "setImageAlpha", 150);
+                      views.setImageViewBitmap(R.id.cardBg, ChecklistWidgetProvider.cardGradientBitmap(wDp, hDp, context, st.accent, st.accent2, cornerRadiusDp));
+                      views.setInt(R.id.cardBg, "setImageAlpha", 255);
                   } else {
                       int shapeRes = "pill".equals(st.shape) ? R.drawable.widget_card_shape_pill
                                    : "sharp".equals(st.shape) ? R.drawable.widget_card_shape_sharp
@@ -1805,12 +2798,15 @@ jobs:
                       views.setViewVisibility(R.id.cardPattern, View.GONE);
                   }
 
-                  String[] entry = QuoteCatalog.QUOTES[todayIndex()];
+                  String[] entry = QuoteCatalog.QUOTES[currentIndex(context, widgetId)];
                   views.setTextViewText(R.id.quoteText, entry[0]);
                   views.setTextViewText(R.id.quoteAuthor, "\u2014 " + entry[1]);
                   views.setInt(R.id.quoteMark, "setTextColor", st.accent2);
                   views.setInt(R.id.quoteText, "setTextColor", st.text);
                   views.setInt(R.id.quoteAuthor, "setTextColor", st.accent);
+
+                  // Tap anywhere on the card to swap in a different quote (see ACTION_QUOTE_NEXT).
+                  views.setOnClickPendingIntent(R.id.widgetRoot, nextIntent(context, widgetId));
 
                   mgr.updateAppWidget(widgetId, views);
               }
@@ -1843,6 +2839,7 @@ jobs:
           import android.widget.LinearLayout;
           import android.widget.Switch;
           import android.widget.TextView;
+          import java.util.Calendar;
 
           /** Shared "add widget" / long-press "Edit" screen for both home-screen widgets. Each
            *  widget instance can either follow the app's current in-app theme (default), or use
@@ -2041,8 +3038,14 @@ jobs:
 
               private void buildBgOptions() {
                   bgOptionRow.removeAllViews();
-                  String[] keys = { "opaque", "glass", "transparent" };
-                  String[] labels = { "کدر", "شیشه‌ای", "بدون پس‌زمینه" };
+                  // گرادیانت/آوت‌لاین فقط برایِ ویجتِ چک‌لیست معنی داره -- دیالِ روزشمار خودش یه
+                  // بیت‌مپِ یکپارچه (glow/bezel/ring) می‌کشه و این دو حالت توش پیاده نشده.
+                  String[] keys = isChecklist
+                      ? new String[]{ "opaque", "glass", "gradient", "outline", "transparent" }
+                      : new String[]{ "opaque", "glass", "transparent" };
+                  String[] labels = isChecklist
+                      ? new String[]{ "کدر", "شیشه‌ای", "گرادیانت", "خط‌دور", "بدون پس‌زمینه" }
+                      : new String[]{ "کدر", "شیشه‌ای", "بدون پس‌زمینه" };
                   for (int i = 0; i < keys.length; i++) {
                       final String key = keys[i];
                       Button b = pillButton(labels[i], key.equals(bg));
@@ -2128,13 +3131,29 @@ jobs:
                   FrameLayout.LayoutParams full = new FrameLayout.LayoutParams(
                           ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
 
-                  if (!"transparent".equals(bg)) {
+                  // The flat rounded/pill card + pattern below is only for the checklist widget now —
+                  // the day-progress dial bakes its own bezel/face/glow into one bitmap (see the
+                  // dialBitmap() branch further down), so drawing this flat card underneath it too
+                  // would just double up the background.
+                  if (isChecklist && !"transparent".equals(bg)) {
                       View cardView = new View(this);
                       GradientDrawable shapeDrawable = new GradientDrawable();
-                      shapeDrawable.setColor(card);
-                      if (!isChecklist || "pill".equals(shape)) shapeDrawable.setCornerRadius(dp(999));
-                      else if ("sharp".equals(shape)) shapeDrawable.setCornerRadius(dp(4));
-                      else shapeDrawable.setCornerRadius(dp(24));
+                      float radius = "pill".equals(shape) ? dp(999) : "sharp".equals(shape) ? dp(4) : dp(24);
+                      shapeDrawable.setCornerRadius(radius);
+                      // پیش‌نمایشِ این صفحه یه View/GradientDrawable واقعیه (نه RemoteViews محدود)،
+                      // پس برخلافِ خودِ ویجت (که برایِ گرادیانتِ واقعی مجبور به رندرِ Bitmap دستیه —
+                      // ببین cardGradientBitmap تو ChecklistWidgetProvider)، اینجا می‌شه مستقیم از
+                      // GradientDrawable.setColors استفاده کرد.
+                      if ("gradient".equals(bg)) {
+                          shapeDrawable.setColors(new int[]{ accent, accent2 });
+                          shapeDrawable.setOrientation(GradientDrawable.Orientation.TL_BR);
+                          shapeDrawable.setStroke(dp(1), 0x5AFFFFFF);
+                      } else if ("outline".equals(bg)) {
+                          shapeDrawable.setColor(Color.TRANSPARENT);
+                          shapeDrawable.setStroke(dp(2), accent);
+                      } else {
+                          shapeDrawable.setColor(card);
+                      }
                       cardView.setBackground(shapeDrawable);
                       cardView.setAlpha("glass".equals(bg) ? 0.65f : 1f);
                       previewHolder.addView(cardView, full);
@@ -2183,14 +3202,32 @@ jobs:
                       }
                       previewHolder.addView(content, full);
                   } else {
+                      FrameLayout dialWrap = new FrameLayout(this);
+                      ImageView ringPreview = new ImageView(this);
+                      Calendar previewNow = Calendar.getInstance();
+                      float pct = Math.max(0f, Math.min(1f,
+                              (previewNow.get(Calendar.HOUR_OF_DAY) * 60 + previewNow.get(Calendar.MINUTE)) / 1440f));
+                      float strokeFactor = "thin".equals(thickness) ? 0.06f : "thick".equals(thickness) ? 0.13f : 0.09f;
+                      int trackPreview = (muted & 0x00FFFFFF) | 0x40000000;
+                      ringPreview.setImageBitmap(DayProgressWidgetProvider.dialBitmap(
+                              pct, 128, this, accent, accent2, trackPreview, strokeFactor, bg, card));
+                      dialWrap.addView(ringPreview, full);
+
                       LinearLayout dayCol = new LinearLayout(this);
                       dayCol.setOrientation(LinearLayout.VERTICAL);
                       dayCol.setGravity(Gravity.CENTER);
+                      TextView captionText = new TextView(this);
+                      captionText.setText("روز");
+                      captionText.setTextColor(muted);
+                      captionText.setTypeface(null, Typeface.BOLD);
+                      captionText.setTextSize(8.5f);
+                      captionText.setLetterSpacing(0.12f);
+                      dayCol.addView(captionText);
                       TextView dayText = new TextView(this);
-                      dayText.setText("روز ۱۲");
+                      dayText.setText("12");
                       dayText.setTextColor(text);
                       dayText.setTypeface(null, Typeface.BOLD);
-                      dayText.setTextSize(15);
+                      dayText.setTextSize(20);
                       dayCol.addView(dayText);
                       if (showHour || showMinute) {
                           String clockStr = showHour && showMinute ? "12:34" : showHour ? "12" : "34";
@@ -2218,7 +3255,8 @@ jobs:
                       }
                       FrameLayout.LayoutParams centerLp = new FrameLayout.LayoutParams(
                               ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
-                      previewHolder.addView(dayCol, centerLp);
+                      dialWrap.addView(dayCol, centerLp);
+                      previewHolder.addView(dialWrap, full);
                   }
               }
 
@@ -2295,17 +3333,60 @@ jobs:
                   android:orientation="vertical"
                   android:padding="16dp">
 
-                  <TextView
-                      android:id="@+id/title"
-                      android:layout_width="wrap_content"
+                  <LinearLayout
+                      android:layout_width="match_parent"
                       android:layout_height="wrap_content"
-                      android:text="چک‌لیست امروز"
-                      android:textDirection="rtl"
-                      android:textAlignment="viewStart"
-                      android:textColor="#241F3D"
-                      android:textStyle="bold"
-                      android:textSize="14sp"
-                      android:paddingBottom="8dp" />
+                      android:orientation="horizontal"
+                      android:gravity="center_vertical"
+                      android:paddingBottom="8dp">
+
+                      <TextView
+                          android:id="@+id/title"
+                          android:layout_width="0dp"
+                          android:layout_weight="1"
+                          android:layout_height="wrap_content"
+                          android:text="چک‌لیست امروز"
+                          android:textDirection="rtl"
+                          android:textAlignment="viewStart"
+                          android:textColor="#241F3D"
+                          android:textStyle="bold"
+                          android:textSize="14sp" />
+
+                      <!-- Jewel-style "done/total" badge — same gradient-capsule language as the
+                           day-progress widget's digital clock badge. Hidden with no tasks at all. -->
+                      <FrameLayout
+                          android:id="@+id/progressBadgeWrap"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content">
+                          <ImageView
+                              android:id="@+id/progressBadgeBg"
+                              android:layout_width="match_parent"
+                              android:layout_height="match_parent"
+                              android:src="@drawable/widget_card_shape_pill"
+                              android:scaleType="fitXY" />
+                          <TextView
+                              android:id="@+id/progressBadgeText"
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:paddingStart="9dp"
+                              android:paddingEnd="9dp"
+                              android:paddingTop="3dp"
+                              android:paddingBottom="3dp"
+                              android:textColor="#FFFFFF"
+                              android:textStyle="bold"
+                              android:textSize="9.5sp" />
+                      </FrameLayout>
+                  </LinearLayout>
+
+                  <!-- Slim gradient progress bar, hand-drawn bitmap (see progressBarBitmap in
+                       ChecklistWidgetProvider). Height is fixed to match that bitmap exactly, so
+                       scaleType="fitXY" below only ever stretches the width axis, never the height. -->
+                  <ImageView
+                      android:id="@+id/progressBar"
+                      android:layout_width="match_parent"
+                      android:layout_height="7dp"
+                      android:layout_marginBottom="10dp"
+                      android:scaleType="fitXY" />
 
                   <!-- Real scrollable task list (backed by ChecklistRemoteViewsService), so any
                        number of tasks can be swiped through — not capped at a fixed row count,
@@ -2321,17 +3402,30 @@ jobs:
                       android:listSelector="@android:color/transparent"
                       android:cacheColorHint="#00000000" />
 
-                  <TextView
-                      android:id="@+id/emptyView"
+                  <LinearLayout
+                      android:id="@+id/emptyViewWrap"
                       android:layout_width="match_parent"
                       android:layout_height="0dp"
                       android:layout_weight="1"
+                      android:orientation="vertical"
                       android:gravity="center"
-                      android:text="کاری برای امروز نیست"
-                      android:textDirection="rtl"
-                      android:textColor="#8A84AB"
-                      android:textSize="12sp"
-                      android:visibility="gone" />
+                      android:visibility="gone">
+                      <ImageView
+                          android:id="@+id/emptyIcon"
+                          android:layout_width="26dp"
+                          android:layout_height="26dp"
+                          android:layout_marginBottom="6dp"
+                          android:src="@drawable/widget_check_off" />
+                      <TextView
+                          android:id="@+id/emptyView"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:gravity="center"
+                          android:text="کاری برای امروز نیست"
+                          android:textDirection="rtl"
+                          android:textColor="#8A84AB"
+                          android:textSize="12sp" />
+                  </LinearLayout>
 
               </LinearLayout>
           </FrameLayout>
@@ -2341,32 +3435,50 @@ jobs:
           #      per-item by ChecklistRemoteViewsFactory) ----
           cat > "$RES_DIR/layout/widget_checklist_item.xml" <<'XMLEOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:id="@+id/itemRow"
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
-              android:layout_height="wrap_content"
-              android:orientation="horizontal"
-              android:gravity="center_vertical"
-              android:paddingTop="5dp"
-              android:paddingBottom="5dp">
+              android:layout_height="wrap_content">
+
+              <!-- Soft accent-tinted capsule glow behind the row, shown only for completed tasks
+                   (see ChecklistRemoteViewsFactory#getViewAt) — alpha 0 keeps it fully invisible
+                   behind pending rows instead of needing a visibility toggle. -->
               <ImageView
-                  android:id="@+id/itemCheck"
-                  android:layout_width="20dp"
-                  android:layout_height="20dp"
-                  android:src="@drawable/widget_check_off"
-                  android:layout_marginEnd="10dp" />
-              <TextView
-                  android:id="@+id/itemLabel"
-                  android:layout_width="0dp"
-                  android:layout_weight="1"
+                  android:id="@+id/itemHighlight"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:layout_marginTop="1dp"
+                  android:layout_marginBottom="1dp"
+                  android:src="@drawable/widget_card_shape_pill"
+                  android:scaleType="fitXY" />
+
+              <LinearLayout
+                  android:id="@+id/itemRow"
+                  android:layout_width="match_parent"
                   android:layout_height="wrap_content"
-                  android:textDirection="rtl"
-                  android:textAlignment="viewStart"
-                  android:textColor="#241F3D"
-                  android:textSize="13sp"
-                  android:maxLines="1"
-                  android:ellipsize="end" />
-          </LinearLayout>
+                  android:orientation="horizontal"
+                  android:gravity="center_vertical"
+                  android:paddingStart="8dp"
+                  android:paddingEnd="8dp"
+                  android:paddingTop="6dp"
+                  android:paddingBottom="6dp">
+                  <ImageView
+                      android:id="@+id/itemCheck"
+                      android:layout_width="22dp"
+                      android:layout_height="22dp"
+                      android:layout_marginEnd="10dp" />
+                  <TextView
+                      android:id="@+id/itemLabel"
+                      android:layout_width="0dp"
+                      android:layout_weight="1"
+                      android:layout_height="wrap_content"
+                      android:textDirection="rtl"
+                      android:textAlignment="viewStart"
+                      android:textColor="#241F3D"
+                      android:textSize="13sp"
+                      android:maxLines="1"
+                      android:ellipsize="end" />
+              </LinearLayout>
+          </FrameLayout>
           XMLEOF
 
           # ---- res/layout/widget_day_progress.xml ----
@@ -2377,43 +3489,32 @@ jobs:
               android:layout_height="match_parent"
               android:padding="8dp">
 
-              <!-- Soft drop shadow behind the circular card (same floating-card trick as the
-                   checklist widget), then the recolorable circular card, then the gradient ring. -->
-              <ImageView
-                  android:id="@+id/cardShadow"
-                  android:layout_width="match_parent"
-                  android:layout_height="match_parent"
-                  android:layout_marginTop="3dp"
-                  android:src="@drawable/widget_card_shadow_circle"
-                  android:scaleType="fitXY" />
-
-              <ImageView
-                  android:id="@+id/cardBg"
-                  android:layout_width="match_parent"
-                  android:layout_height="match_parent"
-                  android:src="@drawable/widget_card_shape_circle"
-                  android:scaleType="fitXY" />
-
-              <!-- Optional decorative pattern (dots/stripes/grid/waves), drawn on top of cardBg
-                   and tinted with the secondary theme color at runtime. Gone by default. -->
-              <ImageView
-                  android:id="@+id/cardPattern"
-                  android:layout_width="match_parent"
-                  android:layout_height="match_parent"
-                  android:scaleType="fitXY"
-                  android:visibility="gone" />
+              <!-- Kept only so RemoteViews.setViewVisibility calls for these legacy ids never fail
+                   to resolve; the actual dial (glow/bezel/ring/ticks/sheen) is now a single premium
+                   bitmap drawn by DayProgressWidgetProvider.dialBitmap() and set on #ring below. -->
+              <ImageView android:id="@+id/cardShadow" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+              <ImageView android:id="@+id/cardBg" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+              <ImageView android:id="@+id/cardPattern" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
 
               <ImageView android:id="@+id/ring" android:layout_width="match_parent" android:layout_height="match_parent"
-                  android:layout_gravity="center" android:padding="4dp" />
+                  android:layout_gravity="center" android:padding="2dp" />
+
+              <!-- Stat-card style label: small letter-spaced caption on top, big bold day number
+                   below it — reads like a premium dashboard metric instead of one plain line. -->
               <LinearLayout
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:layout_gravity="center"
                   android:orientation="vertical"
                   android:gravity="center">
-                  <TextView android:id="@+id/dayLabel" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                      android:textDirection="rtl" android:textColor="#241F3D"
-                      android:textStyle="bold" android:textSize="16sp" />
+                  <TextView android:id="@+id/dayCaptionLabel" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:textDirection="rtl" android:textColor="#8A84AB"
+                      android:textStyle="bold" android:textSize="8.5sp"
+                      android:letterSpacing="0.12" android:alpha="0.85" />
+                  <TextView android:id="@+id/dayNumberLabel" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:layout_marginTop="-1dp"
+                      android:textDirection="ltr" android:textColor="#241F3D"
+                      android:textStyle="bold" android:textSize="24sp" />
                   <!-- Optional live HH / MM display (off by default — costs a bit more battery
                        since it needs a faster background refresh; see WidgetConfigActivity).
                        clockBadgeBg is only shown for the "capsule" style, tinted at runtime the
@@ -2445,6 +3546,7 @@ jobs:
           cat > "$RES_DIR/layout/widget_quote.xml" <<'XMLEOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/widgetRoot"
               android:layout_width="match_parent"
               android:layout_height="match_parent">
 
@@ -2499,7 +3601,7 @@ jobs:
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
                       android:textDirection="rtl"
-                      android:textAlignment="viewStart"
+                      android:textAlignment="textStart"
                       android:textColor="#241F3D"
                       android:textStyle="bold"
                       android:textSize="13sp"
@@ -2513,7 +3615,7 @@ jobs:
                       android:layout_height="wrap_content"
                       android:layout_marginTop="8dp"
                       android:textDirection="rtl"
-                      android:textAlignment="viewStart"
+                      android:textAlignment="textStart"
                       android:textColor="#4338CA"
                       android:textSize="11.5sp"
                       android:maxLines="1"
@@ -2821,6 +3923,38 @@ jobs:
           </shape>
           XMLEOF
 
+          # ---- res/drawable/widget_card_outline*.xml (bg="outline" style: transparent fill, just a
+          #      clean colored border, tinted at runtime with the accent color via setColorFilter —
+          #      the fill's alpha stays 0 no matter what filter color is applied, so only the stroke
+          #      ever actually shows up. One per shape family, same corner-radius values as the
+          #      filled shapes above so switching shape still lines up visually.) ----
+          cat > "$RES_DIR/drawable/widget_card_outline.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#00FFFFFF" />
+              <stroke android:width="2dp" android:color="#FFFFFFFF" />
+              <corners android:radius="24dp" />
+          </shape>
+          XMLEOF
+
+          cat > "$RES_DIR/drawable/widget_card_outline_pill.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#00FFFFFF" />
+              <stroke android:width="2dp" android:color="#FFFFFFFF" />
+              <corners android:radius="999dp" />
+          </shape>
+          XMLEOF
+
+          cat > "$RES_DIR/drawable/widget_card_outline_sharp.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#00FFFFFF" />
+              <stroke android:width="2dp" android:color="#FFFFFFFF" />
+              <corners android:radius="4dp" />
+          </shape>
+          XMLEOF
+
           # ---- res/drawable/widget_pattern_dots.xml (decorative widget background pattern, tinted
           #      at runtime with the secondary theme color via setColorFilter) ----
           cat > "$RES_DIR/drawable/widget_pattern_dots.xml" <<'XMLEOF'
@@ -3025,6 +4159,7 @@ jobs:
                   '        <intent-filter>\n'
                   '            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
                   '            <action android:name="' + app_id + '.ACTION_QUOTE_TICK" />\n'
+                  '            <action android:name="' + app_id + '.ACTION_QUOTE_NEXT" />\n'
                   '        </intent-filter>\n'
                   '        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_quote_info" />\n'
                   '    </receiver>\n'
