@@ -2097,11 +2097,13 @@
   .mode-btn .mode-ic svg{width:16px;height:16px;display:block;}
   .mode-btn.active{background:var(--accent-soft);color:#c96b1a;box-shadow:0 4px 12px -4px var(--accent);}
   body.subpage-open .mode-bar{display:none;}
+  /* عمومی دو برابر سهم می‌گیره تا برنامه‌ریزی+رشد فردی روی هم برابر عمومی بشن و دکمه‌ی «حالت» بینشون دقیقاً وسط بیفته */
+  #modePublicBtn{flex:2 1 0;}
 
   /* ---- دکمه‌ی دایره‌ای لوکسِ «حالت» — بین عمومی و خصوصی، کمی از نوار پایین بیرون‌زده ---- */
   .mode-fab-btn{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
     gap:3px;background:none;border:none;font-family:inherit;cursor:pointer;padding:0 4px;
-    -webkit-tap-highlight-color:transparent;}
+    -webkit-tap-highlight-color:transparent;transform:translateX(-10px);}
   .mode-fab-circle{position:relative;width:52px;height:52px;border-radius:50%;margin-top:-30px;
     display:flex;align-items:center;justify-content:center;
     background:
@@ -3645,8 +3647,8 @@
   #tab-chat .chat-pill-btn:active{transform:scale(.93);}
   #tab-chat .chat-pill-btn-danger{color:var(--avoid);border-color:color-mix(in srgb, var(--avoid) 40%, transparent);}
   #tab-chat .chat-pill-btn.chat-gender-filter-active{color:var(--accent);border-color:color-mix(in srgb, var(--accent) 45%, transparent);}
-  #tab-chat .cpb-label{white-space:nowrap;}
-  @media (max-width:370px){ #tab-chat .cpb-label{display:none;} #tab-chat .chat-pill-btn{padding:8px;} }
+  #tab-chat .cpb-label{display:none;}
+  #tab-chat .chat-pill-btn{padding:8px;}
   /* دکمه‌ی فیلترِ جنسیتِ چت — همون دراپ‌داونِ سه‌گزینه‌ای (فقط دختر/فقط پسر/هردو) */
   #tab-chat .cgf-wrap{position:relative;}
   #tab-chat .cgf-menu{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:941;
