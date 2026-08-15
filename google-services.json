@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "404286471675",
+    "project_id": "dreamlife-app-3ee57",
+    "storage_bucket": "dreamlife-app-3ee57.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:404286471675:android:88b7eaeea96e427703df5e",
+        "android_client_info": {
+          "package_name": "com.mahdihd648.dreamlifeapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCezr_BluTbtxj7X1Eh2wvCz6ldKWJ81_M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
