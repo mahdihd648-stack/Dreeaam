@@ -140,8 +140,51 @@ jobs:
           [ -d assets ] && cp -r assets www/assets || true
           ls -la www
 
+      - name: Obfuscate app.js for the native build (native APK only — repo source untouched)
+        # index.html/app.js in the repo stay fully readable for us to keep developing.
+        # This step only rewrites the COPY inside www/ that gets packaged into the APK
+        # (via `npx cap sync android` right after), so what ships to end users is much
+        # harder to read in a decompiler:
+        #   1) terser: strips comments/whitespace, mangles local variable names, drops
+        #      dead code — output is unreadable but still 100% functionally identical.
+        #   2) javascript-obfuscator: on top of that, renames remaining identifiers to
+        #      hex, splits/rotates string literals into a lookup array (so UI text and
+        #      endpoint paths aren't sitting in the file as plain strings), and adds
+        #      control-flow flattening so the logic itself is much harder to trace.
+        # This raises the bar a lot but is not unbreakable — it is JS running in a
+        # WebView, so a determined attacker can still unpack the APK and deobfuscate.
+        # It does NOT hide the Supabase URL/anon key (those are meant to be public;
+        # real protection for them is Supabase RLS, not obscurity) — if anything else
+        # sensitive (private API keys, admin secrets) is ever added to app.js, it must
+        # never ship client-side at all, obfuscated or not.
+        run: |
+          set -e
+          npm install --no-save terser javascript-obfuscator
+
+          npx terser www/app.js \
+            --compress --mangle \
+            -o www/app.js
+
+          npx javascript-obfuscator www/app.js \
+            --output www/app.js \
+            --compact true \
+            --control-flow-flattening true \
+            --control-flow-flattening-threshold 0.75 \
+            --dead-code-injection true \
+            --dead-code-injection-threshold 0.4 \
+            --string-array true \
+            --string-array-encoding base64 \
+            --string-array-threshold 0.85 \
+            --rename-globals false \
+            --self-defending true \
+            --disable-console-output true \
+            --identifier-names-generator hexadecimal
+
+          echo "Obfuscated www/app.js size: $(wc -c < www/app.js) bytes"
+
       - name: Add Android platform
         run: npx cap add android
+
 
       - name: Wire up Firebase (google-services.json + Gradle plugin)
         # google-services.json sitting at the repo root does NOTHING on its own — the Android
