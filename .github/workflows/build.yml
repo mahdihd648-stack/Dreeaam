@@ -204,6 +204,41 @@ jobs:
             exit 1
           fi
 
+          # Applying the google-services plugin only wires up the config; it does NOT pull in
+          # the Firebase Messaging SDK itself. Without this, ChatReplyMessagingService.java
+          # (added later in "Inject chat push-reply support") fails to compile: it cannot
+          # resolve FirebaseMessagingService / RemoteMessage, and — since it then doesn't
+          # properly extend FirebaseMessagingService (which is a Context) — the compiler also
+          # rejects passing `this` as a Context ("cannot be converted to Context").
+          python3 - "$APP_GRADLE" <<'PYEOF'
+          import sys, re
+          path = sys.argv[1]
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+
+          firebase_deps = (
+              "    implementation platform('com.google.firebase:firebase-bom:33.5.1')\n"
+              "    implementation 'com.google.firebase:firebase-messaging'\n"
+          )
+          if 'com.google.firebase:firebase-messaging' not in src:
+              new_src, n = re.subn(
+                  r'(dependencies\s*\{)',
+                  r'\1\n' + firebase_deps,
+                  src, count=1
+              )
+              if n == 0:
+                  print("::error::could not find dependencies{ } block in android/app/build.gradle")
+                  sys.exit(1)
+              src = new_src
+
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(src)
+          PYEOF
+          if ! grep -q 'com.google.firebase:firebase-messaging' "$APP_GRADLE"; then
+            echo "::error::firebase-messaging dependency was not added to android/app/build.gradle"
+            exit 1
+          fi
+
       - name: Disable Capacitor's native splash/intro screen (app has its own JS intro)
         # کاپاسیتور به‌طور پیش‌فرض یه اسپلش‌اسکرین بومی می‌سازه (همون که تو اسکرین‌شات دیدی:
         # پس‌زمینه‌ی بنفش برند + آیکون اپ وسط صفحه) که قبل از لود شدن WebView نشون داده
