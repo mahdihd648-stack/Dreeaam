@@ -5,6 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>چک‌لیست روزانه</title>
 <script>
+/* Boot-error guard: installed as the very first script on the page, before even the
+   theme-sync block right below — so it can never miss an error that happens anywhere
+   during boot. This exists purely for the splash's own exit logic further down the
+   page (see runExit()): a splash that always fades out on a fixed timer, no matter
+   what, will happily reveal a half-crashed/blank page if something threw during boot.
+   This just flips a flag (+ keeps a few messages for console debugging) — it shows
+   nothing to the user by itself and changes nothing about normal, error-free boots. */
+window.__dlBootError = false;
+window.__dlBootErrorMsgs = [];
+window.addEventListener('error', function(e){
+  window.__dlBootError = true;
+  try{ if(window.__dlBootErrorMsgs.length<5) window.__dlBootErrorMsgs.push(String(e && (e.message||e))); }catch(_){}
+});
+window.addEventListener('unhandledrejection', function(e){
+  window.__dlBootError = true;
+  try{ if(window.__dlBootErrorMsgs.length<5) window.__dlBootErrorMsgs.push(String(e && e.reason)); }catch(_){}
+});
+</script>
+<script>
 /* Pre-paint theme sync: the real theme lives in storeData and loads async, so without this
    the splash/curtain always paint the default purple for a frame before switching to the
    user's actual theme. This reads a small synced cache (kept in localStorage by applyTheme)
@@ -87,7 +106,12 @@
        (به دلایل accessibility) نادیده می‌گیرن؛ touch-action سطح مرورگرِ pinch-zoom و
        double-tap-zoom رو مستقل از اون قطع می‌کنه، بدون اینکه اسکرول عادی (پن یک‌انگشتی
        عمودی/افقی، مثل استریپ‌های افقی فیلتر) رو مختل کنه. */
-    touch-action:pan-x pan-y;}
+    touch-action:pan-x pan-y;
+    /* اسکرول تند رو تا لبه‌ی بالا/پایین صفحه که می‌بری، مرورگر (خصوصاً اندروید) گاهی
+       "rubber-band"/pull-to-refresh رو هم راه می‌ندازه؛ همون چیزیه که حس بریدگی و پرش
+       ناگهانی صفحه رو می‌ده. این خط اون رفتار رو کامل خاموش می‌کنه، بدون اینکه اسکرول
+       عمودی معمولی صفحه محدود بشه. */
+    overscroll-behavior-y:none;}
   /* App-wide: disable text selection + the native long-press select/copy/share popup everywhere,
      and remove the blue tap-highlight rectangle Android WebView shows on click.
      Real inputs stay selectable so users can still type/paste email, password, etc. */
@@ -114,7 +138,7 @@
   body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
     box-shadow:inset 0 0 90px -10px var(--accent), inset 0 0 40px -18px var(--accent-2),
       inset 0 30px 60px -24px rgba(120,80,30,.26), inset 0 -34px 64px -24px rgba(90,58,20,.22);
-    opacity:.16;transition:opacity .3s;}
+    opacity:.16;transition:opacity .3s;transform:translateZ(0);}
 
   /* ---- decorative page background (mirrors the side-menu brand header's radial glow + circle motif) ----
      Carries the same warm elevation family as the raised cards (top-left light / bottom-right shade),
@@ -490,7 +514,8 @@
     background:var(--card);color:var(--text);font-size:20px;font-weight:700;}
   .lock-keypad button:active{background:var(--accent);color:var(--accent-text);border-color:var(--accent);}
   .lock-key-empty{visibility:hidden;pointer-events:none;}
-  .lock-cancel-btn{margin-top:24px;background:none;border:none;color:var(--muted);font-size:13px;text-decoration:underline;padding:6px;}
+  .lock-cancel-btn{margin-top:24px;background:var(--card-2);border:1px solid var(--line);border-radius:12px;color:var(--muted);font-size:13px;padding:9px 18px;}
+  .lock-cancel-btn:active{background:var(--accent-soft);border-color:var(--accent);color:var(--text);}
   .lock-pattern-wrap{width:230px;height:230px;margin:4px auto 0;}
   .lock-pattern-wrap.shake{animation:lockShake .4s;}
   #patternSvg{width:100%;height:100%;touch-action:none;}
@@ -503,8 +528,9 @@
   .lock-color-tile{width:50px;height:50px;border-radius:50%;border:3px solid rgba(255,255,255,.65);
     box-shadow:0 2px 6px rgba(0,0,0,.15);transform:scale(1);transition:transform .12s;}
   .lock-color-tile:active{transform:scale(.86);}
-  .lock-color-undo{display:block;margin:18px auto 0;background:none;border:none;color:var(--muted);
-    font-size:13px;text-decoration:underline;padding:6px;}
+  .lock-color-undo{display:block;margin:18px auto 0;background:var(--card-2);border:1px solid var(--line);
+    border-radius:12px;color:var(--muted);font-size:13px;padding:9px 18px;}
+  .lock-color-undo:active{background:var(--accent-soft);border-color:var(--accent);color:var(--text);}
 
   .lock-recovery-wrap{width:230px;margin:6px auto 0;}
   .lock-recovery-wrap.shake{animation:lockShake .4s;}
@@ -513,8 +539,9 @@
     text-align:center;direction:ltr;}
   .lock-recovery-submit{width:100%;margin-top:10px;padding:11px;border-radius:12px;border:none;
     background:var(--accent);color:var(--accent-text);font-size:13px;font-weight:700;}
-  .lock-forgot-link{display:none;margin-top:16px;background:none;border:none;color:var(--muted);
-    font-size:12.5px;text-decoration:underline;padding:6px;}
+  .lock-forgot-link{display:none;margin-top:16px;background:var(--card-2);border:1px solid var(--line);
+    border-radius:12px;color:var(--muted);font-size:12.5px;padding:9px 18px;}
+  .lock-forgot-link:active{background:var(--accent-soft);border-color:var(--accent);color:var(--text);}
 
   .recovery-modal{position:fixed;inset:0;z-index:9997;display:none;align-items:center;justify-content:center;
     background:rgba(0,0,0,.55);padding:20px;}
@@ -531,10 +558,34 @@
   .recovery-confirm-btn{width:100%;padding:11px;border-radius:12px;border:none;background:var(--accent);
     color:var(--accent-text);font-size:13px;font-weight:700;}
   .reset-reason-title{font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:10px;}
-  .reset-reason-list{display:flex;flex-direction:column;gap:8px;margin-bottom:6px;max-height:44vh;overflow-y:auto;}
+  .reset-reason-list{display:flex;flex-direction:column;gap:8px;margin-bottom:6px;max-height:44vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .reset-reason-btn{width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--line);
     background:var(--card-2);color:var(--text);font-size:12.5px;font-weight:600;text-align:right;font-family:inherit;}
   .reset-reason-btn:active{background:var(--accent-soft);border-color:var(--accent);}
+  .reset-cancel-btn{width:40px;height:40px;margin:4px auto 0;border-radius:12px;border:1px solid var(--line);
+    background:var(--card-2);color:var(--muted);display:flex;align-items:center;justify-content:center;}
+  .reset-cancel-btn svg{width:18px;height:18px;}
+  .reset-cancel-btn:active{background:var(--accent-soft);border-color:var(--accent);color:var(--text);}
+
+  .reset-date-chips{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin-bottom:14px;}
+  .reset-date-chip{padding:8px 13px;border-radius:999px;border:1px solid var(--line);background:var(--card-2);
+    color:var(--text);font-size:11.5px;font-weight:700;font-family:inherit;}
+  .reset-date-chip.active{background:var(--accent);border-color:var(--accent);color:var(--accent-text);}
+  .reset-date-custom-label{font-size:11.5px;color:var(--muted);margin-bottom:8px;text-align:right;}
+  .reset-date-input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:12px;border:1px solid var(--line);
+    background:var(--card-2);color:var(--text);font-size:13px;font-family:inherit;margin-bottom:8px;}
+  .reset-date-warn{font-size:11.5px;color:#e2665a;line-height:1.8;margin-bottom:8px;text-align:right;}
+  .reset-date-actions{display:flex;gap:8px;margin-top:6px;}
+  .reset-date-back-btn{flex:1;padding:11px;border-radius:12px;border:1px solid var(--line);background:var(--card-2);
+    color:var(--text);font-size:12.5px;font-weight:700;font-family:inherit;}
+  .reset-date-confirm-btn{flex:2;padding:11px;border-radius:12px;border:none;background:var(--accent);
+    color:var(--accent-text);font-size:12.5px;font-weight:700;font-family:inherit;}
+  .reset-date-back-btn:active,.reset-date-chip:active{background:var(--accent-soft);border-color:var(--accent);}
+
+  .tg-clock-warning{display:flex;gap:8px;align-items:flex-start;background:rgba(226,102,90,.12);
+    border:1px solid rgba(226,102,90,.4);border-radius:12px;padding:9px 10px;margin:8px 2px 0;
+    font-size:10.5px;line-height:1.8;color:var(--text);}
+  .tg-clock-warning span:first-child{flex-shrink:0;}
 
   /* ---- main app header (mirrors the side-menu brand header) ---- */
   /* ---- streak "flame" overlay: a soft glow rising from the header's bottom edge, colored by
@@ -703,7 +754,7 @@
   .side-menu-overlay.show{opacity:1;pointer-events:auto;}
   .side-menu{position:fixed;top:0;bottom:0;right:0;width:82%;max-width:315px;background:var(--card);
     box-shadow:-10px 0 34px rgba(40,20,60,.28);transform:translateX(100%);transition:transform .32s cubic-bezier(.22,1,.36,1);
-    z-index:131;padding:0;overflow-y:auto;display:flex;flex-direction:column;}
+    z-index:131;padding:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;display:flex;flex-direction:column;}
   .side-menu-overlay.show .side-menu{transform:translateX(0);}
 
   /* ---- brand hero header ---- a big scenic sky + mountain scene (sparkles/clouds behind a
@@ -845,7 +896,7 @@
   /* ---- counters column: main day-counter + user-added custom day-counters, scrolls vertically
      (kept off the horizontal axis on purpose since the app already uses left/right swipes to
      change tabs) ---- */
-  .counters-scroll{display:flex;flex-direction:column;gap:8px;overflow-y:auto;overflow-x:hidden;
+  .counters-scroll{display:flex;flex-direction:column;gap:8px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;overflow-x:hidden;
     height:96px;flex:1;min-width:0;scroll-snap-type:y proximity;scrollbar-width:none;touch-action:pan-y;}
   .counters-scroll::-webkit-scrollbar{display:none;}
   .counters-scroll > *{scroll-snap-align:start;flex-shrink:0;}
@@ -1079,7 +1130,7 @@
   .goals-stat-chip .gs-num{font-size:14px;font-weight:800;color:var(--accent);}
   .goals-stat-chip.goals-stat-next .gs-num{color:var(--good);font-size:12.5px;}
   .goals-stat-chip .gs-lbl{font-size:9.5px;color:var(--muted);font-weight:700;}
-  .goals-filter-row{display:flex;gap:6px;margin:12px 0 0;overflow-x:auto;-ms-overflow-style:none;scrollbar-width:none;}
+  .goals-filter-row{display:flex;gap:6px;margin:12px 0 0;overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;-ms-overflow-style:none;scrollbar-width:none;}
   .goals-filter-row::-webkit-scrollbar{display:none;}
   .goals-filter-chip{flex-shrink:0;border:1.5px solid var(--line);background:var(--card);color:var(--muted);
     border-radius:20px;padding:6px 13px;font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;}
@@ -1322,7 +1373,7 @@
   .focus-mode-card .fmc-label{font-size:11.5px;font-weight:700;color:var(--text);}
 
   /* ---- Category chips + section headers for grouping the 60 حالت‌ها ---- */
-  .fm-cat-chips{display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:2px 14px 14px;scrollbar-width:none;}
+  .fm-cat-chips{display:flex;gap:8px;overflow-x:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:2px 14px 14px;scrollbar-width:none;}
   .fm-cat-chips::-webkit-scrollbar{display:none;}
   .fm-cat-chip{flex-shrink:0;white-space:nowrap;font-family:inherit;font-size:11.5px;font-weight:700;color:var(--muted);
     background:var(--card);border:1px solid var(--line);border-radius:20px;padding:7px 14px;cursor:pointer;
@@ -1463,7 +1514,7 @@
   .info-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0;}
   .info-card-head h3{font-size:15px;margin:0;font-weight:800;color:var(--text);}
   .info-card-close{width:30px;height:30px;border-radius:50%;background:var(--card-2);border:none;font-size:15px;color:var(--muted);cursor:pointer;flex-shrink:0;}
-  .info-card-body{overflow-y:auto;font-size:12px;line-height:1.9;color:var(--muted);}
+  .info-card-body{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;font-size:12px;line-height:1.9;color:var(--muted);}
   .info-card-body p{margin:0 0 10px;}
   .info-card-body strong{color:var(--text);}
 
@@ -1556,8 +1607,9 @@
   .special-day-active-title{font-size:13px;font-weight:800;color:var(--text);}
   .special-day-active-reason{font-size:12.5px;color:var(--text);line-height:1.8;}
   .special-day-active-days{font-size:11.5px;color:var(--muted);font-weight:600;}
-  .special-day-cancel-btn{align-self:flex-start;background:none;border:none;color:var(--muted);font-size:11.5px;
-    text-decoration:underline;cursor:pointer;padding:2px;font-family:inherit;margin-top:2px;}
+  .special-day-cancel-btn{align-self:flex-start;background:var(--card-2);border:1px solid var(--line);
+    border-radius:10px;color:var(--muted);font-size:11.5px;cursor:pointer;padding:6px 12px;font-family:inherit;margin-top:2px;}
+  .special-day-cancel-btn:active{background:var(--card);border-color:var(--accent);color:var(--text);}
   .special-day-field{margin-bottom:12px;}
   .special-day-label{display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin-bottom:5px;}
   .special-day-days-input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1px solid var(--line);
@@ -1692,7 +1744,7 @@
   .sos-thread-name{font-size:14.5px;font-weight:800;}
   .sos-thread-sub{font-size:10.5px;opacity:.9;font-weight:600;margin-top:1px;}
   #sosThreadBox{display:flex;flex-direction:column;height:calc(100vh - 210px);}
-  #sosThreadBox .chat-messages{flex:1 1 auto;overflow-y:auto;}
+  #sosThreadBox .chat-messages{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .sos-admin-section-head{padding:14px 4px 6px;font-size:12.5px;font-weight:800;color:var(--muted);
     display:flex;align-items:center;gap:6px;}
   .sos-admin-card{border-color:var(--line);}
@@ -1751,19 +1803,39 @@
     justify-content:center;opacity:0;pointer-events:none;transition:opacity .3s;z-index:120;padding:20px;}
   .sos-overlay.show{opacity:1;pointer-events:auto;}
   .sos-card{background:var(--card);border-radius:22px;padding:26px 22px 20px;max-width:340px;width:100%;
-    text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto;}
+    text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .sos-why{background:var(--accent-soft);border-radius:14px;padding:12px;font-size:13px;color:#7a4a1a;
     margin-bottom:16px;line-height:1.7;}
-  .breath-circle{width:110px;height:110px;border-radius:50%;background:radial-gradient(circle,var(--accent-2),var(--accent));
-    margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:var(--accent-text);font-size:13px;
-    font-weight:700;animation:breathe 16s ease-in-out infinite;}
-  @keyframes breathe{0%{transform:scale(1);}25%{transform:scale(1.32);}50%{transform:scale(1.32);}75%{transform:scale(1);}100%{transform:scale(1);}}
-  .sos-timer{font-size:24px;font-weight:800;color:var(--accent);margin:4px 0 14px;}
-  .sos-activity{background:var(--card-2);border-radius:12px;padding:11px 14px;font-size:13px;margin-bottom:18px;}
+  /* ---- «برنامه‌ی خودت»: همون جمله‌ای که کاربر تو آنبوردینگ (if-then plan) نوشته که موقعِ
+     خطر یادش بیاد — جدا از چک‌لیستِ عمومی، با یه حاشیه‌ی رنگی مشخص، که گم نشه لایِ
+     پیشنهادهایِ عمومی. ---- */
+  .sos-my-plan{background:var(--card-2);border:1.5px solid var(--accent);border-radius:14px;padding:12px;
+    font-size:13px;color:var(--text);margin-bottom:16px;line-height:1.7;font-weight:600;text-align:right;}
+  /* ---- جایگزینِ حلقه‌ی نفس‌کشیدنِ منفعل: چک‌لیستِ ۲-۳ اقدامِ فوری و مشخص (از همون
+     activities هرگروه، یا برنامه‌ی خودِ کاربر اگه داشته باشه) که واقعاً باید روش تپ بزنه —
+     درگیرش می‌کنه به‌جای اینکه فقط چند دقیقه به یه دایره‌ی نبض‌دار نگاه کنه. ---- */
+  .sos-checklist{display:flex;flex-direction:column;gap:8px;margin-bottom:14px;text-align:right;}
+  .sos-check-item{display:flex;align-items:center;gap:10px;width:100%;border:1.5px solid var(--line);
+    background:var(--card-2);border-radius:14px;padding:10px 12px;font-family:inherit;font-size:12.5px;
+    font-weight:600;color:var(--text);line-height:1.6;cursor:pointer;transition:border-color .15s,background .15s;}
+  .sos-check-item:active{transform:scale(.98);}
+  .sos-check-item .sci-box{flex-shrink:0;width:22px;height:22px;border-radius:7px;border:1.8px solid var(--muted);
+    display:flex;align-items:center;justify-content:center;color:transparent;transition:all .15s;}
+  .sos-check-item .sci-box svg{width:14px;height:14px;}
+  .sos-check-item.done{border-color:var(--good);background:color-mix(in srgb, var(--good) 12%, var(--card-2));}
+  .sos-check-item.done .sci-text{color:var(--muted);text-decoration:line-through;}
+  .sos-check-item.done .sci-box{background:var(--good);border-color:var(--good);color:#fff;}
+  /* ---- تایمرِ تعهد: نوارِ پیشرفتی که موقعِ افتِ وسوسه خالی می‌شه، به‌جای فقط یه عددِ خام ---- */
+  .sos-timer-wrap{margin-bottom:14px;}
+  .sos-timer-bar{height:6px;border-radius:4px;background:var(--card-2);overflow:hidden;margin-bottom:8px;}
+  .sos-timer-bar-fill{height:100%;width:100%;background:var(--accent);border-radius:4px;transition:width 1s linear;}
+  .sos-timer{font-size:22px;font-weight:800;color:var(--accent);margin-bottom:4px;}
+  .sos-timer-note{font-size:11px;color:var(--muted);line-height:1.7;}
   .sos-outcome-row{display:flex;gap:10px;}
-  .sos-btn{flex:1;border:none;border-radius:14px;padding:11px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;}
+  .sos-btn{flex:1;border:none;border-radius:14px;padding:11px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .2s;}
   .sos-btn.win{background:var(--good);color:#fff;}
   .sos-btn.slip{background:var(--card-2);color:var(--muted);border:1px solid var(--line);}
+  .sos-btn.slip.locked{opacity:.55;cursor:not-allowed;}
 
   /* ---- SOS: which-temptation category step ---- */
   .sos-cat-title{font-size:15.5px;font-weight:800;color:var(--text);margin-bottom:4px;}
@@ -1859,7 +1931,9 @@
     font-weight:600;color:var(--text);line-height:1.7;margin-bottom:12px;}
   .plb-emoji{font-size:15px;flex-shrink:0;}
 
-  .sos-skip{margin-top:12px;font-size:11.5px;color:var(--muted);cursor:pointer;text-decoration:underline;}
+  .sos-skip{display:inline-block;margin-top:12px;font-size:11.5px;color:var(--muted);cursor:pointer;
+    background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:8px 16px;}
+  .sos-skip:active{background:var(--accent-soft);border-color:var(--accent);color:var(--text);}
 
   /* ---- urge pattern stats ---- */
   .urge-stats-row{display:flex;justify-content:space-between;padding:0 14px 10px;font-size:12.5px;color:var(--muted);}
@@ -1897,9 +1971,15 @@
 
   /* ---- tab navigation ---- */
   .tabbar{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:16px;
-    padding:5px;margin-bottom:14px;position:sticky;top:8px;z-index:40;box-shadow:0 3px 14px rgba(180,120,60,.08);
-    overflow-x:auto;scrollbar-width:none;}
+    padding:5px;margin:0 auto 14px;position:sticky;top:8px;z-index:40;box-shadow:0 3px 14px rgba(180,120,60,.08);
+    overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;scrollbar-width:none;width:fit-content;max-width:100%;}
   .tabbar::-webkit-scrollbar{display:none;}
+  /* ---- private tabbar split into two groups ("برنامه‌ریزی" / "رشد فردی"), switched from
+     the bottom mode-bar itself (see .mode-btn[data-cat]) instead of a separate control —
+     only the active group's row of icons is shown inside the same #tabbar. ---- */
+  .tabbar-group{display:flex;gap:4px;flex:1 1 auto;}
+  #tabbar[data-active-cat="planning"] .tabbar-group[data-group="growth"],
+  #tabbar[data-active-cat="growth"] .tabbar-group[data-group="planning"]{display:none;}
   .tab-btn{flex:0 0 auto;min-width:58px;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;
     font-family:inherit;color:var(--muted);padding:8px 6px;border-radius:12px;cursor:pointer;font-size:9.5px;
     font-weight:700;transition:background .2s,color .2s,box-shadow .2s;white-space:nowrap;position:relative;}
@@ -1940,6 +2020,14 @@
   .mode-btn .mode-ic svg{width:16px;height:16px;display:block;}
   .mode-btn.active{background:var(--accent-soft);color:#c96b1a;box-shadow:0 4px 12px -4px var(--accent);}
   body.subpage-open .mode-bar{display:none;}
+  /* ---- «برنامه‌ریزی» + «رشد فردی» یه گروهِ نصفه‌نصفه‌ن که رو هم اندازه‌ی تبِ «عمومی»
+     می‌شن (هر کدوم نصفِ عمومی)، تا دکمه‌ی گردِ «حالت» دقیقاً وسطِ نوار بمونه. ---- */
+  #modePlanningBtn,#modeGrowthBtn{flex:.5;gap:3px;padding:9px 2px;font-size:10.3px;}
+  #modePlanningBtn .mode-ic svg,#modeGrowthBtn .mode-ic svg{width:14px;height:14px;}
+  body.public-active .mode-bar #modePlanningBtn,
+  body.public-active .mode-bar #modeGrowthBtn{padding:5px 2px;font-size:9px;gap:2px;}
+  body.public-active .mode-bar #modePlanningBtn .mode-ic svg,
+  body.public-active .mode-bar #modeGrowthBtn .mode-ic svg{width:12px;height:12px;}
 
   /* ---- دکمه‌ی دایره‌ای لوکسِ «حالت» — بین عمومی و خصوصی، کمی از نوار پایین بیرون‌زده ---- */
   .mode-fab-btn{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
@@ -2023,6 +2111,25 @@
       inset 0 2px 2px rgba(255,255,255,.55), inset 0 -3px 5px rgba(0,0,0,.28);}
   .badge-item.earned .b-emoji{filter:none;opacity:1;text-shadow:0 1px 2px rgba(0,0,0,.25);}
   .badge-item .b-title{font-size:9.5px;color:var(--muted);line-height:1.3;}
+
+  /* ---- achievements page (earned badges + exact earn timestamp) ---- */
+  .ach-intro{padding:0 14px 12px;font-size:11.5px;color:var(--muted);line-height:1.8;}
+  .ach-list{display:flex;flex-direction:column;gap:8px;padding:0 14px 14px;}
+  .ach-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;
+    background:var(--card-2);border:1px solid var(--line);}
+  .ach-emoji-wrap{position:relative;width:38px;height:38px;border-radius:50%;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;overflow:hidden;
+    background:
+      linear-gradient(115deg, rgba(255,255,255,.7) 6%, rgba(255,255,255,0) 34%),
+      radial-gradient(ellipse at 50% 112%, rgba(0,0,0,.32) 0%, rgba(0,0,0,0) 58%),
+      linear-gradient(160deg, var(--accent-2) 0%, var(--accent) 100%);
+    box-shadow:0 3px 8px color-mix(in srgb, var(--accent) 45%, transparent),
+      inset 0 2px 2px rgba(255,255,255,.55), inset 0 -3px 5px rgba(0,0,0,.28);}
+  .ach-emoji-wrap .ach-emoji{font-size:19px;text-shadow:0 1px 2px rgba(0,0,0,.25);}
+  .ach-title{flex:1;font-size:12.5px;font-weight:700;color:var(--text);}
+  .ach-when{display:flex;flex-direction:column;align-items:flex-end;gap:1px;flex-shrink:0;}
+  .ach-date{font-size:10.5px;font-weight:700;color:var(--text);}
+  .ach-time{font-size:10px;color:var(--muted);direction:ltr;}
   .badge-item.earned .b-title{color:#c96b1a;font-weight:700;}
 
   /* ---- focus mode quality rating modal ---- */
@@ -2075,7 +2182,7 @@
     border:1px solid var(--accent);border-radius:20px;padding:6px 12px;font-size:12px;font-weight:800;}
 
   /* ---- heatmap ---- */
-  .heatmap-wrap{padding:0 14px 14px;overflow-x:auto;}
+  .heatmap-wrap{padding:0 14px 14px;overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .heatmap-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);gap:3px;width:max-content;}
   .heatmap-cell{width:13px;height:13px;border-radius:3px;background:var(--line);}
   .heatmap-cell.l1{background:#ffe0b8;}
@@ -2139,9 +2246,11 @@
   /* ---- library: quote of the day ---- */
   .lib-quote-card{margin:14px 14px 6px;padding:20px 18px 18px;border-radius:18px;position:relative;
     background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--accent-text);
-    box-shadow:0 8px 24px -8px var(--accent);overflow:hidden;}
+    box-shadow:0 8px 24px -8px var(--accent);overflow:hidden;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+  .lib-quote-card:active{transform:scale(.98);}
   .lib-quote-mark{position:absolute;top:-6px;right:14px;font-size:56px;line-height:1;opacity:.25;font-family:Georgia,serif;}
-  .lib-quote-text{position:relative;font-size:13.5px;font-weight:700;line-height:2;}
+  .lib-quote-text{position:relative;font-size:13.5px;font-weight:700;line-height:2;
+    text-align:right;direction:rtl;unicode-bidi:plaintext;transition:opacity .18s ease;}
 
   /* ---- library: short courses ---- */
   .lib-course-card{margin:0 14px;background:var(--card-2);border:1px solid var(--line);border-radius:16px;
@@ -2163,7 +2272,7 @@
     justify-content:center;opacity:0;pointer-events:none;transition:opacity .3s;z-index:150;padding:20px;}
   .lib-lesson-overlay.show{opacity:1;pointer-events:auto;}
   .lib-lesson-card{background:var(--card);border-radius:22px;padding:22px 20px 18px;max-width:340px;width:100%;
-    text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25);max-height:85vh;overflow-y:auto;position:relative;}
+    text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25);max-height:85vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;position:relative;}
   .lib-lesson-close{position:absolute;top:12px;left:12px;width:28px;height:28px;border-radius:50%;
     border:none;background:var(--card-2);color:var(--muted);font-size:13px;cursor:pointer;}
   .lib-lesson-course-title{font-size:11.5px;font-weight:700;color:var(--muted);margin-bottom:10px;padding:0 30px;}
@@ -2183,7 +2292,8 @@
   .settings-row:first-of-type{border-top:none;}
   .settings-row .s-label{font-size:13px;color:var(--text);}
   .settings-row .s-sub{font-size:11px;color:var(--muted);margin-top:2px;}
-  .seg{display:flex;background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:3px;gap:3px;}
+  .seg{display:flex;background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:3px;gap:3px;
+    width:fit-content;max-width:100%;}
   .seg button.seg-locked{opacity:.5;}
   .seg button.seg-locked::after{content:'🔒';font-size:9px;margin-inline-start:3px;}
   .onboard-chip-grid.chips-locked .onboard-chip{opacity:.5;}
@@ -2259,12 +2369,12 @@
   .wt-word-input:focus{border-color:var(--accent);}
   .wt-word-input.wt-input-error{border-color:var(--avoid);}
   .wt-tree-live{margin:2px 14px 4px;padding:12px;background:var(--card-2);border:1px solid var(--line);
-    border-radius:14px;max-height:220px;overflow-y:auto;}
+    border-radius:14px;max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .wt-done{padding:6px 14px 6px;text-align:center;}
   .wt-done-emoji{font-size:38px;}
   .wt-done-title{font-size:13.5px;font-weight:800;color:var(--text);margin:4px 0 14px;}
   .wt-tree-view{text-align:start;padding:12px;background:var(--card-2);border:1px solid var(--line);
-    border-radius:14px;max-height:340px;overflow-y:auto;}
+    border-radius:14px;max-height:340px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .wt-node{position:relative;}
   .wt-word-chip{display:inline-flex;align-items:center;padding:6px 13px;border-radius:11px;font-size:12.5px;
     font-weight:800;border:1px solid var(--line);background:var(--card);color:var(--text);}
@@ -2337,15 +2447,20 @@
     border-radius:9px;cursor:pointer;font-weight:700;}
   .seg button.active{background:var(--accent);color:var(--accent-text);}
   .subseg{display:flex;background:var(--card-2);border:1px solid var(--line);border-radius:14px;
-    padding:4px;gap:4px;margin-bottom:14px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;
-    scrollbar-width:none;-ms-overflow-style:none;}
-  .subseg::-webkit-scrollbar{display:none;height:0;}
-  .subseg button{flex:0 0 auto;border:none;background:none;font-family:inherit;font-size:12.5px;color:var(--muted);
-    padding:10px 12px;border-radius:11px;cursor:pointer;font-weight:800;display:flex;align-items:center;
-    justify-content:center;gap:6px;white-space:nowrap;scroll-snap-align:start;}
+    padding:4px;gap:4px;margin-bottom:14px;}
+  .subseg button{flex:1;border:none;background:none;font-family:inherit;font-size:12.5px;color:var(--muted);
+    padding:10px 8px;border-radius:11px;cursor:pointer;font-weight:800;display:flex;align-items:center;
+    justify-content:center;gap:6px;}
   .subseg button.active{background:var(--accent);color:var(--accent-text);box-shadow:0 3px 10px rgba(255,154,61,.35);}
   .subseg button .subic{display:flex;align-items:center;justify-content:center;flex-shrink:0;}
   .subseg button .subic svg{width:15px;height:15px;display:block;}
+  /* روزشمار اصلی (روز/ساعت) کوچولو، زیرِ برچسبِ خودِ دکمه‌ی «نمای کلی» — چون دیفالتِ اپ
+     دیگه رو تب «برنامه‌ی روزانه»ست، این تنها جایی می‌مونه که کاربر بدون سوییچ‌کردنِ
+     زیرتب، پیشرفتِ روزشمارشو یه نگاه ببینه. */
+  #tab-today .subseg button[data-sub="overview"]{flex-wrap:wrap;row-gap:1px;}
+  .subtab-live-badge{flex-basis:100%;text-align:center;font-size:9px;font-weight:700;
+    opacity:.8;line-height:1.3;}
+  .subtab-live-badge:empty{display:none;}
   .sub-panel{display:none;}
   .sub-panel.active{display:block;animation:tabIn .2s cubic-bezier(.22,1,.36,1);}
   .sub-panel-empty{padding:36px 14px;text-align:center;color:var(--muted);font-size:12.5px;line-height:1.9;}
@@ -2382,7 +2497,7 @@
     padding:7px 10px;background:var(--card-2);border-radius:10px;margin-bottom:6px;}
   .custom-list .c-row span.rm{color:var(--avoid);cursor:pointer;font-weight:800;padding:0 4px;}
   /* ---- ابزار «ساخت برنامه» (برنامه‌ی دستی): نوار روزهای افقی + چیپ‌های پیشنهادی سریع ---- */
-  .mp-day-chips{display:flex;gap:8px;overflow-x:auto;padding:2px 14px 4px;-webkit-overflow-scrolling:touch;
+  .mp-day-chips{display:flex;gap:8px;overflow-x:auto;overscroll-behavior:contain;padding:2px 14px 4px;-webkit-overflow-scrolling:touch;
     scrollbar-width:none;}
   .mp-day-chips::-webkit-scrollbar{display:none;}
   .mp-day-chip{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;
@@ -2453,7 +2568,7 @@
   /* ---- «چطور می‌خوای شروع کنی؟» — دروازه‌ی انتخاب حالت، اولین چیزیه که تو
      آنبوردینگ دیده می‌شه. با کلاس mode-gate روی onboardOverlay فعال می‌شه و
      خودِ ویزارد شماره‌دار (onboard-header/body/footer) رو موقتاً مخفی می‌کنه. */
-  .onboard-mode-select{display:none;flex:1 1 auto;overflow-y:auto;position:relative;z-index:1;
+  .onboard-mode-select{display:none;flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;position:relative;z-index:1;
     flex-direction:column;align-items:center;justify-content:center;
     padding:34px 20px max(24px, env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;}
   #onboardOverlay.mode-gate .onboard-mode-select{display:flex;}
@@ -2510,7 +2625,7 @@
     background:linear-gradient(90deg,#fff 0%,#ffe3b0 50%,#fff 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
     filter:drop-shadow(0 2px 10px rgba(0,0,0,.28));}
   /* body now transparent — it's the same sky as the header, just scrollable, no boxed card underneath it */
-  .onboard-body{flex:1 1 auto;overflow-y:auto;position:relative;z-index:1;
+  .onboard-body{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;position:relative;z-index:1;
     display:flex;justify-content:center;-webkit-overflow-scrolling:touch;}
   .onboard-wrap{max-width:520px;width:100%;padding:26px 20px 8px;}
   /* footer becomes a frosted-glass strip instead of a solid white bar, so it blends with the sky behind it */
@@ -2561,7 +2676,7 @@
   .onboard-skip-btn svg{flex:0 0 auto;opacity:.85;}
   .onboard-skip-btn:hover{opacity:.88;background:var(--line);}
   .onboard-skip-btn:active{transform:scale(.96);}
-  .onboard-noprogram-btn{margin-top:8px;background:transparent;border-color:transparent;text-decoration:underline;text-underline-offset:3px;}
+  .onboard-noprogram-btn{margin-top:8px;}
   .split-confirm-summary{display:flex;flex-direction:column;gap:8px;}
   .split-confirm-day{background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;}
   .split-confirm-day-title{font-size:12.5px;font-weight:700;color:var(--text);}
@@ -2664,7 +2779,7 @@
     box-shadow:0 6px 18px rgba(255,184,107,.3);}
 
   /* ================= AI chat (memory) ================= */
-  .chat-thread{display:flex;flex-direction:column;gap:10px;padding:4px 14px 12px;max-height:420px;overflow-y:auto;}
+  .chat-thread{display:flex;flex-direction:column;gap:10px;padding:4px 14px 12px;max-height:420px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .chat-empty{font-size:12px;color:var(--muted);text-align:center;padding:18px 0;}
   .chat-bubble{max-width:84%;padding:10px 13px;border-radius:16px;font-size:13px;line-height:1.75;white-space:pre-line;}
   .chat-bubble.user{align-self:flex-start;background:var(--accent-soft);color:#5a3a18;border-bottom-left-radius:5px;}
@@ -2678,7 +2793,9 @@
   .chat-send-btn{flex-shrink:0;background:var(--accent);border:none;color:var(--accent-text);width:44px;height:44px;border-radius:50%;
     font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
   .chat-send-btn:disabled{opacity:.55;}
-  .chat-clear{text-align:center;font-size:11px;color:var(--muted);text-decoration:underline;cursor:pointer;padding:0 14px 10px;}
+  .chat-clear{text-align:center;font-size:11px;color:var(--muted);cursor:pointer;padding:6px 14px;
+    display:inline-block;background:var(--card-2);border:1px solid var(--line);border-radius:10px;margin:0 auto 10px;}
+  .chat-clear:active{background:var(--accent-soft);border-color:var(--accent);color:var(--text);}
 
   /* ================= Crisis / safety banner ================= */
   .crisis-banner{margin:0 14px 14px;background:linear-gradient(135deg,#ffece9,#fff3e6);border:1.5px solid var(--avoid);
@@ -2688,7 +2805,9 @@
   .crisis-numbers{display:flex;gap:8px;flex-wrap:wrap;}
   .crisis-numbers a{background:#fff;border:1px solid var(--avoid);color:#a83a2d;font-weight:800;font-size:12.5px;
     padding:7px 14px;border-radius:12px;text-decoration:none;}
-  .crisis-dismiss{margin-top:10px;font-size:11px;color:#7a3a2d;text-decoration:underline;cursor:pointer;display:inline-block;}
+  .crisis-dismiss{margin-top:10px;font-size:11px;color:#7a3a2d;cursor:pointer;display:inline-block;
+    background:#fff;border:1px solid var(--avoid);border-radius:10px;padding:6px 12px;font-weight:700;}
+  .crisis-dismiss:active{background:#ffe3de;}
 
   /* ================= Mood picker (slider) ================= */
   .mood-slider-wrap{padding:2px 14px 16px;text-align:center;}
@@ -2792,7 +2911,9 @@
   .chat-auth-tab{flex:1;text-align:center;padding:9px;border-radius:12px;font-size:12.5px;font-weight:700;
     background:var(--card-2);border:1px solid var(--line);color:var(--muted);cursor:pointer;}
   .chat-auth-tab.active{background:var(--accent);color:var(--accent-text);border-color:var(--accent);}
-  .chat-forgot-link{font-size:11.5px;color:var(--muted);text-decoration:underline;cursor:pointer;}
+  .chat-forgot-link{font-size:11.5px;color:var(--muted);cursor:pointer;display:inline-block;
+    background:var(--card-2);border:1px solid var(--line);border-radius:10px;padding:7px 14px;}
+  .chat-forgot-link:active{background:var(--accent-soft);border-color:var(--accent);color:var(--text);}
   .chat-auth-form{padding:0 14px 14px;display:flex;flex-direction:column;gap:8px;}
   .chat-auth-form input{background:var(--card-2);border:1px solid var(--line);border-radius:12px;color:var(--text);
     font-family:inherit;font-size:13px;padding:10px 12px;outline:none;}
@@ -2853,7 +2974,7 @@
   .chat-user-row .cu-name span{color:var(--accent);}
   .chat-logout-btn{background:none;border:1px solid var(--line);color:var(--muted);padding:6px 14px;
     border-radius:16px;font-size:11.5px;font-family:inherit;cursor:pointer;}
-  .chat-messages{max-height:calc(100vh - 250px);min-height:340px;overflow-y:auto;padding:4px 14px 10px;display:flex;flex-direction:column;gap:6px;}
+  .chat-messages{max-height:calc(100vh - 250px);min-height:340px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:4px 14px 10px;display:flex;flex-direction:column;gap:6px;}
   #chatMessages{--chat-zoom:1;position:relative;} /* live-updated by pinch gesture (see chatMessages pinch-zoom JS) and restored from window.storage on load */
   .chat-zoom-hint{position:absolute;top:8px;left:50%;transform:translateX(-50%) translateY(-6px);
     background:rgba(0,0,0,.7);color:#fff;font-size:12px;font-weight:800;padding:5px 14px;border-radius:20px;
@@ -2874,6 +2995,7 @@
   /* Filter-by-sender: non-matching bubbles are removed from flow, not just visually hidden,
      so grouping/spacing of the remaining ones stays correct. */
   .chat-msg.cm-filtered-out{display:none;}
+  .chat-msg.cm-gender-filtered-out{display:none;}
   .cm-reply-hint{position:absolute;top:50%;left:6px;transform:translateY(-50%) scale(.5);
     width:22px;height:22px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
     display:flex;align-items:center;justify-content:center;font-size:11px;opacity:0;pointer-events:none;z-index:2;}
@@ -2952,13 +3074,13 @@
   /* composer boxes used to be single-line <input>s so long messages just scrolled
      sideways and never showed in full; now they're <textarea rows="1"> that grow
      with content (JS sets height on input) up to this cap, then scroll internally. */
-  .chat-send-row textarea{resize:none;overflow-y:auto;max-height:120px;line-height:1.4;box-sizing:border-box;}
+  .chat-send-row textarea{resize:none;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;max-height:120px;line-height:1.4;box-sizing:border-box;}
   .chat-send-row button{background:var(--accent);border:none;color:var(--accent-text);padding:10px 18px;border-radius:20px;
     font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;}
   .chat-empty-msg{padding:14px;text-align:center;font-size:12px;color:var(--muted);}
-  .chat-report-btn{flex-shrink:0;background:linear-gradient(135deg,#7c3aed,#2563eb);border:none;color:#fff;
+  .chat-report-btn{flex-shrink:0;background:linear-gradient(135deg,var(--accent),var(--accent-2));border:none;color:var(--accent-text);
     width:44px;height:44px;border-radius:50%;font-size:17px;display:flex;align-items:center;justify-content:center;
-    cursor:pointer;box-shadow:0 2px 8px rgba(99,60,220,.35);}
+    cursor:pointer;box-shadow:0 2px 8px -2px color-mix(in srgb, var(--accent) 45%, transparent);}
   .chat-report-btn:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:grayscale(.5);}
   .chat-media-btn{background:linear-gradient(135deg,#0891b2,#0d9488);box-shadow:0 2px 8px rgba(8,145,178,.35);}
   .chat-report-hint{padding:0 14px 12px;font-size:10.5px;color:var(--muted);text-align:center;}
@@ -2991,12 +3113,12 @@
   .chat-msg.cm-media-only .cm-bottom-row:empty{display:none;}
   /* Report message now behaves like a normal message in the flow — see the premium redesign below,
      which drops the old centered/oversized treatment in favor of a compact inline card. */
-  .chat-msg.report-msg{background:linear-gradient(160deg,rgba(124,58,237,.14),rgba(37,99,235,.10));
-    border:1px solid rgba(124,58,237,.4);box-shadow:0 2px 10px rgba(99,60,220,.18);border-radius:16px;}
-  .chat-msg.report-msg .cm-name{color:#7c3aed;}
+  .chat-msg.report-msg{background:linear-gradient(160deg,color-mix(in srgb, var(--accent) 14%, transparent),color-mix(in srgb, var(--accent-2) 10%, transparent));
+    border:1px solid color-mix(in srgb, var(--accent) 40%, transparent);box-shadow:0 2px 10px -4px color-mix(in srgb, var(--accent) 45%, transparent);border-radius:16px;}
+  .chat-msg.report-msg .cm-name{color:var(--accent);}
   .chat-msg.report-msg .cm-text{font-size:calc(12.5px * var(--chat-zoom,1));line-height:1.85;}
   .chat-msg.report-msg .cm-report-tag{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;
-    color:#7c3aed;background:rgba(124,58,237,.14);border:1px solid rgba(124,58,237,.3);padding:2px 9px;
+    color:var(--accent);background:color-mix(in srgb, var(--accent) 14%, transparent);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);padding:2px 9px;
     border-radius:20px;margin-bottom:6px;}
   /* Group streak banner: pinned above the chat, shows the shared day-count */
   .group-streak-banner{margin:0 14px 8px;padding:9px 14px;border-radius:14px;
@@ -3015,7 +3137,7 @@
      each individually. Multiple messages can be pinned at once, so the banner is a stack of
      rows rather than a single line. */
   .chat-pinned-banner{display:none;flex-direction:column;gap:6px;margin:0 14px 8px;
-    max-height:132px;overflow-y:auto;}
+    max-height:132px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .chat-pinned-banner.show{display:flex;}
   .chat-pinned-banner .cpin-row{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:8px 10px;
     border-radius:12px;background:var(--card-2);border:1px solid var(--line);
@@ -3162,6 +3284,48 @@
   .prem-compare-table td.pct-no{color:var(--muted);}
   .prem-compare-table td.pct-yes{color:#0b8a52;background:rgba(63,184,127,.1);}
 
+  /* ---- non-comparative premium description: replaces the free/premium table with a short
+     flowing paragraph ordered by feature importance, no per-row free-vs-premium breakdown. ---- */
+  .prem-desc-wrap{margin:16px 0;border-radius:18px;padding:16px 15px;
+    background:var(--pc-glass-strong);border:1px solid var(--pc-border);
+    box-shadow:0 10px 24px -18px var(--pc-shadow);}
+  .prem-desc-text{margin:0;font-size:12.5px;font-weight:600;color:var(--text);line-height:2;}
+
+  /* ---- prem journey: 10 cards, one per premium perk, connected by a thin vertical
+     "path" behind the icons (visual echo of "مسیر"/"همراه" wording in the copy).
+     Replaces the single flowing paragraph above with scannable, individually-styled cards. ---- */
+  .prem-journey{position:relative;margin:18px 0 22px;display:flex;flex-direction:column;gap:11px;}
+  .prem-journey-card{position:relative;display:flex;align-items:flex-start;gap:12px;padding:14px 15px;
+    border-radius:18px;background:var(--pc-glass-strong);border:1px solid var(--pc-border);
+    box-shadow:0 10px 24px -18px var(--pc-shadow), inset 0 1px 0 color-mix(in srgb, white 16%, transparent);
+    opacity:0;transform:translateY(10px);animation:pjIn .5s ease forwards;}
+  .prem-journey-card:nth-child(1){animation-delay:.02s;}
+  .prem-journey-card:nth-child(2){animation-delay:.07s;}
+  .prem-journey-card:nth-child(3){animation-delay:.12s;}
+  .prem-journey-card:nth-child(4){animation-delay:.17s;}
+  .prem-journey-card:nth-child(5){animation-delay:.22s;}
+  .prem-journey-card:nth-child(6){animation-delay:.27s;}
+  .prem-journey-card:nth-child(7){animation-delay:.32s;}
+  .prem-journey-card:nth-child(8){animation-delay:.37s;}
+  .prem-journey-card:nth-child(9){animation-delay:.42s;}
+  .prem-journey-card:nth-child(10){animation-delay:.47s;}
+  @keyframes pjIn{to{opacity:1;transform:translateY(0);}}
+  .prem-journey-card:not(:last-child)::after{content:'';position:absolute;z-index:0;
+    top:33px;right:33px;width:2px;height:calc(100% + 11px);
+    background:linear-gradient(180deg, color-mix(in srgb, var(--pc-gold) 55%, var(--pc-border)) 0%, var(--pc-border-soft) 100%);}
+  .pj-icon{position:relative;z-index:1;flex-shrink:0;width:38px;height:38px;border-radius:12px;
+    display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;
+    background:var(--pc-grad);box-shadow:0 4px 14px -4px var(--pc-glow-a), inset 0 1px 0 rgba(255,255,255,.35);}
+  .pj-text{position:relative;z-index:1;flex:1;min-width:0;font-size:12.5px;font-weight:600;
+    color:var(--text);line-height:1.95;padding-top:4px;}
+  .prem-journey-card.pj-final{background:linear-gradient(160deg, color-mix(in srgb, var(--pc-gold) 24%, var(--pc-glass-strong)) 0%, var(--pc-glass-strong) 100%);
+    border-color:color-mix(in srgb, var(--pc-gold) 55%, var(--line));}
+  .prem-journey-card.pj-final .pj-icon{background:linear-gradient(135deg, var(--pc-gold) 0%, var(--accent-2) 100%);}
+  .prem-journey-card.pj-final .pj-text{font-weight:700;}
+  @media (prefers-reduced-motion: reduce){
+    .prem-journey-card{opacity:1;transform:none;animation:none;}
+  }
+
   /* ---- exclusive perks pill grid ---- */
   .prem-perks-title{font-size:12.5px;font-weight:800;color:var(--text);margin:2px 4px 10px;}
   .prem-perks-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px;}
@@ -3169,25 +3333,14 @@
     background:var(--pc-glass);border:1px solid var(--pc-border-soft);font-size:11.5px;font-weight:700;color:var(--text);}
   .prem-perk-pill .emoji{font-size:16px;flex-shrink:0;}
 
-  /* ---- friendly benefit sentences: each promise gets its OWN frosted glassmorphism
-     card (instead of being grouped inside one flat block), so every sentence reads
-     as its own separate, tappable reason to upgrade. backdrop-filter gives the actual
-     frosted-glass blur; the closing sentence gets a gold tint to read as the CTA line. ---- */
-  .prem-benefit-list{display:flex;flex-direction:column;gap:12px;margin:16px 0 20px;}
-  .prem-benefit-item{position:relative;display:flex;align-items:flex-start;gap:12px;
-    padding:15px 16px;border-radius:20px;
-    background:var(--pc-glass-strong);border:1px solid var(--pc-border);
-    box-shadow:inset 0 1px 0 color-mix(in srgb, white 45%, transparent), 0 10px 24px -18px var(--pc-shadow);
-    backdrop-filter:blur(16px) saturate(160%);-webkit-backdrop-filter:blur(16px) saturate(160%);
-    transition:transform .15s ease;}
-  .prem-benefit-item:active{transform:scale(.98);}
-  .prem-benefit-item .emoji{font-size:19px;flex-shrink:0;margin-top:1px;
-    filter:drop-shadow(0 2px 5px rgba(0,0,0,.14));}
-  .prem-benefit-item p{margin:0;font-size:12.5px;font-weight:600;color:var(--text);line-height:1.9;}
-  .prem-benefit-item:last-child{
-    background:color-mix(in srgb, var(--pc-gold) 20%, var(--pc-glass-strong));
-    border-color:color-mix(in srgb, var(--pc-gold) 55%, var(--pc-border));}
-  .prem-benefit-item:last-child p{font-weight:800;}
+  /* ---- friendly benefit sentences: replaces the free/premium comparison table + perk-pill
+     grid with a short, warm list of what premium actually gives you, one caring sentence
+     per item instead of a dry feature checklist. ---- */
+  .prem-benefit-list{display:flex;flex-direction:column;gap:10px;margin:16px 0 20px;}
+  .prem-benefit-item{display:flex;align-items:flex-start;gap:10px;padding:13px 14px;border-radius:16px;
+    background:var(--pc-glass-strong);border:1px solid var(--pc-border);font-size:12.5px;font-weight:600;
+    color:var(--text);line-height:1.9;box-shadow:0 10px 24px -18px var(--pc-shadow);}
+  .prem-benefit-item .emoji{font-size:17px;flex-shrink:0;margin-top:1px;}
 
   /* ---- price card: the whole point of the page ---- */
   .prem-price-card{position:relative;text-align:center;border-radius:22px;padding:22px 16px 18px;margin-bottom:14px;
@@ -3329,7 +3482,7 @@
   .cm-ov-back:active{background:rgba(255,255,255,.34);}
   .cm-ov-title{font-size:15px;font-weight:800;}
   .cm-ov-sub{font-size:10.5px;opacity:.9;font-weight:600;margin-top:1px;}
-  .cm-ov-body{flex:1 1 auto;overflow-y:auto;padding:6px 0 24px;}
+  .cm-ov-body{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:6px 0 24px;}
   .cm-ov-section{padding:12px 16px 5px;font-size:11px;font-weight:800;color:var(--muted);}
   .cm-ov-row{display:flex;align-items:center;gap:11px;padding:9px 16px;}
   .cm-ov-name{font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -3354,39 +3507,79 @@
 
   /* ---- fixed header: community icon / title / member indicator / user chip / actions ---- */
   #tab-chat .chat-user-row{
-    display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;
-    padding:14px 16px 10px;border-bottom:1px solid var(--pc-border-soft);
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:16px 18px 12px;border-bottom:1px solid var(--pc-border-soft);
   }
-  #tab-chat .cph-id{display:flex;align-items:center;gap:9px;min-width:0;flex-shrink:0;}
+  #tab-chat .cph-id{display:flex;align-items:center;gap:10px;min-width:0;}
   #tab-chat .cph-icon{
-    width:34px;height:34px;border-radius:12px;flex-shrink:0;font-size:15px;
+    width:38px;height:38px;border-radius:14px;flex-shrink:0;font-size:17px;
     display:flex;align-items:center;justify-content:center;
     background:var(--pc-grad);box-shadow:0 6px 16px -6px var(--pc-glow-a);
   }
   #tab-chat .cph-id-text{min-width:0;}
-  #tab-chat .cph-title{font-size:14px;font-weight:800;color:var(--text);letter-spacing:.2px;}
+  #tab-chat .cph-title{font-size:15px;font-weight:800;color:var(--text);letter-spacing:.2px;}
   #tab-chat .chat-user-row .cu-name{
-    display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--muted);
+    display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--muted);
     margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
   #tab-chat .chat-user-row .cu-name span{color:var(--pc-primary);font-weight:800;}
   #tab-chat .chat-user-row .cu-name #chatOnlineText{color:var(--muted);font-weight:600;}
   #tab-chat .cph-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:var(--good);
     box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 30%, transparent);}
-  #tab-chat .cph-actions{display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end;flex:1 1 auto;min-width:0;}
+  #tab-chat .cph-actions{display:flex;align-items:center;gap:8px;flex-shrink:0;}
   #tab-chat .chat-pill-btn{
-    display:inline-flex;align-items:center;gap:3px;
+    display:inline-flex;align-items:center;gap:4px;
     background:var(--pc-glass-strong);border:1px solid var(--pc-border);color:var(--text);
-    font-family:inherit;font-size:10px;font-weight:700;padding:6px 9px;border-radius:11px;
-    cursor:pointer;transition:transform .15s ease, background .2s ease;white-space:nowrap;
+    font-family:inherit;font-size:11px;font-weight:700;padding:8px 12px;border-radius:14px;
+    cursor:pointer;transition:transform .15s ease, background .2s ease;
   }
-  #tab-chat .chat-pill-btn .ci{width:14px;height:14px;flex-shrink:0;}
-  #tab-chat .chat-pill-btn .ci svg{width:100%;height:100%;}
   #tab-chat .chat-pill-btn:active{transform:scale(.93);}
   #tab-chat .chat-pill-btn-danger{color:var(--avoid);border-color:color-mix(in srgb, var(--avoid) 40%, transparent);}
+  #tab-chat .chat-pill-btn.chat-gender-filter-active{color:var(--accent);border-color:color-mix(in srgb, var(--accent) 45%, transparent);}
   #tab-chat .cpb-label{white-space:nowrap;}
-  @media (max-width:460px){ #tab-chat .cpb-label{display:none;} #tab-chat .chat-pill-btn{padding:7px;} }
-  @media (max-width:340px){ #tab-chat .cph-id-text .cu-name{display:none;} }
+  @media (max-width:370px){ #tab-chat .cpb-label{display:none;} #tab-chat .chat-pill-btn{padding:8px;} }
+  /* دکمه‌ی فیلترِ جنسیتِ چت — همون دراپ‌داونِ سه‌گزینه‌ای (فقط دختر/فقط پسر/هردو) */
+  #tab-chat .cgf-wrap{position:relative;}
+  #tab-chat .cgf-menu{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:941;
+    min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.18);}
+  #tab-chat .cgf-menu.show{display:block;animation:cmMenuPop .16s cubic-bezier(.22,1,.36,1);}
+  #tab-chat .cgf-menu .cgf-option{display:flex;align-items:center;gap:8px;width:100%;text-align:right;
+    padding:9px 10px;border-radius:10px;border:none;background:none;color:var(--text);
+    font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;}
+  #tab-chat .cgf-menu .cgf-option:active{background:var(--card-2);}
+  #tab-chat .cgf-menu .cgf-option.active{color:var(--accent);}
+  /* دکمه‌ی سه‌نقطه‌ی «گزینه‌های بیشتر» توی هدر چت — دراپ‌داونش همون right:0 لنگر می‌شه چون
+     دکمه نزدیکِ لبه‌ی چپِ صفحه‌ست و اگه left:0 لنگر می‌شد ممکن بود از صفحه بزنه بیرون. */
+  #tab-chat .cph-more-wrap{position:relative;}
+  #tab-chat .chat-more-menu{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:941;
+    min-width:170px;background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.18);}
+  #tab-chat .chat-more-menu.show{display:block;animation:cmMenuPop .16s cubic-bezier(.22,1,.36,1);}
+  #tab-chat .chat-more-menu .chat-more-option{display:flex;align-items:center;gap:8px;width:100%;text-align:right;
+    padding:9px 10px;border-radius:10px;border:none;background:none;color:var(--text);
+    font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;}
+  #tab-chat .chat-more-menu .chat-more-option:active{background:var(--card-2);}
+  /* ---- نوار جستجوی درون‌چت: فقط بین پیام‌هایی که همین الان لود شدن سرچ می‌کنه (data-raw
+     رویِ هر حباب) — های‌لایتِ حلقه‌ای دورِ پیام‌های منطبق + یه حلقه‌ی پررنگ‌تر برایِ موردِ
+     فعال، با ناوبریِ قبلی/بعدی و اسکرولِ نرم به هر نتیجه. ---- */
+  #tab-chat .chat-search-bar{display:none;align-items:center;gap:8px;margin:0 18px 10px;padding:8px 12px;
+    background:var(--pc-glass-strong);border:1px solid var(--pc-border);border-radius:14px;}
+  #tab-chat .chat-search-bar.show{display:flex;}
+  #tab-chat .chat-search-bar .csb-icon{flex-shrink:0;color:var(--muted);display:flex;}
+  #tab-chat .chat-search-bar .csb-icon svg{width:16px;height:16px;}
+  #tab-chat .chat-search-bar .csb-input{flex:1;min-width:0;border:none;background:none;outline:none;
+    font-family:inherit;font-size:12.5px;color:var(--text);}
+  #tab-chat .chat-search-bar .csb-input::placeholder{color:var(--muted);}
+  #tab-chat .chat-search-bar .csb-count{flex-shrink:0;font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap;}
+  #tab-chat .chat-search-bar .csb-nav,#tab-chat .chat-search-bar .csb-close{flex-shrink:0;display:flex;align-items:center;justify-content:center;
+    width:26px;height:26px;border-radius:50%;border:none;background:none;color:var(--text);cursor:pointer;}
+  #tab-chat .chat-search-bar .csb-nav svg,#tab-chat .chat-search-bar .csb-close svg{width:15px;height:15px;}
+  #tab-chat .chat-search-bar .csb-nav:active,#tab-chat .chat-search-bar .csb-close:active{background:var(--card-2);}
+  #tab-chat .chat-search-bar .csb-nav:disabled{opacity:.35;pointer-events:none;}
+  #tab-chat .chat-msg.csb-hit{outline:2px solid color-mix(in srgb, var(--accent) 45%, transparent);outline-offset:2px;}
+  #tab-chat .chat-msg.csb-hit-active{outline:2px solid var(--accent);outline-offset:2px;
+    box-shadow:0 0 0 5px color-mix(in srgb, var(--accent) 18%, transparent);}
   #tab-chat .chat-privacy-note{padding:0 18px 12px;font-size:10.5px;color:var(--muted);line-height:1.8;}
   #tab-chat .group-streak-banner{margin:0 18px 10px;border-radius:16px;background:var(--pc-grad);
     box-shadow:0 8px 20px -10px var(--pc-glow-a);border:none;}
@@ -3406,7 +3599,7 @@
   /* ---- Telegram-style "scroll to last message" FAB: hidden while at bottom, appears once the
      user scrolls up; shows an unread-count badge when new messages arrived while scrolled away ---- */
   .chat-scroll-down-btn{
-    position:absolute;left:14px;bottom:14px;z-index:5;
+    position:absolute;left:50%;bottom:14px;margin-left:-20px;z-index:5;
     width:40px;height:40px;border-radius:50%;
     display:flex;align-items:center;justify-content:center;
     background:var(--pc-glass-strong);border:1px solid var(--pc-border);
@@ -3465,12 +3658,15 @@
      sticky only *clamps* movement, it doesn't set the resting position. So instead:
        - .cm-group uses align-items:stretch so .cm-group-avatar spans the FULL height of
          the run (same height as .cm-group-messages), not just the avatar's own 30px.
-       - .cm-group-avatar is itself a flex column, and .cm-avatar gets margin-top:auto,
+       - .cm-group-avatar is itself a flex column, and .cm-avatar-wrap gets margin-top:auto,
          which rests it at the bottom of that column by default (fixes point 1 — and is
-         also what guarantees it never overlaps the bubble above it).
-       - .cm-avatar also gets position:sticky + bottom:0, so while the (now tall)
-         .cm-group-avatar column is scrolling past, the avatar clamps near the bottom of
-         the visible viewport instead of scrolling out of view (fixes point 2).
+         also what guarantees it never overlaps the bubble above it). (.cm-avatar-wrap is
+         a thin box around the real .cm-avatar circle — added so the flame-ring/day-count
+         overlay further below has something to position itself off of without disturbing
+         any of this.)
+       - .cm-avatar-wrap also gets position:sticky + bottom:0, so while the (now tall)
+         .cm-group-avatar column is scrolling past, it clamps near the bottom of the
+         visible viewport instead of scrolling out of view (fixes point 2).
      Together this reproduces Telegram's grouped-avatar behavior exactly.
      Received groups use row-reverse: the page is RTL, so a plain "row" would put the
      first DOM child (the avatar) toward the row's own reading-start — which, combined
@@ -3490,15 +3686,77 @@
   #tab-chat .cm-group-messages{display:flex;flex-direction:column;gap:6px;min-width:0;flex:0 1 auto;}
   #tab-chat .cm-group-messages .chat-msg{max-width:100% !important;}
   #tab-chat .cm-group.cm-filtered-out{display:none;}
+  #tab-chat .cm-group.cm-gender-filtered-out{display:none;}
+  /* .cm-avatar-wrap now owns the "rest at bottom of the group, then stick while scrolling"
+     behavior that used to live directly on .cm-avatar (see the big Telegram-grouped-avatar
+     comment above) — moved up one level so the flame ring + day-count badge below can be
+     absolutely-positioned siblings of the avatar itself, sized off this same box, without
+     touching that scroll behavior at all. */
+  #tab-chat .cm-avatar-wrap{
+    flex-shrink:0;margin-top:auto;position:sticky;bottom:0;
+    width:calc(30px * var(--chat-zoom,1));height:calc(30px * var(--chat-zoom,1));
+  }
   #tab-chat .cm-avatar{
-    flex-shrink:0;
-    width:calc(30px * var(--chat-zoom,1));height:calc(30px * var(--chat-zoom,1));border-radius:50%;display:flex;
+    position:absolute;inset:0;border-radius:50%;display:flex;
     align-items:center;justify-content:center;font-size:calc(12px * var(--chat-zoom,1));font-weight:800;color:#fff;
-    box-shadow:0 2px 6px rgba(0,0,0,.22);overflow:hidden;
-    margin-top:auto;position:sticky;bottom:0;
+    box-shadow:0 2px 6px rgba(0,0,0,.22);overflow:hidden;z-index:2;
   }
   #tab-chat .cm-avatar.cm-avatar-img{background:var(--pc-border-soft,#e2e2e2);}
   #tab-chat .cm-avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;}
+
+  /* ---- Avatar flame ring + day-count badge ----------------------------------------
+     Turns a sender's day-streak into a small overlay on their public-chat avatar:
+       1) .cm-avatar-daycount — a tiny pill straddling the avatar's own bottom rim
+          (half sunk into it, half hanging below) so it reads as attached to the
+          avatar rather than floating off on its own, without ever sitting on top of
+          the photo itself.
+       2) .cm-avatar-flame-ring — one continuous ring of real-looking fire built in
+          JS as an SVG (avatarFlameRingSvg in app.js) and dropped in here as markup;
+          this box just positions/sizes it and adds the slow ambient "breathe" pulse.
+          The organic flame shape itself (a bright wobbly "spine" with small flame
+          leaflets flicking off it, fern-frond style — see the big comment above
+          avatarFlameRingSvg in app.js) is built from hand-authored SVG paths with
+          per-avatar randomized jitter, not filters, so each ring carries its own
+          small scoped <defs> and there's nothing shared to inject at the page level.
+          How much of the ring is lit and its color (day 0-40 growth, then 9 color
+          milestones from day 40-365) is decided in JS per sender's streak; growth
+          always fills symmetrically from the bottom of the ring, closing at the top
+          by day 40, matching the reference art it was built to match.
+          The ring sits at z-index:1, strictly behind the real .cm-avatar photo
+          (z-index:2), and the SVG's own inner radius starts just outside the
+          avatar's edge — so the fire can never visually cover any part of the
+          avatar image itself, only the rim around it and the space just outside it.
+     Neither piece renders unless the wrapper carries .has-flame; a sender with no
+     eligible streak keeps the exact plain-avatar look from before this change. */
+  #tab-chat .cm-avatar-daycount{display:none;}
+  #tab-chat .cm-avatar-wrap.has-flame .cm-avatar-daycount{
+    display:flex;align-items:center;justify-content:center;
+    position:absolute;left:50%;bottom:calc(-5px * var(--chat-zoom,1));z-index:3;
+    transform:translateX(-50%);
+    min-width:calc(15px * var(--chat-zoom,1));height:calc(11px * var(--chat-zoom,1));
+    padding:0 calc(3.5px * var(--chat-zoom,1));border-radius:999px;
+    font-size:calc(7.5px * var(--chat-zoom,1));font-weight:800;color:#fff;line-height:1;
+    background:linear-gradient(135deg, var(--flame-c1,#ff9a2e), var(--flame-c2,#d94f12));
+    border:calc(1.5px * var(--chat-zoom,1)) solid var(--card,#fff);
+    box-shadow:0 1px 4px rgba(0,0,0,.3);white-space:nowrap;
+  }
+  #tab-chat .cm-avatar-flame-ring{display:none;}
+  #tab-chat .cm-avatar-wrap.has-flame .cm-avatar-flame-ring{
+    display:block;position:absolute;z-index:1;pointer-events:none;
+    inset:calc(-13px * var(--chat-zoom,1));
+  }
+  #tab-chat .cm-avatar-flame-ring svg{
+    width:100%;height:100%;display:block;overflow:visible;
+    animation:cmFireBreathe 2.6s ease-in-out infinite;
+    transform-origin:50% 50%;
+  }
+  @keyframes cmFireBreathe{
+    0%,100%{transform:scale(1);}
+    50%{transform:scale(1.045);}
+  }
+  @media (prefers-reduced-motion: reduce){
+    #tab-chat .cm-avatar-flame-ring svg{animation:none;}
+  }
   #tab-chat .cm-streak-chip{background:var(--pc-grad);box-shadow:0 3px 10px -3px var(--pc-glow-a);}
   #tab-chat .cm-owner-badge{background:linear-gradient(135deg, var(--pc-gold), var(--pc-secondary));
     box-shadow:0 3px 10px -3px color-mix(in srgb, var(--pc-gold) 55%, transparent);}
@@ -3600,7 +3858,7 @@
     box-shadow:inset 0 2px 5px rgba(0,0,0,.10), inset 0 -1px 0 rgba(255,255,255,.3);
     transition:border-color .2s ease, box-shadow .2s ease, transform .2s ease;
   }
-  #tab-chat .chat-send-row textarea{resize:none;overflow-y:auto;max-height:120px;line-height:1.4;box-sizing:border-box;}
+  #tab-chat .chat-send-row textarea{resize:none;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;max-height:120px;line-height:1.4;box-sizing:border-box;}
   #tab-chat .chat-send-row input:focus,#tab-chat .chat-send-row textarea:focus{
     border-color:var(--pc-primary);
     box-shadow:inset 0 2px 5px rgba(0,0,0,.10), inset 0 -1px 0 rgba(255,255,255,.3),
@@ -3638,9 +3896,9 @@ box-shadow:0 6px 18px -8px var(--pc-shadow);width:34px;height:34px;
 
   /* ---- Report-mode window (20:00–24:00): chat skin switches to a dedicated work-report look ---- */
   .chat-report-mode-banner{display:none;margin:0 14px 8px;padding:10px 14px;border-radius:14px;
-    background:linear-gradient(135deg,#7c3aed,#2563eb);color:#fff;font-size:11.5px;font-weight:700;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--accent-text);font-size:11.5px;font-weight:700;
     line-height:1.75;text-align:center;align-items:center;justify-content:center;gap:6px;
-    box-shadow:0 4px 14px rgba(99,60,220,.32);animation:reportBannerIn .3s ease;}
+    box-shadow:0 4px 14px -4px color-mix(in srgb, var(--accent) 45%, transparent);animation:reportBannerIn .3s ease;}
   .chat-report-mode-banner.show{display:flex;}
   @keyframes reportBannerIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
 
@@ -3676,10 +3934,10 @@ box-shadow:0 6px 18px -8px var(--pc-shadow);width:34px;height:34px;
       radial-gradient(140% 90% at 106% 108%, color-mix(in srgb, var(--accent-2) 26%, transparent) 0%, transparent 58%),
       var(--pc-glass);
   }
-  #tab-chat .chat-premium-panel.report-mode-active .cph-icon{background:linear-gradient(135deg,#7c3aed,#2563eb);}
+  #tab-chat .chat-premium-panel.report-mode-active .cph-icon{background:linear-gradient(135deg,var(--accent),var(--accent-2));}
   #tab-chat .chat-premium-panel.report-mode-active .cu-name::after{
-    content:'⏰ حالت گزارش کار';font-size:9.5px;font-weight:800;color:#fff;
-    background:linear-gradient(135deg,#7c3aed,#2563eb);padding:2px 8px;border-radius:20px;margin-inline-start:4px;}
+    content:'⏰ حالت گزارش کار';font-size:9.5px;font-weight:800;color:var(--accent-text);
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));padding:2px 8px;border-radius:20px;margin-inline-start:4px;}
   #tab-chat .chat-premium-panel.report-mode-active .chat-send-row input:disabled,
   #tab-chat .chat-premium-panel.report-mode-active .chat-send-row textarea:disabled,
   #tab-chat .chat-premium-panel.report-mode-active .chat-send-row button:disabled{
@@ -3790,6 +4048,50 @@ box-shadow:0 6px 18px -8px var(--pc-shadow);width:34px;height:34px;
   .wo-session-overlay.rest-ready .wo-session-skip{background:var(--good);border-color:var(--good);color:#fff;}
   @keyframes woReadyPulse{0%,100%{box-shadow:0 0 0 0 rgba(76,175,120,.35);}50%{box-shadow:0 0 0 10px rgba(76,175,120,0);}}
   .wo-session-next{font-size:11.5px;color:var(--muted);min-height:16px;margin-bottom:14px;}
+  /* ---- لیستِ کوچیکِ حرکت‌های انجام‌شده، وسطِ خودِ پاپ‌آپِ جلسه ----
+     تا حرکتِ اول تموم نشه اصلاً نشون داده نمی‌شه (اول جلسه چیزی برای لیست‌کردن نیست).
+     ارتفاعش قفله (max-height)، نه با تعدادِ حرکت‌های تمرینِ امروز رشد می‌کنه — پس تو
+     تمرین‌های طولانی (۸-۹ حرکته) هم پاپ‌آپ از کادرِ خودش بیرون نمی‌زنه؛ فقط خودِ این
+     لیستِ کوچیک داخلش اسکرول می‌خوره، نه کلِ کارت. اسمِ حرکت هم اگه بلند باشه با
+     ellipsis قطع می‌شه تا از عرضِ کادر رد نشه. */
+  .wo-session-done-wrap{margin:0 4px 14px;text-align:right;}
+  .wo-session-done-label{font-size:10.5px;font-weight:700;color:var(--muted);margin-bottom:5px;padding:0 2px;}
+  .wo-session-done-list{max-height:84px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+    display:flex;flex-direction:column;gap:4px;}
+  .wo-session-done-item{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--text);
+    background:var(--card-2);border:1px solid var(--line);border-radius:9px;padding:5px 9px;flex-shrink:0;
+    width:100%;font-family:inherit;cursor:pointer;text-align:right;}
+  .wo-session-done-item:active{transform:scale(.98);}
+  .wo-session-done-item .di-check{color:var(--good);font-size:11px;flex-shrink:0;}
+  .wo-session-done-item .di-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .wo-session-done-item .di-time{flex-shrink:0;font-size:10px;color:var(--muted);font-weight:700;}
+  /* ---- کارتِ کوچیکِ جزئیاتِ یه حرکتِ قبلی، با تپ‌کردنِ آیتمِ بالا باز می‌شه ----
+     فقط نمایشیه (read-only)؛ به idx/وضعیتِ حرکتِ در حالِ اجرا دست نمی‌زنه، پس کاربر
+     می‌تونه هر چندتا حرکتِ قبلی که خواست چک کنه بدونِ این‌که تایمرِ حرکتِ فعلی مختل بشه. */
+  .wo-done-detail-modal{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;
+    background:rgba(20,16,35,.6);padding:20px;}
+  .wo-done-detail-modal.visible{display:flex;}
+  .wo-done-detail-card{background:var(--card);border-radius:20px;padding:18px 16px 16px;max-width:340px;width:100%;
+    text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.3);}
+  .wo-done-detail-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  .wo-done-detail-tag{font-size:10.5px;font-weight:700;color:var(--muted);}
+  .wo-done-detail-close{width:30px;height:30px;flex-shrink:0;border-radius:50%;border:none;background:var(--card-2);
+    color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;}
+  .wo-done-detail-name{font-size:16px;font-weight:800;color:var(--text);margin-bottom:4px;}
+  .wo-done-detail-meta{font-size:12px;color:var(--muted);margin-bottom:14px;}
+  .wo-done-detail-time-box{background:var(--accent-soft);border-radius:14px;padding:12px;}
+  .wo-done-detail-time-label{font-size:10.5px;color:var(--muted);font-weight:700;margin-bottom:3px;}
+  .wo-done-detail-time-num{font-size:22px;font-weight:800;color:var(--accent);}
+  /* ---- مودالِ «طرزِ اجرا»ی حرکتِ فک — همون قالبِ wo-done-detail، فقط با یه بلوکِ متنیِ
+       راست‌چین برای توضیح؛ هم از لیستِ حرکت‌ها (بیرونِ جلسه) هم از وسطِ جلسه‌ی زنده باز می‌شه. ---- */
+  .wo-done-detail-howto-text{font-size:12.5px;color:var(--text);line-height:1.95;text-align:right;
+    background:var(--card-2);border-radius:14px;padding:13px 14px;margin-top:2px;}
+  .wo-done-detail-howto-safety{font-size:10.5px;color:var(--muted);line-height:1.8;text-align:right;margin-top:10px;}
+  .wo-session-info-btn{display:inline-flex;align-items:center;gap:5px;background:var(--card-2);color:var(--accent);
+    border:1.5px solid var(--accent);border-radius:999px;padding:6px 14px;font-family:inherit;font-size:11.5px;
+    font-weight:700;cursor:pointer;margin:8px auto 0;}
+  .wo-session-info-btn:active{transform:scale(.96);}
+  .ex-info-hint{display:flex;align-items:center;gap:3px;font-size:9.5px;color:var(--accent);font-weight:700;margin-top:2px;}
   .wo-session-skip{width:100%;border:1.5px solid var(--line);background:var(--card-2);color:var(--text);
     border-radius:14px;padding:12px;font-family:inherit;font-size:13.5px;font-weight:700;cursor:pointer;margin-bottom:8px;}
   .wo-session-skip:active{transform:scale(.97);}
@@ -3817,7 +4119,7 @@ box-shadow:0 6px 18px -8px var(--pc-shadow);width:34px;height:34px;
   .wo-swap-current-label{font-size:10px;color:var(--muted);font-weight:700;margin-bottom:2px;}
   .wo-swap-current-name{font-size:13px;font-weight:800;color:var(--accent);}
   .wo-swap-sub{font-size:11.5px;color:var(--muted);margin-bottom:10px;}
-  .wo-swap-list{overflow-y:auto;display:flex;flex-direction:column;gap:7px;padding-bottom:2px;}
+  .wo-swap-list{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;display:flex;flex-direction:column;gap:7px;padding-bottom:2px;}
   .wo-swap-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:13px;width:100%;
     background:var(--card-2);border:1.5px solid var(--line);text-align:right;cursor:pointer;font-family:inherit;}
   .wo-swap-item:active{transform:scale(.98);}
@@ -3934,6 +4236,64 @@ box-shadow:0 6px 18px -8px var(--pc-shadow);width:34px;height:34px;
   @keyframes lbSpin{to{transform:rotate(360deg);}}
   .lb-empty{text-align:center;padding:34px 16px;color:var(--muted);font-size:12.5px;line-height:1.9;}
 
+  /* ===================== SKELETON / SHIMMER LOADING (shared) =====================
+     One consistent "loading" language for anything that waits on the server (leaderboard,
+     public chat, game lobbies, ...) instead of a bare spinner or a text line — the shapes
+     below echo the real content's silhouette (avatar circles, name/line lengths, card
+     outlines) so the swap from skeleton → real content doesn't jump. Built entirely from
+     existing tokens (--card/--line/--accent-soft) so it re-themes automatically with the
+     rest of the app, incl. dark theme. Respects prefers-reduced-motion. */
+  @keyframes skelSweep{0%{background-position:160% 0;}100%{background-position:-60% 0;}}
+  .skel-shimmer{position:relative;overflow:hidden;background:var(--line);opacity:.55;}
+  .skel-shimmer::after{content:'';position:absolute;inset:0;
+    background:linear-gradient(100deg, transparent 30%, rgba(255,255,255,.75) 50%, transparent 70%);
+    background-size:220% 100%;animation:skelSweep 1.6s ease-in-out infinite;}
+  [data-theme="dark"] .skel-shimmer::after,
+  body.theme-dark .skel-shimmer::after{background:linear-gradient(100deg, transparent 30%, rgba(255,255,255,.16) 50%, transparent 70%);background-size:220% 100%;}
+  .skel-line{height:10px;border-radius:6px;}
+  .skel-avatar{border-radius:50%;flex-shrink:0;}
+  .skel-chip{border-radius:10px;flex-shrink:0;}
+  @media (prefers-reduced-motion: reduce){
+    .skel-shimmer::after{animation:none;}
+  }
+
+  /* --- Leaderboard skeleton: mirrors .lb-podium (round cards) + .lb-row (list rows) --- */
+  .lb-skel-podium{display:flex;align-items:flex-end;gap:8px;margin:6px 0 22px;padding:2px 4px 10px;overflow:hidden;}
+  .lb-skel-card{flex:0 0 auto;width:96px;border-radius:0;background:var(--card);border:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;padding:14px 8px 12px;}
+  .lb-skel-card:nth-child(1){height:172px;}
+  .lb-skel-card:nth-child(2){height:146px;}
+  .lb-skel-card:nth-child(3){height:130px;}
+  .lb-skel-card .skel-avatar{width:52px;height:52px;margin-bottom:10px;}
+  .lb-skel-card .skel-line{width:70%;margin-bottom:6px;}
+  .lb-skel-card .skel-line:last-child{width:45%;margin-bottom:0;}
+  .lb-skel-rows{display:flex;flex-direction:column;gap:10px;}
+  .lb-skel-row{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
+    border-radius:0;padding:9px 12px;}
+  .lb-skel-row .skel-line.rank{width:16px;height:14px;flex-shrink:0;}
+  .lb-skel-row .skel-avatar{width:34px;height:34px;}
+  .lb-skel-row .skel-line.name{flex:1;}
+  .lb-skel-row .skel-chip{width:38px;height:16px;}
+
+  /* --- Chat skeleton: mirrors .chat-msg bubbles, alternating sides like a real thread --- */
+  .chat-skel{display:flex;flex-direction:column;gap:14px;padding:6px 2px 10px;}
+  .chat-skel-row{display:flex;align-items:flex-end;gap:8px;}
+  .chat-skel-row.own{flex-direction:row-reverse;}
+  .chat-skel-row .skel-avatar{width:26px;height:26px;}
+  .chat-skel-bubble{border-radius:14px;padding:10px 12px;background:var(--card-2);border:1px solid var(--line);
+    display:flex;flex-direction:column;gap:6px;}
+  .chat-skel-row.own .chat-skel-bubble{background:var(--accent-soft);border-color:var(--accent);opacity:.7;}
+  .chat-skel-bubble .skel-line{height:9px;}
+
+  /* --- Game lobby skeleton: mirrors .hk-room-card / .dbl-room-card rows --- */
+  .lobby-skel{display:flex;flex-direction:column;gap:8px;}
+  .lobby-skel-row{display:flex;align-items:center;justify-content:space-between;background:var(--card);
+    border:1px solid var(--line);border-radius:14px;padding:10px 12px;}
+  .lobby-skel-info{display:flex;align-items:center;gap:8px;flex:1;min-width:0;}
+  .lobby-skel-info .skel-avatar{width:22px;height:22px;}
+  .lobby-skel-info .skel-line{width:64%;}
+  .lobby-skel-row .skel-chip{width:56px;height:24px;}
+
   /* --- Podium (all ranks) ---
      Horizontally scrollable strip so every rank uses the same round card
      style. The container is forced to direction:ltr so rank #1 is always
@@ -3941,7 +4301,7 @@ box-shadow:0 6px 18px -8px var(--pc-shadow);width:34px;height:34px;
      card resets back to direction:rtl so its own Persian text still reads
      normally. */
   .lb-podium{display:flex;align-items:flex-end;justify-content:flex-start;gap:8px;margin:6px 0 22px;padding:2px 4px 10px;
-    direction:ltr;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;}
+    direction:ltr;overflow-x:auto;overscroll-behavior:contain;overflow-y:hidden;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;}
   .lb-podium::-webkit-scrollbar{height:4px;}
   .lb-podium::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
   .lb-podium-item{flex:0 0 auto;width:96px;direction:rtl;scroll-snap-align:center;display:flex;flex-direction:column;align-items:center;border-radius:0;
@@ -4063,7 +4423,7 @@ box-shadow:0 6px 18px -8px var(--pc-shadow);width:34px;height:34px;
   .lb-scroll-legend-end svg{width:11px;height:11px;flex-shrink:0;}
   .lb-scroll-legend-track{flex:1;height:2px;border-radius:2px;background:linear-gradient(to left, var(--accent), transparent);}
   .lb-scroll-legend-arrow{flex-shrink:0;white-space:nowrap;}
-  .lb-strip{display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;padding:2px 4px 10px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;}
+  .lb-strip{display:flex;gap:8px;overflow-x:auto;overscroll-behavior:contain;overflow-y:hidden;padding:2px 4px 10px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;}
   .lb-strip::-webkit-scrollbar{height:4px;}
   .lb-strip::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
   .lb-strip-card{flex-shrink:0;width:66px;scroll-snap-align:center;display:flex;flex-direction:column;align-items:center;
@@ -4586,6 +4946,20 @@ overflow:hidden;
   #tab-progress .badge-item.earned{
     background-image: var(--elev-sheen);
   }
+  /* ---- گلیچ/پارگیِ اسکرول سریع، مخصوصِ تب پیشرفت ----
+     برخلاف بقیه‌ی تب‌های «بخش خصوصی» که افکت سه‌بعدی فقط رو چندتا کارتِ بزرگ می‌شینه،
+     اینجا (بج‌ها ۵۴تا + کارت‌های حالت‌های تمرکز که با استفاده‌ی بیشتر زیاد می‌شن) دهها
+     المنتِ کوچیک هرکدوم باکس‌شدوی ۴لایه (elev-lift-sm) + گرادینتِ لعابِ ۳لایه دارن.
+     دقیقاً همون مشکلِ بک‌گراندهای fixed بالا (چون لایه‌ی کامپوزیت مجزا ندارن، WebView
+     حین اسکرول سریع مجبوره همه‌شونو هر فریم دوباره ریپینت کنه)، منتها این‌بار رو محتوای
+     معمولیِ در حالِ اسکرول. فرقش با راه‌حلِ بالا: will-change رو تک‌تکِ ۵۰+ آیتم نمی‌ذاریم
+     (خودش باعثِ انفجارِ تعدادِ لایه و کندیِ حافظه می‌شه)، فقط خودِ گریدِ (کانتینرِ) دربرگیرنده
+     رو یه لایه‌ی مجزا می‌کنیم؛ کل محتوا یه‌بار رستر می‌شه و بعد حینِ اسکرول فقط جابه‌جا
+     (recomposite) می‌شه، بدونِ ریپینتِ فریم‌به‌فریم. */
+  #tab-progress .badge-grid,
+  #tab-progress .focus-stat-grid{
+    will-change: transform;
+  }
   /* یه سایه‌ی محو زیرِ نوشته‌های سفیدِ همین کادرها (علاوه بر کم‌کردنِ نورِ لعاب بالا)، تا حتی
      تو تم‌های روشن‌تر (نارنجی/آبی روشن و…) یا هر جای کادر که نوشته باشه، خوانا بمونه. */
   #tab-today .streak-live-card *,
@@ -4686,11 +5060,17 @@ overflow:hidden;
   /* ---- پرمیوم: کادرهای شیشه‌ای (pc-*) رنگ/گرادینت خودشون رو کامل حفظ می‌کنن،
      فقط سایه‌ی برجسته و لعاب اضافه می‌شه؛ سایه‌ی رنگیِ قبلیشون هم می‌مونه ---- */
   #tab-premium .prem-compare-wrap,
-  #tab-premium .prem-benefit-item,
+  #tab-premium .prem-desc-wrap,
   #tab-premium .premium-loss-banner,
-  #tab-premium .prem-scarcity-box{
+  #tab-premium .prem-scarcity-box,
+  #tab-premium .prem-journey-card{
     box-shadow: var(--elev-lift-sm), 0 10px 24px -18px var(--pc-shadow) !important;
     background-image: var(--elev-sheen);
+  }
+  #tab-premium .prem-journey-card.pj-final{
+    background-image: var(--elev-sheen),
+      linear-gradient(160deg, color-mix(in srgb, var(--pc-gold) 24%, var(--pc-glass-strong)) 0%, var(--pc-glass-strong) 100%) !important;
+    box-shadow: var(--elev-lift-sm), 0 12px 28px -16px var(--pc-shadow), 0 1px 0 color-mix(in srgb, white 16%, transparent) inset !important;
   }
   #tab-premium .prem-perk-pill{
     box-shadow: var(--elev-lift-sm) !important;
@@ -5066,6 +5446,206 @@ overflow:hidden;
   .games-select-card.active{border-color:var(--accent);box-shadow:0 6px 14px -8px var(--accent);}
   .games-select-card.active .games-select-label{color:var(--accent);}
 
+  /* ===================== دابل — STAGE 1 (کارتِ استیتوسِ موتورِ تولیدِ دسته) =====================
+     پیشوندِ کاملاً جدا (dbl-)، موازیِ hk-/ef-، طبقِ سندِ معماری. فعلاً فقط یه کارتِ سبک برای
+     نشون‌دادنِ نتیجه‌ی اعتبارسنجیِ دسته؛ استایلِ کارتِ گرد/نمادها مالِ STAGE 2ه. */
+  .dbl-stage1-card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:18px 16px;text-align:center;}
+  .dbl-stage1-head{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px;}
+  .dbl-stage1-emoji{font-size:24px;line-height:1;}
+  .dbl-stage1-title{font-family:'Baloo 2',cursive;font-weight:800;font-size:18px;color:var(--text);}
+  .dbl-stage1-status{font-size:13px;font-weight:700;color:var(--muted);line-height:1.9;margin-bottom:10px;}
+  .dbl-stage1-status-ok{color:#3fae5c;}
+  .dbl-stage1-status-error{color:#e0453f;}
+  .dbl-stage1-meta{display:flex;flex-direction:column;gap:6px;background:var(--bg1);
+    border-radius:12px;padding:10px 12px;margin-bottom:10px;}
+  .dbl-stage1-meta-row{display:flex;align-items:center;justify-content:space-between;
+    font-size:12.5px;color:var(--text);}
+  .dbl-stage1-meta-row span:first-child{color:var(--muted);font-weight:600;}
+  .dbl-stage1-meta-row span:last-child{font-weight:700;}
+  .dbl-stage1-note{font-size:11.5px;color:var(--muted);}
+
+  /* ===================== دابل — STAGE 2، نیمه‌ی اول (بانکِ نمادِ SVG) =====================
+     فقط نمایشِ آزمایشیِ ۵۷ نمادِ بانک، تو چندتا سایز/زاویه‌ی مختلف، تا کیفیتِ بصری (خوانا
+     بودن حتی تو سایزِ کوچیک، تمایزِ سیلوئتی نه فقط رنگی) قبل از رفتن به نیمه‌ی دومِ STAGE 2
+     (چیدمانِ بدون‌برخورد رویِ کارتِ گرد) تایید بشه. پیشوندِ dbl-icons- جدا از dbl-stage1
+     نگه داشته شده چون این یه بخشِ مستقلِ تست‌پذیره، نه ادامه‌ی همون کارتِ استیتوس. */
+  .dbl-icons-card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:16px;margin-top:12px;}
+  .dbl-icons-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;}
+  .dbl-icons-title{font-family:'Baloo 2',cursive;font-weight:800;font-size:15px;color:var(--text);}
+  .dbl-icons-count{font-size:12px;font-weight:700;color:var(--muted);}
+  .dbl-icons-note{font-size:11.5px;color:var(--muted);line-height:1.8;margin-bottom:12px;}
+  .dbl-icons-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:10px;}
+  .dbl-icons-cell{display:flex;flex-direction:column;align-items:center;gap:4px;}
+  .dbl-icons-swatch{width:52px;height:52px;border-radius:12px;background:var(--bg1);
+    display:flex;align-items:center;justify-content:center;overflow:visible;}
+  .dbl-icons-swatch svg{display:block;}
+  .dbl-icons-idx{font-size:9.5px;color:var(--muted);font-weight:700;direction:ltr;}
+  /* ردیفِ جداگانه‌ی «تست مقیاس/چرخش»: یه نمادِ ثابت رو تو چند سایز (۴۰٪→۱۰۰٪) و چند زاویه
+     نشون می‌ده، تا مطمئن بشیم SVG بودنِ نمادها واقعاً بدونِ افتِ کیفیت اسکیل/چرخش می‌خوره. */
+  .dbl-icons-scaletest{display:flex;align-items:flex-end;justify-content:center;gap:14px;
+    margin-top:14px;padding-top:14px;border-top:1px dashed var(--line);flex-wrap:wrap;}
+  .dbl-icons-scaletest-item{display:flex;flex-direction:column;align-items:center;gap:4px;}
+  .dbl-icons-scaletest-item svg{display:block;}
+  .dbl-icons-scaletest-label{font-size:9.5px;color:var(--muted);font-weight:700;direction:ltr;}
+
+  /* ===================== دابل — STAGE 2، نیمه‌ی دوم (چیدمانِ بدون‌برخورد رویِ کارتِ گرد) =====================
+     ویترینِ چندتا کارتِ نمونه (renderDobbleCard از dobble-card.js) — بدونِ هیچ منطقِ بازی
+     (لابی/گیم‌پلی مالِ STAGEهای بعدین)، فقط برای تاییدِ بصریِ چیدمان: نمادها نباید رویِ هم
+     بیفتن و باید کاملاً داخلِ مرزِ دایره بمونن. */
+  .dbl-cards-card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:16px;margin-top:12px;}
+  .dbl-cards-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;}
+  .dbl-cards-title{font-family:'Baloo 2',cursive;font-weight:800;font-size:15px;color:var(--text);}
+  .dbl-cards-count{font-size:12px;font-weight:700;color:var(--muted);}
+  .dbl-cards-note{font-size:11.5px;color:var(--muted);line-height:1.8;margin-bottom:12px;}
+  .dbl-cards-row{display:flex;gap:14px;overflow-x:auto;overscroll-behavior:contain;padding-bottom:6px;-webkit-overflow-scrolling:touch;}
+  .dbl-cards-item{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:6px;}
+  .dbl-cards-item svg.dobble-card{width:170px;height:170px;filter:drop-shadow(0 2px 6px rgba(0,0,0,.12));}
+  .dbl-cards-item-label{font-size:10.5px;color:var(--muted);font-weight:700;direction:ltr;}
+  /* کارتِ بزرگِ اول رو با سایزِ واقعی‌ترش (نزدیک به چیزی که رویِ صفحه‌ی بازیِ واقعی دیده
+     می‌شه) نشون می‌ده تا لمسِ نمادها و خوانایی تو سایزِ واقعی هم قابل‌بررسی باشه. */
+  .dbl-cards-item.dbl-cards-item-big svg.dobble-card{width:250px;height:250px;}
+
+  /* ===================== دابل — STAGE 3، نیمه‌ی اول (لابیِ عمومی: ساخت/دیدن/پیوستن به میز) =====================
+     پیشوندِ dbl-، عیناً هم‌الگو با hk-/ef- (طبقِ سندِ معماری) — تا هیچ‌وقت به استایلِ اون دو گره
+     نخوره. برخلافِ حکم (۴ صندلیِ ثابت)، این‌جا تعدادِ صندلی‌ها متغیره؛ برای همینه که به‌جایِ
+     چیپ‌های جداجدا (مثلِ ef-turns-btn) یه استپرِ عددیِ جمع‌وجور (dbl-players-stepper) اضافه
+     شده — با ۷ چیپ (۲ تا ۸) تو عرضِ موبایل شلوغ می‌شد. */
+  .dbl-lobby-panel{margin-bottom:14px;}
+  .dbl-lobby-loading{font-size:11.5px;color:var(--muted);text-align:center;padding:10px 4px;}
+  .dbl-myroom-card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;
+    box-shadow:var(--elev-lift-sm);}
+  .dbl-myroom-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;}
+  .dbl-myroom-title{font-weight:800;font-size:13.5px;color:var(--text);}
+  .dbl-myroom-count{font-weight:800;font-size:12.5px;color:var(--accent);background:var(--accent-soft);
+    padding:3px 10px;border-radius:12px;}
+  .dbl-myroom-seats{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:10px 0;}
+  .dbl-seat-dot{width:13px;height:13px;border-radius:50%;background:var(--line);}
+  .dbl-seat-dot-filled{background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);}
+  .dbl-myroom-status{font-size:11.5px;color:var(--muted);text-align:center;margin-bottom:10px;font-weight:700;}
+  .dbl-leave-btn{width:100%;background:var(--avoid-soft);color:var(--avoid);border:none;border-radius:12px;
+    padding:9px;font-family:inherit;font-weight:700;font-size:12.5px;}
+  .dbl-leave-btn:active{box-shadow:var(--elev-press) !important;}
+  .dbl-create-btn{width:100%;background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);
+    color:#fff;border:none;border-radius:14px;padding:12px;font-family:inherit;font-weight:800;font-size:13px;
+    box-shadow:0 6px 16px -6px var(--accent);margin-bottom:10px;}
+  .dbl-create-btn:active{box-shadow:var(--elev-press) !important;}
+  .dbl-create-btn:disabled{opacity:.5;box-shadow:none;}
+  .dbl-lobby-list-head{font-size:11.5px;font-weight:700;color:var(--muted);margin:4px 2px 6px;}
+  .dbl-lobby-list{display:flex;flex-direction:column;gap:8px;}
+  .dbl-room-card{display:flex;align-items:center;justify-content:space-between;background:var(--card);
+    border:1px solid var(--line);border-radius:14px;padding:10px 12px;}
+  .dbl-room-info{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text);}
+  .dbl-room-icon{font-size:15px;}
+  .dbl-room-count{font-weight:700;}
+  .dbl-room-meta{color:var(--muted);font-size:10.5px;}
+  .dbl-room-join-btn{background:var(--accent-soft);color:var(--accent);border:none;border-radius:10px;
+    padding:7px 14px;font-family:inherit;font-weight:700;font-size:11.5px;}
+  .dbl-room-join-btn:active{box-shadow:var(--elev-press) !important;}
+  .dbl-lobby-empty{text-align:center;font-size:11.5px;color:var(--muted);padding:16px 8px;}
+
+  /* ---- فرمِ ساختِ میز ---- */
+  .dbl-create-form{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;
+    box-shadow:var(--elev-lift-sm);}
+  .dbl-create-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+  .dbl-create-title{font-weight:800;font-size:14px;color:var(--text);}
+  .dbl-create-close-btn{width:26px;height:26px;border-radius:50%;border:none;background:var(--bg1);
+    color:var(--muted);font-size:13px;font-family:inherit;display:flex;align-items:center;justify-content:center;}
+  .dbl-create-close-btn:active{box-shadow:var(--elev-press) !important;}
+  .dbl-create-section-label{font-size:11.5px;font-weight:700;color:var(--muted);margin:12px 2px 8px;}
+  .dbl-create-section-label:first-of-type{margin-top:0;}
+  /* استپرِ تعدادِ صندلی — منهایِ/عددِ فعلی/بعلاوه، هرکدوم لمسِ راحتِ موبایل (≥40px) */
+  .dbl-players-stepper{display:flex;align-items:center;justify-content:center;gap:16px;padding:6px 0 4px;}
+  .dbl-stepper-btn{width:42px;height:42px;border-radius:50%;border:1.5px solid var(--line);background:var(--bg1);
+    color:var(--accent);font-family:inherit;font-size:20px;font-weight:800;display:flex;align-items:center;
+    justify-content:center;line-height:1;}
+  .dbl-stepper-btn:active{box-shadow:var(--elev-press) !important;}
+  .dbl-stepper-btn:disabled{opacity:.4;color:var(--muted);}
+  .dbl-stepper-value{min-width:64px;text-align:center;font-weight:800;font-size:15px;color:var(--text);}
+  .dbl-create-submit-btn{margin-top:14px;}
+
+  /* ===== STAGE 3، نیمه‌ی دوم — دکمه‌ی «شروع بازی» + صفحه‌ی کارتِ خودم/کارتِ وسط.
+     پیشوندِ dbl- عیناً هم‌الگو با بقیه‌ی بخش‌های دابل بالا؛ dbl-start-btn دقیقاً هم‌سبکِ
+     dbl-create-btn (رنگِ accent مشترک)، فقط اسمِ کلاس جداست تا استایلِ مستقلِ خودش رو
+     بعداً (مثلاً غیرفعال‌شدنِ بصریِ متفاوت) بتونه بگیره بدونِ اینکه رویِ فرمِ ساختِ میز اثر بذاره. */
+  .dbl-start-btn{width:100%;background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);
+    color:#fff;border:none;border-radius:12px;padding:11px;font-weight:800;font-size:13.5px;
+    margin-top:10px;box-shadow:var(--elev-1);}
+  .dbl-start-btn:active{box-shadow:var(--elev-press) !important;}
+  .dbl-start-btn:disabled{opacity:.5;box-shadow:none;}
+  .dbl-play-status{text-align:center;font-weight:800;font-size:13px;color:var(--accent);margin-bottom:12px;}
+  .dbl-play-boards{display:flex;justify-content:center;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:10px;}
+  /* سایزِ کارت‌هایِ بازی قبلاً ثابت (150px) روی همه‌ی صفحه‌ها بود — همون چیزی که باعث می‌شد
+     نمادها روی موبایل ریز و لمسشون سخت دیده بشه. الان با vw نسبت به عرضِ صفحه بزرگ می‌شه (تا
+     یه سقفِ منطقی برای صفحه‌های بزرگ‌تر)، پس هم روی گوشی‌های کوچیک هم روی صفحه‌های بزرگ‌تر
+     همیشه «پر و راحت‌لمس» دیده می‌شه، نه یه سایزِ ثابتِ یکسان برای همه. */
+  .dbl-play-card-wrap{width:min(43vw,260px);height:min(43vw,260px);display:flex;align-items:center;justify-content:center;}
+  .dbl-play-card-wrap svg.dobble-card{width:100%;height:100%;filter:drop-shadow(0 3px 8px rgba(0,0,0,.14));}
+  .dbl-play-board{display:flex;flex-direction:column;align-items:center;gap:6px;}
+  .dbl-play-board-label{font-size:11px;font-weight:700;color:var(--muted);}
+
+  /* ===== STAGE 4، نیمه‌ی دوم — فیدبکِ لحظه‌ایِ claim (قبل از تاییدِ میزبان، رویِ کلِ
+     dbl-play-boards تا هم کارتِ من هم کارتِ وسط رو در بگیره): یه پالسِ سبزِ کوتاه برایِ
+     claimِ موفق (dbl-claim-success)، یه لرزشِ قرمزِ کوتاه برایِ claimِ ردشده
+     (dbl-claim-reject) — دقیقاً همون دو حالتی که سندِ STAGE ۴ خواسته بود («اگه میزبان رد
+     کرد، برگرده به حالتِ قبل، مثلاً یه لرزشِ کوتاه یا رنگِ قرمز»). هر دو با کلاس اضافه/حذف
+     می‌شن (app.js، dblApplyClaimOutcome)، نه انیمیشنِ دائمی. */
+  .dbl-claim-success{animation:dblPulseGreen .5s ease-out;}
+  .dbl-claim-reject{animation:dblShakeRed .5s ease-out;}
+  @keyframes dblPulseGreen{
+    0%{box-shadow:0 0 0 0 rgba(60,200,120,.55);border-radius:18px;}
+    60%{box-shadow:0 0 0 14px rgba(60,200,120,0);border-radius:18px;}
+    100%{box-shadow:0 0 0 0 rgba(60,200,120,0);border-radius:18px;}
+  }
+  @keyframes dblShakeRed{
+    0%,100%{transform:translateX(0);}
+    20%{transform:translateX(-7px);}
+    40%{transform:translateX(6px);}
+    60%{transform:translateX(-4px);}
+    80%{transform:translateX(3px);}
+  }
+
+  /* ===== STAGE 4، نیمه‌ی دوم — اسکوربوردِ زنده (شمارشِ کارتِ هر بازیکن، رویِ صفحه‌ی همه،
+     زیرِ دو کارتِ خودم/وسط). ردیف‌ها با dobble_room_scoreboard پر می‌شن؛ ردیفِ خودم با
+     dbl-scoreboard-row-me برجسته می‌شه — عیناً هم‌الگو با ef-gameend-row-me پایین‌تر. */
+  .dbl-scoreboard{display:flex;flex-direction:column;gap:5px;margin-top:4px;}
+  .dbl-scoreboard-row{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    background:var(--bg1);border-radius:10px;padding:6px 10px;}
+  .dbl-scoreboard-row-me{background:var(--accent-soft);}
+  .dbl-scoreboard-name{flex:1;text-align:right;font-size:11.5px;font-weight:700;color:var(--text);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .dbl-scoreboard-count{font-weight:800;font-size:12px;color:var(--accent);flex-shrink:0;}
+  /* STAGE 5، کوارتر ۱ — بازیکنِ «قطع» (last_seen_at قدیمی‌تر از آستانه، سمتِ کلاینت).
+     عمداً حذف/کم‌رنگ‌کردنِ کامل نیست — طبقِ سند فقط باید «نشون داده بشه»، بازیکن هنوز عضوِ
+     میزه و شمارشِ کارتش هم دیده می‌شه، فقط با یه نشونه‌ی بصریِ کم‌رنگِ کدر. */
+  .dbl-scoreboard-row-disconnected{opacity:.55;}
+  .dbl-scoreboard-disconnected-badge{display:inline-block;margin-right:5px;padding:1px 6px;
+    border-radius:6px;font-size:9.5px;font-weight:800;color:#fff;background:#9a5a2a;
+    vertical-align:middle;}
+
+  /* ===== STAGE 4، نیمه‌ی دوم — صفحه‌ی نتیجه‌ی پایانِ بازی. عیناً هم‌الگو با
+     ef-gameend-overlay/ef-gameend-card بالاتر (همون توکن‌های رنگی، همون چیدمان) — فقط
+     پیشوندِ dbl- تا مستقل از استایلِ اسم‌فامیل بمونه. */
+  .dbl-gameend-overlay{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;
+    background:rgba(12,6,22,.72);backdrop-filter:blur(3px);}
+  .dbl-gameend-card{width:min(86vw,340px);max-height:80vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--card);border-radius:26px;
+    padding:26px 22px 20px;text-align:center;box-shadow:0 30px 60px -20px rgba(0,0,0,.6);}
+  .dbl-gameend-emoji{font-size:44px;margin-bottom:6px;}
+  .dbl-gameend-title{font-family:'Baloo 2',cursive;font-weight:800;font-size:21px;color:var(--text);margin-bottom:14px;}
+  .dbl-gameend-rows{display:flex;flex-direction:column;gap:6px;margin-bottom:18px;}
+  .dbl-gameend-row{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    background:var(--bg1);border-radius:12px;padding:9px 12px;}
+  .dbl-gameend-row-me{background:var(--accent-soft);}
+  .dbl-gameend-rank{font-size:15px;font-weight:800;width:26px;text-align:center;flex-shrink:0;}
+  .dbl-gameend-name{flex:1;text-align:right;font-size:12.5px;font-weight:700;color:var(--text);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .dbl-gameend-score{font-weight:800;font-size:13.5px;color:var(--accent);flex-shrink:0;}
+  .dbl-gameend-btn{width:100%;padding:12px;border-radius:14px;font-weight:700;font-size:13.5px;
+    border:1px solid var(--line);font-family:inherit;cursor:pointer;background:var(--bg1);color:var(--text);}
+  .dbl-gameend-btn:active{box-shadow:var(--elev-press) !important;}
+
   /* ===================== اسم فامیل — استایلِ لابی + فرمِ ساختِ میز (STAGE 1 مارک‌آپ، STAGE 2 دیتای واقعی) =====================
      پیشوندِ کاملاً جدا (ef-)، موازیِ hk-، طبقِ سندِ معماری — تا هیچ‌وقت به استایلِ حکم گره نخوره.
      رنگ‌ها از همون توکن‌های مشترکِ اپ (--accent/--card/--line/...) گرفته شدن تا هم‌رنگِ بقیه بمونه. */
@@ -5228,7 +5808,7 @@ overflow:hidden;
   .ef-next-round-btn:disabled{opacity:.5;box-shadow:none;}
   .ef-gameend-overlay{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;
     background:rgba(12,6,22,.72);backdrop-filter:blur(3px);}
-  .ef-gameend-card{width:min(86vw,340px);max-height:80vh;overflow-y:auto;background:var(--card);border-radius:26px;
+  .ef-gameend-card{width:min(86vw,340px);max-height:80vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--card);border-radius:26px;
     padding:26px 22px 20px;text-align:center;box-shadow:0 30px 60px -20px rgba(0,0,0,.6);}
   .ef-gameend-emoji{font-size:44px;margin-bottom:6px;}
   .ef-gameend-title{font-family:'Baloo 2',cursive;font-weight:800;font-size:21px;color:var(--text);margin-bottom:14px;}
@@ -5299,21 +5879,13 @@ overflow:hidden;
 
 <!-- ===================== SPLASH / LOGO-MOTION INTRO ===================== -->
 <div id="splashScreen" aria-hidden="true">
-  <div class="splash-sky" id="splashSky" aria-hidden="true">
-    <div class="splash-cloud c1"></div>
-    <div class="splash-cloud c2"></div>
-    <div class="splash-cloud c3"></div>
-    <div class="splash-sun"></div>
-    <div class="splash-moon"></div>
-    <div class="splash-star s1"></div>
-    <div class="splash-star s2"></div>
-    <div class="splash-star s3"></div>
-    <div class="splash-star s4"></div>
-    <div class="splash-star s5"></div>
-    <div class="splash-star s6"></div>
-    <svg class="splash-bird b1" viewBox="0 0 24 12" xmlns="http://www.w3.org/2000/svg"><path d="M2,8 Q6,2 12,8 Q18,2 22,8"/></svg>
-    <svg class="splash-bird b2" viewBox="0 0 24 12" xmlns="http://www.w3.org/2000/svg"><path d="M2,8 Q6,2 12,8 Q18,2 22,8"/></svg>
-  </div>
+  <!-- Sky ambience (clouds/sun/moon/stars/birds) and both mascots' detail are mounted by
+       the script at the bottom of the splash, staggered over a couple of animation
+       frames instead of being parsed here synchronously — see the "staggered mount"
+       comment near mountSplashExtras() down there for why. Nothing here changes what
+       ends up on screen, just moves ~60 nodes' worth of DOM/style/layout cost off the
+       page's very first synchronous parse pass. -->
+  <div class="splash-sky" id="splashSky" aria-hidden="true"></div>
   <div id="splashContent">
   <div class="splash-word">Dreaml<span class="i-dotless-wrap">ı<span class="i-star"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span></span>fe</div>
   <div class="splash-tagline"><span class="tagline-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5l6.5 7-6.5 7M3.5 12h15.5"/></svg></span>your dream, your life!<span class="tagline-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5l-6.5 7 6.5 7M20.5 12H5"/></svg></span></div>
@@ -5414,7 +5986,79 @@ overflow:hidden;
              می‌گه (صبح بخیر/ظهرت بخیر/عصرت بخیر/شبت بخیر). چون بدنه دیگه از رو گلیف فونت
              ساخته نمی‌شه، همه‌ی مختصات از پیش ثابت و طراحی‌شده‌ن — فقط عرض حباب سلام رو
              اسکریپت پایین صفحه بر اساس طول واقعی متن (که روز به روز فرق می‌کنه) تنظیم می‌کنه. -->
-        <g class="mascot mascot-d" id="mascotD">
+        <!-- Mascot detail (limbs/face/bubble/etc, ~25 nodes each) is mounted by the
+             staggered-mount script near the bottom of the splash instead of being parsed
+             here — see mountSplashExtras(). Same reasoning as the empty .splash-sky above. -->
+        <g class="mascot mascot-d" id="mascotD"></g>
+        <g class="mascot mascot-l" id="mascotL"></g>
+      </svg>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var splash = document.getElementById('splashScreen');
+  if(!splash) return;
+  try{
+    if(sessionStorage.getItem('skipSplashOnce') === '1'){
+      sessionStorage.removeItem('skipSplashOnce');
+      splash.parentNode.removeChild(splash);
+      return;
+    }
+  }catch(e){}
+
+  // ---- حالت سبک برای دستگاه‌های ضعیف/کم‌رم: هم prefers-reduced-motion رو چک می‌کنیم
+  // (کاربرانی که صریحاً انیمیشن کمتر خواستن) هم navigator.deviceMemory (فقط کروم/اندروید،
+  // مقداری تقریبیه از RAM به گیگابایت — گوشی‌های ضعیف معمولاً ۲ یا ۳ گزارش می‌کنن). هر کدوم
+  // که درست بود، کلاس splash-lite همه‌ی انیمیشن‌های سنگین رو غیرفعال می‌کنه (تعریفش تو CSS
+  // بالای صفحه‌ست) و پایین همین اسکریپت هم زمان نمایش اسپلش رو براش خیلی کوتاه‌تر می‌کنه.
+  var isLite = false;
+  try{
+    isLite = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
+             (typeof navigator.deviceMemory === 'number' && navigator.deviceMemory > 0 && navigator.deviceMemory <= 4);
+  }catch(e){}
+  if(isLite) splash.classList.add('splash-lite');
+
+  // sky day/night phase: just a class on the *outer* sky div, so it's applied immediately —
+  // doesn't need to wait for the sky's own children to be mounted (see mountSplashExtras
+  // below), it just needs to already be set by the time they show up.
+  try{
+    var skyOuter = document.getElementById('splashSky');
+    if(skyOuter){
+      var hh = new Date().getHours();
+      var phase = (hh>=4&&hh<7) ? 't-dawn' : (hh>=7&&hh<11) ? 't-morning' : (hh>=11&&hh<15) ? 't-noon' :
+        (hh>=15&&hh<18) ? 't-afternoon' : (hh>=18&&hh<20) ? 't-sunset' : (hh>=20&&hh<24) ? 't-night' : 't-midnight';
+      skyOuter.classList.add(phase);
+    }
+  }catch(e){}
+
+  // ---- staggered mount for the three heaviest subtrees --------------------------------
+  // The sky ambience (12 nodes: clouds/sun/moon/stars/birds) and each mascot's full detail
+  // (~25 nodes: limbs/face/mouth/hand/shadow/speech-bubble) used to sit right in the static
+  // HTML above, so the browser had to parse/style/layout all ~60 of those extra nodes in one
+  // synchronous pass before it could even paint the first frame — the heaviest single chunk
+  // of the splash's render cost, especially on weak devices. None of it needs to exist that
+  // early: the sky doesn't fade in until .9s and mascot detail not until .5s/1.05s (see the
+  // CSS timeline comment further up), so mounting it a few animation frames later is
+  // completely invisible while letting the browser spread that DOM/style/layout work across
+  // those frames instead of doing it all at once. If anything about this ever fails — a
+  // future browser quirk, anything — the catch below mounts everything immediately and
+  // synchronously instead, exactly like before this change, so the splash can never end up
+  // with an empty sky/mascot because of it.
+  var SKY_HTML = `    <div class="splash-cloud c1"></div>
+    <div class="splash-cloud c2"></div>
+    <div class="splash-cloud c3"></div>
+    <div class="splash-sun"></div>
+    <div class="splash-moon"></div>
+    <div class="splash-star s1"></div>
+    <div class="splash-star s2"></div>
+    <div class="splash-star s3"></div>
+    <div class="splash-star s4"></div>
+    <div class="splash-star s5"></div>
+    <div class="splash-star s6"></div>
+    <svg class="splash-bird b1" viewBox="0 0 24 12" xmlns="http://www.w3.org/2000/svg"><path d="M2,8 Q6,2 12,8 Q18,2 22,8"/></svg>
+    <svg class="splash-bird b2" viewBox="0 0 24 12" xmlns="http://www.w3.org/2000/svg"><path d="M2,8 Q6,2 12,8 Q18,2 22,8"/></svg>`;
+  var MASCOT_D_HTML = `
           <g class="mascot-body">
             <rect class="mascot-torso" x="9.5" y="77" width="17" height="19" rx="8.5"/>
             <path class="mascot-bowtie" d="M15,78.5 L18,80.5 L15,82.5 Z M21,78.5 L18,80.5 L21,82.5 Z"/>
@@ -5451,8 +6095,8 @@ overflow:hidden;
             <path class="mascot-bubble-tail" d="M14,47 L10,58 L20,47 Z"/>
             <text id="splashGreetText" class="mascot-bubble-text" x="18" y="42" text-anchor="middle" font-size="6.4" direction="rtl">شبت بخیر!</text>
           </g>
-        </g>
-        <g class="mascot mascot-l" id="mascotL">
+        `;
+  var MASCOT_L_HTML = `
           <g class="mascot-body">
             <rect class="mascot-torso" x="73.5" y="77" width="17" height="19" rx="8.5"/>
             <path class="mascot-bowtie" d="M79,78.5 L82,80.5 L79,82.5 Z M85,78.5 L82,80.5 L85,82.5 Z"/>
@@ -5489,42 +6133,43 @@ overflow:hidden;
             <path class="mascot-bubble-tail" d="M86,47 L90,58 L80,47 Z"/>
             <text id="splashHelloText" class="mascot-bubble-text" x="82" y="42" text-anchor="middle" font-size="7.2" direction="rtl">سلام!</text>
           </g>
-        </g>
-      </svg>
-    </div>
-  </div>
-</div>
-<script>
-(function(){
-  var splash = document.getElementById('splashScreen');
-  if(!splash) return;
-  try{
-    if(sessionStorage.getItem('skipSplashOnce') === '1'){
-      sessionStorage.removeItem('skipSplashOnce');
-      splash.parentNode.removeChild(splash);
-      return;
+        `;
+  function mountSplashExtras(done){
+    var sky = document.getElementById('splashSky');
+    var mD = document.getElementById('mascotD');
+    var mL = document.getElementById('mascotL');
+    var raf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(fn){ setTimeout(fn, 16); };
+    var finished = false;
+    function finish(){ if(finished) return; finished = true; try{ done(); }catch(e){} }
+    try{
+      raf(function(){
+        try{ if(sky) sky.innerHTML = SKY_HTML; }catch(e){}
+        raf(function(){
+          try{ if(mD) mD.innerHTML = MASCOT_D_HTML; }catch(e){}
+          raf(function(){
+            try{ if(mL) mL.innerHTML = MASCOT_L_HTML; }catch(e){}
+            finish();
+          });
+        });
+      });
+    }catch(e){
+      try{ if(sky) sky.innerHTML = SKY_HTML; }catch(e2){}
+      try{ if(mD) mD.innerHTML = MASCOT_D_HTML; }catch(e2){}
+      try{ if(mL) mL.innerHTML = MASCOT_L_HTML; }catch(e2){}
+      finish();
     }
-  }catch(e){}
-
-  // ---- حالت سبک برای دستگاه‌های ضعیف/کم‌رم: هم prefers-reduced-motion رو چک می‌کنیم
-  // (کاربرانی که صریحاً انیمیشن کمتر خواستن) هم navigator.deviceMemory (فقط کروم/اندروید،
-  // مقداری تقریبیه از RAM به گیگابایت — گوشی‌های ضعیف معمولاً ۲ یا ۳ گزارش می‌کنن). هر کدوم
-  // که درست بود، کلاس splash-lite همه‌ی انیمیشن‌های سنگین رو غیرفعال می‌کنه (تعریفش تو CSS
-  // بالای صفحه‌ست) و پایین همین اسکریپت هم زمان نمایش اسپلش رو براش خیلی کوتاه‌تر می‌کنه.
-  var isLite = false;
-  try{
-    isLite = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
-             (typeof navigator.deviceMemory === 'number' && navigator.deviceMemory > 0 && navigator.deviceMemory <= 4);
-  }catch(e){}
-  if(isLite) splash.classList.add('splash-lite');
+    // absolute fallback: if for any reason neither the raf chain nor its catch ever calls
+    // finish() (shouldn't happen, but this is a boot-critical path), force it after a short
+    // wait so runMascotLayout/document.fonts.ready never just hangs forever.
+    setTimeout(finish, 200);
+  }
 
   // ---- D/L mascot dynamic bits ----
-  // The mascots' bodies/limbs/faces are now fully hand-designed with fixed coordinates
-  // right in the SVG markup above (no longer built from a font glyph's bounding box), so
-  // this script only needs to handle the parts that are genuinely runtime-dependent: the
-  // time-of-day greeting text, the sky's day/night phase, and the speech bubble's width
-  // (which must fit whatever that greeting text turns out to be, in whichever language/
-  // length it renders at).
+  // The mascots' bodies/limbs/faces are fully hand-designed with fixed coordinates (now
+  // mounted via MASCOT_D_HTML/MASCOT_L_HTML above instead of being parsed inline, but the
+  // markup itself is unchanged), so this only needs to handle what's genuinely runtime-
+  // dependent: the time-of-day greeting text and the speech bubble's width (must fit
+  // whatever that greeting text turns out to be, in whichever language/length it renders at).
   function sizeBubble(root, cx, topY){
     try{
       var textEl = root.querySelector('.mascot-bubble-text');
@@ -5554,15 +6199,6 @@ overflow:hidden;
       if(greetEl){
         greetEl.textContent = (h>=5 && h<12) ? 'صبح بخیر!' : (h>=12 && h<16) ? 'ظهرت بخیر!' : (h>=16 && h<20) ? 'عصرت بخیر!' : 'شبت بخیر!';
       }
-      // sky ambience: same phase boundaries as the main app's getDayPeriod(), kept as a
-      // small local copy (rather than calling that function directly) since this script
-      // runs before the main app script block has executed.
-      var sky = document.getElementById('splashSky');
-      if(sky){
-        var phase = (h>=4&&h<7) ? 't-dawn' : (h>=7&&h<11) ? 't-morning' : (h>=11&&h<15) ? 't-noon' :
-          (h>=15&&h<18) ? 't-afternoon' : (h>=18&&h<20) ? 't-sunset' : (h>=20&&h<24) ? 't-night' : 't-midnight';
-        sky.classList.add(phase);
-      }
     }catch(e){}
     try{
       // storeData itself isn't defined yet at this point in page load (it's declared much
@@ -5581,12 +6217,53 @@ overflow:hidden;
     if(mascotD) sizeBubble(mascotD, 18, 32);
     if(mascotL) sizeBubble(mascotL, 82, 32);
   }
-  try{
-    if(document.fonts && document.fonts.ready) document.fonts.ready.then(runMascotLayout).catch(runMascotLayout);
-    else runMascotLayout();
-  }catch(e){ runMascotLayout(); }
+  mountSplashExtras(function(){
+    try{
+      if(document.fonts && document.fonts.ready) document.fonts.ready.then(runMascotLayout).catch(runMascotLayout);
+      else runMascotLayout();
+    }catch(e){ runMascotLayout(); }
+  });
+
+  // ---- retry affordance shown only if we end up holding the splash open (see runExit) ----
+  function showSplashRetry(){
+    try{
+      if(document.getElementById('splashRetryBtn')) return;
+      var content = document.getElementById('splashContent');
+      if(!content) return;
+      var btn = document.createElement('button');
+      btn.id = 'splashRetryBtn';
+      btn.type = 'button';
+      btn.textContent = 'تلاش دوباره';
+      btn.style.cssText = 'position:relative;z-index:3;margin-top:22px;padding:10px 22px;'+
+        'border-radius:14px;font-family:inherit;font-size:13px;font-weight:700;color:#fff;'+
+        'background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);cursor:pointer;';
+      btn.addEventListener('click', function(){ try{ location.reload(); }catch(e){} });
+      content.appendChild(btn);
+    }catch(e){}
+  }
 
   function runExit(){
+    // Safety net: window.__dlBootError is set by the boot-error guard at the very top of
+    // <head> the instant anything on the page throws (a sync error or a rejected promise).
+    // If that happened somewhere during boot, fading the splash out here would just reveal
+    // whatever broken/half-rendered state the crash left behind — so instead: try one
+    // automatic reload (most boot-time crashes are transient — a flaky CDN font/script load,
+    // a one-off race — and clear right up on a fresh load), guarded by sessionStorage so it
+    // can only ever happen once per app session (never an infinite reload loop). If it's
+    // still failing after that one retry, stop trying to auto-recover — leave the splash's
+    // branded scene up (never the broken app underneath it) with a manual retry button.
+    if(window.__dlBootError){
+      try{ console.error('Splash exit held: boot error detected', window.__dlBootErrorMsgs); }catch(e){}
+      var alreadyRetried = false;
+      try{ alreadyRetried = sessionStorage.getItem('dl_boot_retry_done') === '1'; }catch(e){}
+      if(!alreadyRetried){
+        try{ sessionStorage.setItem('dl_boot_retry_done', '1'); }catch(e){}
+        setTimeout(function(){ try{ location.reload(); }catch(e){} }, 900);
+        return;
+      }
+      showSplashRetry();
+      return;
+    }
     splash.classList.add('fade-out');
     // sfxAppEnter is defined in the main app script further down the page; by the time this
     // timer fires that script has long since run, but the typeof guard keeps this safe
@@ -5603,7 +6280,9 @@ overflow:hidden;
   // آخرین چیزی که تموم می‌شه حباب‌های سلامه (شروع 1.6s + مدت .4s = 2.0s)، پس بعدش فقط یه مکث
   // کوتاه (۸۵۰ms) برای دیده‌شدن صحنه می‌ذاریم: 2850ms انیمیشن/مکث + 350ms فید اوت = 3200ms
   // (قبلاً 3400ms+350ms=3750ms بود؛ حدود ۱.۲۵ ثانیه از کل مکث اسپلش کم شد چون خیلی طولانی
-  // و سنگین حس می‌شد، بدون این‌که انیمیشن‌ها رو ناقص/بریده نشون بده).
+  // و سنگین حس می‌شد، بدون این‌که انیمیشن‌ها رو ناقص/بریده نشون بده). staggered mount بالا
+  // فقط چندتا فریم (کمتر از ۵۰ms) طول می‌کشه، پس این تایمر رو دست نخورده نگه داشتیم — کاملاً
+  // زیر بودجه‌ی همین مکثه، هیچ تغییری تو زمان‌بندی قابل مشاهده لازم نبود.
   // تو حالت splash-lite همه‌ی انیمیشن‌ها همون لحظه‌ی اول با CSS به حالت پایانی پریدن، پس
   // نیازی به این مکث طولانی نیست — فقط یه لحظه کوتاه لوگو دیده بشه، بعد رد بشه.
   setTimeout(runExit, isLite ? 600 : 2850);
@@ -5676,19 +6355,40 @@ overflow:hidden;
 <!-- ===================== RESTART JOURNEY (relapse reset) ===================== -->
 <div id="journeyResetModal" class="recovery-modal">
   <div class="recovery-modal-card">
-    <div class="recovery-modal-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 0 1 12.6-5.5M19.5 12a7.5 7.5 0 0 1-12.6 5.5"/><path d="M17.6 3.6v3.4h-3.4M6.4 20.4v-3.4h3.4"/></svg></div>
-    <div class="recovery-modal-title">شروع دوباره</div>
-    <div class="recovery-modal-sub">با انتخاب یکی از گزینه‌ها، روزشمار و چک‌لیست‌ها و نشان‌های فعلیت صفر می‌شه و مسیرت از همین الان از نو شروع می‌شه. این کار برگشت‌ناپذیره.</div>
-    <div class="reset-reason-title">مهم‌ترین دلیل لغزشت چی بود؟</div>
-    <div class="reset-reason-list" id="resetReasonList">
-      <button class="reset-reason-btn" data-reason="stress">استرس یا اضطراب زیاد</button>
-      <button class="reset-reason-btn" data-reason="fatigue">خستگی یا کم‌خوابی</button>
-      <button class="reset-reason-btn" data-reason="loneliness">تنهایی یا بی‌حوصلگی</button>
-      <button class="reset-reason-btn" data-reason="trigger">یه موقعیت یا محرک خاص</button>
-      <button class="reset-reason-btn" data-reason="impulse">فقط دلم خواست، بدون دلیل خاص</button>
-      <button class="reset-reason-btn" data-reason="prefer_not_say">ترجیح می‌دم نگم</button>
+    <div id="journeyResetReasonStep">
+      <div class="recovery-modal-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 0 1 12.6-5.5M19.5 12a7.5 7.5 0 0 1-12.6 5.5"/><path d="M17.6 3.6v3.4h-3.4M6.4 20.4v-3.4h3.4"/></svg></div>
+      <div class="recovery-modal-title">شروع دوباره</div>
+      <div class="recovery-modal-sub">با انتخاب یکی از گزینه‌ها، روزشمار و چک‌لیست‌ها و نشان‌های فعلیت صفر می‌شه و مسیرت از نو شروع می‌شه. این کار برگشت‌ناپذیره.</div>
+      <div class="reset-reason-title">مهم‌ترین دلیل لغزشت چی بود؟</div>
+      <div class="reset-reason-list" id="resetReasonList">
+        <button class="reset-reason-btn" data-reason="stress">استرس یا اضطراب زیاد</button>
+        <button class="reset-reason-btn" data-reason="fatigue">خستگی یا کم‌خوابی</button>
+        <button class="reset-reason-btn" data-reason="loneliness">تنهایی یا بی‌حوصلگی</button>
+        <button class="reset-reason-btn" data-reason="trigger">یه موقعیت یا محرک خاص</button>
+        <button class="reset-reason-btn" data-reason="impulse">فقط دلم خواست، بدون دلیل خاص</button>
+        <button class="reset-reason-btn" data-reason="prefer_not_say">ترجیح می‌دم نگم</button>
+      </div>
+      <button class="reset-cancel-btn" id="journeyResetCancelBtn" aria-label="انصراف"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
-    <button class="lock-cancel-btn" id="journeyResetCancelBtn" style="margin-top:4px;">انصراف</button>
+    <!-- مرحله‌ی دوم: فقط برای کاربرِ واجدشرایط (مالکِ اپ، یا کسی که یه‌بار به ۹۰ روز رسیده) نمایش داده می‌شه -->
+    <div id="journeyResetDateStep" style="display:none;">
+      <div class="recovery-modal-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v4.8l3.3 2"/></svg></div>
+      <div class="recovery-modal-title">دقیقاً کِی شکست خوردی؟</div>
+      <div class="recovery-modal-sub">می‌تونی تاریخِ واقعیِ شکست رو مشخص کنی — روزشمار از همون لحظه دوباره حساب می‌شه، نه لزوماً از همین الان.</div>
+      <div class="reset-date-chips" id="journeyResetDateChips">
+        <button type="button" class="reset-date-chip active" data-days="0">الان</button>
+        <button type="button" class="reset-date-chip" data-days="1">۱ روز پیش</button>
+        <button type="button" class="reset-date-chip" data-days="2">۲ روز پیش</button>
+        <button type="button" class="reset-date-chip" data-days="3">۳ روز پیش</button>
+      </div>
+      <div class="reset-date-custom-label">یا تاریخ و ساعتِ دقیق:</div>
+      <input type="datetime-local" id="journeyResetDateInput" class="reset-date-input" />
+      <div class="reset-date-warn" id="journeyResetDateWarn" style="display:none;"></div>
+      <div class="reset-date-actions">
+        <button type="button" class="reset-date-back-btn" id="journeyResetDateBackBtn">بازگشت</button>
+        <button type="button" class="reset-date-confirm-btn" id="journeyResetDateConfirmBtn">تایید و شروع دوباره</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -6128,7 +6828,8 @@ overflow:hidden;
     </span>
     <span class="mode-fab-label">حالت</span>
   </button>
-  <button id="modePrivateBtn" class="mode-btn active" data-mode="private"><span class="mode-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5L12 4l8 7.5"/><path d="M6 10v9.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V10"/><path d="M10 20.5v-5.3h4v5.3"/></svg></span>خصوصی</button>
+  <button id="modePlanningBtn" class="mode-btn active" data-mode="private" data-cat="planning"><span class="mode-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3.5"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/><path d="M8.5 14.2l2 2 4.5-5"/></svg></span>برنامه‌ریزی</button>
+  <button id="modeGrowthBtn" class="mode-btn" data-mode="private" data-cat="growth"><span class="mode-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-8"/><path d="M12 13c0-4-3-6-7-6 0 4 3 6 7 6z"/><path d="M12 11c0-3.4 2.5-5.2 5.8-5.2 0 3.4-2.5 5.2-5.8 5.2z"/></svg></span>رشد فردی</button>
 </div>
 
 <div class="wo-session-overlay" id="woSessionOverlay">
@@ -6140,6 +6841,10 @@ overflow:hidden;
     <div class="wo-session-ring"><div class="wo-session-time" id="woSessionTime"></div></div>
     <div class="wo-session-bar-track"><div class="wo-session-bar-fill" id="woSessionBarFill"></div></div>
     <div class="wo-session-next" id="woSessionNext"></div>
+    <div class="wo-session-done-wrap" id="woSessionDoneWrap" style="display:none;">
+      <div class="wo-session-done-label">✅ حرکت‌های انجام‌شده (<span id="woSessionDoneCount">۰</span>)</div>
+      <div class="wo-session-done-list" id="woSessionDoneList"></div>
+    </div>
     <div id="woSessionActions">
       <button type="button" class="wo-session-swap" id="woSessionSwapBtn">🔄 تغییر حرکت</button>
       <button type="button" class="wo-session-skip" id="woSessionSkipBtn">رد کردن ⏭</button>
@@ -6149,6 +6854,21 @@ overflow:hidden;
       <div style="font-size:12.5px;color:var(--text);font-weight:700;margin-bottom:10px;line-height:1.7;">مطمئنی می‌خوای تمرین رو همینجا تموم کنی؟</div>
       <button type="button" class="wo-session-skip" id="woSessionConfirmNoBtn">پشیمون شدم، ادامه بده</button>
       <button type="button" class="wo-session-finish" id="woSessionConfirmYesBtn" style="color:var(--avoid);font-weight:800;">بله، تمومش کن</button>
+    </div>
+  </div>
+</div>
+
+<div class="wo-done-detail-modal" id="woDoneDetailModal">
+  <div class="wo-done-detail-card">
+    <div class="wo-done-detail-head">
+      <span class="wo-done-detail-tag">حرکت <span id="woDoneDetailIdx"></span></span>
+      <button type="button" class="wo-done-detail-close" id="woDoneDetailCloseBtn">✕</button>
+    </div>
+    <div class="wo-done-detail-name" id="woDoneDetailName"></div>
+    <div class="wo-done-detail-meta" id="woDoneDetailMeta"></div>
+    <div class="wo-done-detail-time-box">
+      <div class="wo-done-detail-time-label">⏱ زمان صرف‌شده</div>
+      <div class="wo-done-detail-time-num" id="woDoneDetailTime"></div>
     </div>
   </div>
 </div>
@@ -6178,6 +6898,94 @@ overflow:hidden;
     <div class="wo-swap-current" id="woSwapCurrent"></div>
     <div class="wo-swap-sub">یکی از حرکت‌های مشابه رو به‌جاش انتخاب کن:</div>
     <div class="wo-swap-list" id="woSwapList"></div>
+  </div>
+</div>
+
+<!-- ===================== پاپ‌آپِ جلسه‌ی هدایت‌شده‌ی تمرینِ فک — عیناً هم‌الگو با
+     پاپ‌آپِ تمرینِ بدنسازی (wo-session-overlay و مودال‌های همراهش)، فقط با idهای jaw
+     تا منطقِ JS مستقل بمونه؛ کلاس‌های CSS مشترک و global هستن، چیزِ جدیدی لازم نیست. -->
+<div class="wo-session-overlay" id="jawSessionOverlay">
+  <div class="wo-session-card">
+    <div class="wo-session-progress" id="jawSessionProgress"></div>
+    <div class="wo-session-phase" id="jawSessionPhaseLabel"></div>
+    <div class="wo-session-exname" id="jawSessionExName"></div>
+    <div class="wo-session-exmeta" id="jawSessionExMeta"></div>
+    <button type="button" class="wo-session-info-btn" id="jawSessionInfoBtn">ℹ️ طرزِ اجرا</button>
+    <div class="wo-session-ring"><div class="wo-session-time" id="jawSessionTime"></div></div>
+    <div class="wo-session-bar-track"><div class="wo-session-bar-fill" id="jawSessionBarFill"></div></div>
+    <div class="wo-session-next" id="jawSessionNext"></div>
+    <div class="wo-session-done-wrap" id="jawSessionDoneWrap" style="display:none;">
+      <div class="wo-session-done-label">✅ حرکت‌های انجام‌شده (<span id="jawSessionDoneCount">۰</span>)</div>
+      <div class="wo-session-done-list" id="jawSessionDoneList"></div>
+    </div>
+    <div id="jawSessionActions">
+      <button type="button" class="wo-session-swap" id="jawSessionSwapBtn">🔄 تغییر حرکت</button>
+      <button type="button" class="wo-session-skip" id="jawSessionSkipBtn">رد کردن ⏭</button>
+      <button type="button" class="wo-session-finish" id="jawSessionFinishBtn">پایان تمرین ✕</button>
+    </div>
+    <div id="jawSessionConfirmRow" style="display:none;">
+      <div style="font-size:12.5px;color:var(--text);font-weight:700;margin-bottom:10px;line-height:1.7;">مطمئنی می‌خوای تمرین رو همینجا تموم کنی؟</div>
+      <button type="button" class="wo-session-skip" id="jawSessionConfirmNoBtn">پشیمون شدم، ادامه بده</button>
+      <button type="button" class="wo-session-finish" id="jawSessionConfirmYesBtn" style="color:var(--avoid);font-weight:800;">بله، تمومش کن</button>
+    </div>
+  </div>
+</div>
+
+<div class="wo-done-detail-modal" id="jawDoneDetailModal">
+  <div class="wo-done-detail-card">
+    <div class="wo-done-detail-head">
+      <span class="wo-done-detail-tag">حرکت <span id="jawDoneDetailIdx"></span></span>
+      <button type="button" class="wo-done-detail-close" id="jawDoneDetailCloseBtn">✕</button>
+    </div>
+    <div class="wo-done-detail-name" id="jawDoneDetailName"></div>
+    <div class="wo-done-detail-meta" id="jawDoneDetailMeta"></div>
+    <div class="wo-done-detail-time-box">
+      <div class="wo-done-detail-time-label">⏱ زمان صرف‌شده</div>
+      <div class="wo-done-detail-time-num" id="jawDoneDetailTime"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== مودالِ «طرزِ اجرا»ی حرکتِ فک — با کلیک روی کارتِ حرکت (چه تویِ
+     لیستِ ساده‌ی بیرونِ جلسه، چه از دکمه‌ی ℹ داخلِ جلسه‌ی زنده) باز می‌شه. ===================== -->
+<div class="wo-done-detail-modal" id="jawHowtoModal">
+  <div class="wo-done-detail-card">
+    <div class="wo-done-detail-head">
+      <span class="wo-done-detail-tag">طرزِ اجرا</span>
+      <button type="button" class="wo-done-detail-close" id="jawHowtoCloseBtn">✕</button>
+    </div>
+    <div class="wo-done-detail-name" id="jawHowtoName"></div>
+    <div class="wo-done-detail-meta" id="jawHowtoMeta"></div>
+    <div class="wo-done-detail-howto-text" id="jawHowtoText"></div>
+    <div class="wo-done-detail-howto-safety">اگه هر جای این حرکت دردی (نه فقط کششِ خفیف) احساس کردی، فشار رو کم کن یا همونجا متوقف شو — مخصوصاً اگه سابقه‌ی مشکلِ مفصلِ فک (TMJ) داری.</div>
+  </div>
+</div>
+
+<div class="focus-quality-modal" id="jawQualityModal">
+  <div class="focus-quality-card">
+    <div class="fq-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18.5c1.3-2.6 1-5.3-.3-7.5"/><path d="M5.3 10.5c-.4-1.7.8-3 2.3-2.7.9.2 1.5 1 1.6 1.9.5-1.6 2.2-2.5 3.8-2 1.7.6 2.4 2.5 1.7 4.4 2.1.4 3.6 2.3 3.6 4.7 0 3-2.4 5.2-5.5 5.2-3.8 0-6.9-1.6-8.8-4.6"/></svg></div>
+    <div class="fq-title">این تمرین چطور بود؟</div>
+    <div class="fq-sub">کیفیت این جلسه رو مشخص کن تا تو تاریخچه‌ی تمرینت ثبت بشه</div>
+    <div class="fq-stars" id="jawFqStars">
+      <button type="button" class="fq-star" data-q="1"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+      <button type="button" class="fq-star" data-q="2"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+      <button type="button" class="fq-star" data-q="3"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+      <button type="button" class="fq-star" data-q="4"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+      <button type="button" class="fq-star" data-q="5"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></button>
+    </div>
+    <button type="button" class="fq-skip-btn" id="jawFqSkipBtn">رد کردن</button>
+  </div>
+</div>
+
+<div class="wo-swap-modal" id="jawSwapModal">
+  <div class="wo-swap-card">
+    <div class="wo-swap-head">
+      <div class="wo-swap-title">🔄 تغییر حرکت</div>
+      <button type="button" class="wo-swap-close" id="jawSwapCloseBtn">✕</button>
+    </div>
+    <div class="wo-swap-current" id="jawSwapCurrent"></div>
+    <div class="wo-swap-sub">یکی از حرکت‌های مشابه رو به‌جاش انتخاب کن:</div>
+    <div class="wo-swap-list" id="jawSwapList"></div>
   </div>
 </div>
 
@@ -6228,11 +7036,15 @@ overflow:hidden;
       <div class="sos-skip" id="sosCatSkip" style="margin-top:14px;">فقط می‌خواستم آروم شم، بستن</div>
     </div>
     <div class="sos-why" id="sosWhyBox" style="display:none"></div>
+    <div class="sos-my-plan" id="sosMyPlanBox" style="display:none"></div>
     <div class="sos-contact" id="sosContactBox"></div>
     <div class="sos-contact" id="sosMaritalBox"></div>
-    <div class="breath-circle" id="breathCircle">دم بگیر...</div>
-    <div class="sos-timer" id="sosTimer">05:00</div>
-    <div class="sos-activity" id="sosActivity"></div>
+    <div class="sos-checklist" id="sosChecklist"></div>
+    <div class="sos-timer-wrap" id="sosTimerWrap">
+      <div class="sos-timer-bar"><div class="sos-timer-bar-fill" id="sosTimerBarFill"></div></div>
+      <div class="sos-timer" id="sosTimer">10:00</div>
+      <div class="sos-timer-note">این حس معمولاً خودش تا چند دقیقه‌ی دیگه افت می‌کنه</div>
+    </div>
     <div class="sos-outcome-row" id="sosOutcomeRow">
       <button class="sos-btn win" id="sosWinBtn">مقاومت کردم 💪</button>
       <button class="sos-btn slip" id="sosSlipBtn">این‌بار نه</button>
@@ -6507,7 +7319,35 @@ overflow:hidden;
       <div class="plan-badge is-free" id="planBadge" title="نوع اشتراک">
         <span class="plan-badge-icon" id="planBadgeIcon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg></span><span id="planBadgeText">پلن رایگان</span>
       </div>
-      <div class="header-badges-btn" id="headerBadgesBtn" title="نشان‌ها" onclick="if(typeof enterSubPage==='function') enterSubPage('progress');">
+      <script>
+      /* Pre-paint premium badge sync (same pattern as the theme sync in <head>): the markup
+         above always starts as the free/open-lock badge because real premium status lives in
+         storeData and loads async. Without this, a returning premium user would see that
+         free-plan lock badge for a frame (or, if data loading is ever slower than the splash's
+         fixed-duration fade — see runExit() — for however long the splash takes to clear)
+         before updatePlanBadge() gets a chance to run. This runs synchronously, immediately
+         after the badge is parsed and before the browser paints it, and flips it straight to
+         the premium/crown look using the cache updatePlanBadge() keeps in localStorage — so a
+         premium purchaser can never see the lock badge, not even for one frame. If the cache
+         says free (or has never been set yet), the markup above is already correct as-is. */
+      (function(){
+        try{
+          if(localStorage.getItem('checklistApp:lastPremium') === '1'){
+            var badge = document.getElementById('planBadge');
+            var iconEl = document.getElementById('planBadgeIcon');
+            var textEl = document.getElementById('planBadgeText');
+            if(badge && iconEl && textEl){
+              badge.classList.remove('is-free');
+              badge.classList.add('is-premium');
+              badge.title = 'اشتراک پرمیوم فعاله';
+              iconEl.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13"><defs><linearGradient id="planCrownGrad" x1="4" y1="5" x2="20" y2="19" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffe9b8"/><stop offset="1" stop-color="#e2a53a"/></linearGradient></defs><path d="M4 17 L4 9 L8 12 L12 5 L16 12 L20 9 L20 17 Z" fill="url(#planCrownGrad)" stroke="url(#planCrownGrad)" stroke-width="0.6" stroke-linejoin="round"/><rect x="4" y="17" width="16" height="2.4" rx="1" fill="url(#planCrownGrad)"/><circle cx="4" cy="9" r="1.15" fill="url(#planCrownGrad)"/><circle cx="12" cy="5" r="1.3" fill="url(#planCrownGrad)"/><circle cx="20" cy="9" r="1.15" fill="url(#planCrownGrad)"/></svg>';
+              textEl.textContent = 'پرمیوم';
+            }
+          }
+        }catch(e){}
+      })();
+      </script>
+      <div class="header-badges-btn" id="headerBadgesBtn" title="نشان‌ها" onclick="if(typeof enterSubPage==='function') enterSubPage('achievements');">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5h10v4.3a5 5 0 0 1-10 0V4.5z"/><path d="M7 6H4.5v1.8A3 3 0 0 0 7 10.7M17 6h2.5v1.8A3 3 0 0 1 17 10.7"/><path d="M12 13.8V17M9 20.5h6M9.5 17h5l.6 3.5h-6.2z"/></svg>
         <span class="header-badges-count" id="headerBadgesCount"></span>
       </div>
@@ -6518,15 +7358,19 @@ overflow:hidden;
     </div>
   </div>
 
-  <div class="tabbar" id="tabbar">
-    <button class="tab-btn active" data-tab="today"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3.5"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/><path d="M8.5 14.2l2 2 4.5-5"/></svg></span><span id="tabLabelToday">برنامه</span><span class="tab-count-badge" id="tabBadgeToday" style="display:none;"></span></button>
-    <button class="tab-btn" data-tab="workout"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.8 9.3v6.4M17.2 9.3v6.4"/><rect x="3.3" y="8" width="3.2" height="8.8" rx="1.4"/><rect x="17.5" y="8" width="3.2" height="8.8" rx="1.4"/><path d="M9.2 12.5h6.6"/></svg></span>تمرین</button>
-    <button class="tab-btn" data-tab="meditation"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15c0 3 2.8 5 6 5s6-2 6-5c-1.8 1-3.8 1.5-6 1.5S7.8 16 6 15z"/><path d="M12 16.5V9"/><path d="M12 16.5c-1.6-2-2-4.5-1.3-7.3"/><path d="M12 16.5c1.6-2 2-4.5 1.3-7.3"/><path d="M7.8 12.8C6 12.1 4.8 10.6 4.3 8.6"/><path d="M16.2 12.8c1.8-.7 3-2.2 3.5-4.2"/></svg></span>مدیتیشن</button>
-    <button class="tab-btn" data-tab="speech"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="11" rx="3"/><path d="M9 18.5l2.2-3M8 8.5v4M12 7.5v6M16 8.5v4"/></svg></span>فن بیان</button>
-    <button class="tab-btn" data-tab="brain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.6c-1.8 0-3.1 1.3-3.1 2.9-1.4.4-2.4 1.7-2.4 3.2 0 .9.4 1.7 1 2.3-.5.6-.8 1.4-.8 2.2 0 1.7 1.3 3 2.8 3.2.2 1.5 1.5 2.7 3.1 2.7 1.1 0 2.1-.6 2.6-1.5"/><path d="M15 4.6c1.8 0 3.1 1.3 3.1 2.9 1.4.4 2.4 1.7 2.4 3.2 0 .9-.4 1.7-1 2.3.5.6.8 1.4.8 2.2 0 1.7-1.3 3-2.8 3.2-.2 1.5-1.5 2.7-3.1 2.7-1.1 0-2.1-.6-2.6-1.5"/><path d="M12 6.2v12.6"/><path d="M9.3 9.6c.9.5 1.8.5 2.7 0M9.3 13.8c.9.5 1.8.5 2.7 0M14.7 9.6c-.9.5-1.8.5-2.7 0M14.7 13.8c-.9.5-1.8.5-2.7 0"/></svg></span>تقویت هوش</button>
-    <button class="tab-btn tab-btn-highlight" data-tab="ai"><span class="ic"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span>مشاور شخصی</button>
-    <div class="tabbar-divider" aria-hidden="true"></div>
-    <button class="tab-btn" data-tab="library"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.8c-1.9-1.5-4.2-2.1-6.8-2.1-.4 0-.9.03-1.3.1v11.8c.4-.06.9-.1 1.3-.1 2.6 0 4.9.6 6.8 2.1 1.9-1.5 4.2-2.1 6.8-2.1.4 0 .9.04 1.3.1V4.8c-.4-.07-.9-.1-1.3-.1-2.6 0-4.9.6-6.8 2.1z"/><path d="M12 6.8v11.8"/></svg></span>کتابخانه</button>
+  <div class="tabbar" id="tabbar" data-active-cat="planning">
+    <div class="tabbar-group" data-group="planning">
+      <button class="tab-btn active" data-tab="today"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3.5"/><path d="M3.5 9.5h17"/><path d="M8 3v3.2M16 3v3.2"/><path d="M8.5 14.2l2 2 4.5-5"/></svg></span><span id="tabLabelToday">برنامه</span><span class="tab-count-badge" id="tabBadgeToday" style="display:none;"></span></button>
+      <button class="tab-btn" data-tab="workout"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.8 9.3v6.4M17.2 9.3v6.4"/><rect x="3.3" y="8" width="3.2" height="8.8" rx="1.4"/><rect x="17.5" y="8" width="3.2" height="8.8" rx="1.4"/><path d="M9.2 12.5h6.6"/></svg></span>بدنسازی</button>
+      <button class="tab-btn" data-tab="jawline"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 5.5c-.8 2-1.1 4-1.1 6.2 0 5 3 8.8 6.6 9.8.9.2 1.9 0 2.6-.6l1-.9c2.3-2 3.7-4.9 3.9-8 .1-2.4-.3-4.7-1.2-6.9"/><path d="M8.3 9.2c.5-.4 1.1-.6 1.7-.6M15.7 9.2c-.5-.4-1.1-.6-1.7-.6"/></svg></span>زاویه فک</button>
+    </div>
+    <div class="tabbar-group" data-group="growth">
+      <button class="tab-btn" data-tab="meditation"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15c0 3 2.8 5 6 5s6-2 6-5c-1.8 1-3.8 1.5-6 1.5S7.8 16 6 15z"/><path d="M12 16.5V9"/><path d="M12 16.5c-1.6-2-2-4.5-1.3-7.3"/><path d="M12 16.5c1.6-2 2-4.5 1.3-7.3"/><path d="M7.8 12.8C6 12.1 4.8 10.6 4.3 8.6"/><path d="M16.2 12.8c1.8-.7 3-2.2 3.5-4.2"/></svg></span>مدیتیشن</button>
+      <button class="tab-btn" data-tab="speech"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="11" rx="3"/><path d="M9 18.5l2.2-3M8 8.5v4M12 7.5v6M16 8.5v4"/></svg></span>فن بیان</button>
+      <button class="tab-btn" data-tab="brain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.6c-1.8 0-3.1 1.3-3.1 2.9-1.4.4-2.4 1.7-2.4 3.2 0 .9.4 1.7 1 2.3-.5.6-.8 1.4-.8 2.2 0 1.7 1.3 3 2.8 3.2.2 1.5 1.5 2.7 3.1 2.7 1.1 0 2.1-.6 2.6-1.5"/><path d="M15 4.6c1.8 0 3.1 1.3 3.1 2.9 1.4.4 2.4 1.7 2.4 3.2 0 .9-.4 1.7-1 2.3.5.6.8 1.4.8 2.2 0 1.7-1.3 3-2.8 3.2-.2 1.5-1.5 2.7-3.1 2.7-1.1 0-2.1-.6-2.6-1.5"/><path d="M12 6.2v12.6"/><path d="M9.3 9.6c.9.5 1.8.5 2.7 0M9.3 13.8c.9.5 1.8.5 2.7 0M14.7 9.6c-.9.5-1.8.5-2.7 0M14.7 13.8c-.9.5-1.8.5-2.7 0"/></svg></span>تقویت هوش</button>
+      <button class="tab-btn tab-btn-highlight" data-tab="ai"><span class="ic"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.2c.5 4.3 1.6 6.6 3.5 8.4 1.9 1.9 4.2 3 8.4 3.5-4.2.5-6.5 1.6-8.4 3.5-1.9 1.8-3 4.1-3.5 8.4-.5-4.3-1.6-6.6-3.5-8.4-1.9-1.9-4.2-3-8.5-3.5 4.3-.5 6.6-1.6 8.5-3.5 1.9-1.8 3-4.1 3.5-8.4z"/></svg></span>مشاور شخصی</button>
+      <button class="tab-btn" data-tab="library"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.8c-1.9-1.5-4.2-2.1-6.8-2.1-.4 0-.9.03-1.3.1v11.8c.4-.06.9-.1 1.3-.1 2.6 0 4.9.6 6.8 2.1 1.9-1.5 4.2-2.1 6.8-2.1.4 0 .9.04 1.3.1V4.8c-.4-.07-.9-.1-1.3-.1-2.6 0-4.9.6-6.8 2.1z"/><path d="M12 6.8v11.8"/></svg></span>کتابخانه</button>
+    </div>
   </div>
 
   <div class="pub-subnav" id="pubSubnav">
@@ -6565,7 +7409,7 @@ overflow:hidden;
     </div>
 
     <div class="subseg">
-      <button data-sub="overview"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7.2" height="7.2" rx="1.8"/><rect x="13.3" y="3.5" width="7.2" height="7.2" rx="1.8"/><rect x="3.5" y="13.3" width="7.2" height="7.2" rx="1.8"/><rect x="13.3" y="13.3" width="7.2" height="7.2" rx="1.8"/></svg></span>نمای کلی</button>
+      <button data-sub="overview"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7.2" height="7.2" rx="1.8"/><rect x="13.3" y="3.5" width="7.2" height="7.2" rx="1.8"/><rect x="3.5" y="13.3" width="7.2" height="7.2" rx="1.8"/><rect x="13.3" y="13.3" width="7.2" height="7.2" rx="1.8"/></svg></span>نمای کلی<span class="subtab-live-badge" id="overviewLiveBadge"></span></button>
       <button data-sub="program" class="active"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.2h10M9.5 12h10M9.5 17.8h10"/><path d="M3.6 6.2l1 1L6.8 5"/><path d="M3.6 12l1 1 2.2-2.4"/><path d="M3.6 17.8l1 1 2.2-2.4"/></svg></span>برنامه‌ی روزانه</button>
       <button data-sub="custom"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4.3h11a1 1 0 0 1 1 1V20l-6.5-3.8L5.5 20V5.3a1 1 0 0 1 1-1z"/></svg></span>برنامه‌های من</button>
       <button data-sub="tomorrow"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4.5a7.5 7.5 0 1 0 5 13.1A8.5 8.5 0 0 1 15 4.5z"/><path d="M18.3 3.7l.4 1.3 1.3.4-1.3.4-.4 1.3-.4-1.3-1.3-.4 1.3-.4z"/></svg></span>برنامه فردا</button>
@@ -6590,6 +7434,10 @@ overflow:hidden;
               <div class="streak-live-unit"><div class="streak-live-num" id="slSeconds">۰۰</div><div class="streak-live-label">ثانیه</div></div>
             </div>
             <div class="streak-live-empty" id="streakLiveEmpty" style="display:none;">هنوز شروع نکردی — اولین کار امروزتو تیک بزن</div>
+          </div>
+          <div class="tg-clock-warning" id="tgClockWarning" style="display:none;">
+            <span>⏱️</span>
+            <span>به نظر می‌رسه ساعتِ گوشیت درست تنظیم نیست — تا وقتی درست بشه، بعضی امکانات (مثل تاریخِ دستیِ شکست) موقتاً غیرفعاله.</span>
           </div>
 
           <div id="customCountersSlot"></div>
@@ -6621,7 +7469,7 @@ overflow:hidden;
       <div class="section" id="intensitySection">
         <div class="section-head">⚖️ سبک برنامه‌ت</div>
         <div style="padding:0 14px 12px;">
-          <div class="seg" id="intensitySeg">
+          <div class="seg" id="intensitySeg" style="margin:0 auto;">
             <button data-intensity="light">سبک</button>
             <button data-intensity="medium" class="active">متوسط</button>
             <button data-intensity="heavy">سنگین</button>
@@ -7078,7 +7926,7 @@ overflow:hidden;
       <div class="sub-panel" data-sub="recovery">
         <div class="section">
           <div class="section-head">🔄 ریکاوری عضلات</div>
-          <div style="padding:0 14px 12px;font-size:11.5px;color:var(--muted);line-height:1.85;">هر عضله‌ای که تمرین می‌کنی حدود ۷۲ ساعت زمان لازم داره تا کامل ریکاوری بشه و دوباره آماده‌ی تمرین بعدی باشه.</div>
+          <div style="padding:0 14px 12px;font-size:11.5px;color:var(--muted);line-height:1.85;">هر عضله‌ای که تمرین می‌کنی زمانِ متفاوتی لازم داره تا کامل ریکاوری بشه و دوباره آماده‌ی تمرین بعدی باشه — عضله‌های کوچیک مثل جلوبازو و شکم معمولاً حدود ۳۶ ساعته سبک می‌شن، سرشانه/سینه حدود ۴۸ ساعت، و عضله‌های بزرگِ پا و باسن معمولاً تا ۷۲ ساعت طول می‌کشه.</div>
 
           <div id="recoveryGenderAsk" style="display:none;padding:0 14px 14px;">
             <div style="font-size:12.5px;font-weight:700;color:var(--text);padding-bottom:10px;text-align:center;">برای نمایش نقشه‌ی عضلات، جنسیتت رو انتخاب کن:</div>
@@ -7101,7 +7949,7 @@ overflow:hidden;
                 <svg id="recoveryCalloutSvg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" preserveAspectRatio="xMidYMid meet"></svg>
                 <div id="recoveryTapHint" style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,.55);color:#fff;font-size:9.5px;padding:4px 9px;border-radius:20px;pointer-events:none;">لمس کن روی هر عضله برای دیدن اسمش</div>
               </div>
-              <div style="font-size:10.5px;color:var(--muted);line-height:1.8;padding:10px 6px 0;">قرمزِ پررنگ = عضله‌ی تازه‌کارشده و خسته؛ هرچی رنگ کمرنگ‌تر بشه یعنی به ریکاوری کامل (سفید) نزدیک‌تره. هر عضله حدود ۷۲ ساعت طول می‌کشه تا کامل کمرنگ بشه.</div>
+              <div style="font-size:10.5px;color:var(--muted);line-height:1.8;padding:10px 6px 0;">قرمزِ پررنگ = عضله‌ی تازه‌کارشده و خسته؛ هرچی رنگ کمرنگ‌تر بشه یعنی به ریکاوری کامل (سفید) نزدیک‌تره. زمانِ کمرنگ‌شدن به‌خودِ عضله بستگی داره: عضله‌های کوچیک زودتر (حدودِ ۳۶ ساعت) و عضله‌های بزرگِ پا/باسن دیرتر (تا ۷۲ ساعت) کامل سفید می‌شن.</div>
               <div id="recoverySummaryList" style="text-align:right;margin-top:12px;"></div>
             </div>
 
@@ -7246,6 +8094,17 @@ overflow:hidden;
       <div class="collapse-toggle" id="galleryToggle">دیدن آرشیو ▾</div>
       <div class="selfie-grid" id="selfieGrid" style="display:none"></div>
     </div>
+  </div>
+
+  <!-- ===================== TAB: ACHIEVEMENTS (list of earned badges with exact earn time) ===================== -->
+  <div class="tab-panel" id="tab-achievements">
+    <div class="settings-page-head">
+      <button class="settings-back-btn" id="achievementsBackBtn">→ بازگشت</button>
+      <div class="settings-page-title">🏆 دستاوردها</div>
+    </div>
+    <div class="ach-intro">هر نشانی که تا الان گرفتی، به‌ترتیبِ جدیدترین، همراه با تاریخ و ساعتِ دقیقِ به‌دست‌آوردنش.</div>
+    <div class="ach-list" id="achievementsList"></div>
+    <div class="urge-empty" id="achievementsEmpty" style="display:none">هنوز هیچ نشانی نگرفتی — از تب «پیشرفت» ببین برای گرفتنِ اولین نشان چیکار باید بکنی.</div>
   </div>
 
   <!-- ===================== TAB: GOALS ===================== -->
@@ -7422,6 +8281,139 @@ overflow:hidden;
     </div>
   </div>
 
+  <!-- ===================== TAB: JAWLINE (خالی — بدون محتوا فعلاً) ===================== -->
+  <div class="tab-panel" id="tab-jawline">
+    <div class="subseg">
+      <button data-sub="jawprogram" class="active"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.2h10M9.5 12h10M9.5 17.8h10"/><path d="M3.6 6.2l1 1L6.8 5"/><path d="M3.6 12l1 1 2.2-2.4"/><path d="M3.6 17.8l1 1 2.2-2.4"/></svg></span>برنامه</button>
+      <button data-sub="jawhistory"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>تاریخچه تمرین</button>
+      <button data-sub="jawrecovery"><span class="subic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c-4.5-3-8-6.4-8-10.2A5 5 0 0 1 12 7.5 5 5 0 0 1 20 10.8c0 3.8-3.5 7.2-8 10.2z"/><path d="M8.5 12h2l1.3-2.4 1.6 4.4 1.1-2h2"/></svg></span>ریکاوری</button>
+    </div>
+
+    <div class="sub-panel active" data-sub="jawprogram">
+
+      <div class="section onboard-card" id="jawOnboard">
+        <div class="onboard-title">بیا برنامه‌ی زاویه‌ی فکت رو باهم بسازیم</div>
+        <div class="onboard-sub">۶ سوالِ کوچیک — تا حرکت‌هایی که پیشنهاد می‌دیم دقیقاً مناسبِ هدف، اولویت و وضعیتِ خودت باشه، نه یه لیستِ یکسان برای همه.</div>
+
+        <div id="jawObFieldsStep">
+        <div class="section-head" style="padding-right:0;">🎯 هدفِ اصلیت از این برنامه چیه؟</div>
+        <div class="seg wo-access-seg" id="jawObGoalSeg">
+          <button type="button" data-val="doublechin">کم‌کردنِ چانه‌ی دوتایی</button>
+          <button type="button" data-val="jawdef">برجسته‌ترشدنِ خطِ فک</button>
+          <button type="button" data-val="neckfirm">جلوگیری از افتادگیِ گردن</button>
+          <button type="button" data-val="all">هر سه مورد با هم</button>
+        </div>
+
+        <div class="section-head" style="padding-right:0;margin-top:14px;" id="jawObPriorityHead">🔍 کدوم ناحیه الان بیشتر برات اولویت داره؟ (اختیاری، تا ۲ تا)</div>
+        <div style="padding:0 0 6px;font-size:11.5px;color:var(--muted);line-height:1.8;">اگه چیزی انتخاب نکنی، طبقِ همون هدفِ بالا خودکار تنظیم می‌شه؛ حرکت‌های این ناحیه‌ها زودتر و بیشتر تو برنامه میان.</div>
+        <div class="onboard-chip-grid" id="jawObPriorityChips">
+          <button type="button" class="onboard-chip" data-val="masseter">خطِ فک و چونه (ماستر)</button>
+          <button type="button" class="onboard-chip" data-val="platysma">زیرِ چانه و گردن (پلاتیسما)</button>
+          <button type="button" class="onboard-chip" data-val="zygomaticus">گونه‌ها (زایگوماتیکوس)</button>
+          <button type="button" class="onboard-chip" data-val="temporalis">دورِ چشم و گیجگاه</button>
+        </div>
+
+        <div class="section-head" style="padding-right:0;margin-top:14px;">😬 مشکل یا دردِ فک (TMJ) داری؟</div>
+        <div class="seg wo-access-seg" id="jawObTmjSeg">
+          <button type="button" data-val="no">نه، مشکلی ندارم</button>
+          <button type="button" data-val="yes">بله، گاهی درد/تیک‌تیکِ فک دارم</button>
+        </div>
+        <div id="jawObTmjSeverityWrap" style="display:none;margin-top:10px;">
+          <div class="section-head" style="padding-right:0;">چقدر شدید و پرتکرار؟</div>
+          <div class="seg wo-access-seg" id="jawObTmjSeveritySeg">
+            <button type="button" data-val="mild">کم و گاه‌به‌گاه</button>
+            <button type="button" data-val="often">زیاد یا هرروز</button>
+          </div>
+          <div style="padding:6px 0 0;font-size:10.5px;color:var(--muted);line-height:1.8;">با این جواب، حرکت‌های پرخطر برای مفصلِ فک (مثلِ بازکردنِ حداکثری دهان) خودکار از برنامه‌ت کنار گذاشته می‌شن. اگه دردت مکرر یا شدیده، حتماً با دندون‌پزشک یا فیزیوتراپِ فک هم مشورت کن — این برنامه جایگزینِ ویزیت نیست.</div>
+        </div>
+
+        <div class="section-head" style="padding-right:0;margin-top:14px;">⏱️ روزانه چقدر وقت براش می‌ذاری؟</div>
+        <div class="seg wo-access-seg" id="jawObTimeSeg">
+          <button type="button" data-val="5">۵ دقیقه</button>
+          <button type="button" data-val="10">۱۰-۱۵ دقیقه</button>
+          <button type="button" data-val="20">۲۰+ دقیقه</button>
+        </div>
+
+        <div class="section-head" style="padding-right:0;margin-top:14px;">📅 هفته‌ای چند جلسه می‌خوای تمرین کنی؟</div>
+        <div class="seg wo-access-seg" id="jawObFreqSeg">
+          <button type="button" data-val="2">۲ جلسه در هفته</button>
+          <button type="button" data-val="3">۳ جلسه در هفته</button>
+          <button type="button" data-val="4">۴ جلسه در هفته</button>
+        </div>
+        <div style="padding:6px 0 0;font-size:10.5px;color:var(--muted);line-height:1.8;">بر اساسِ همین عدد، ناحیه‌های صورت رو بینِ جلسه‌های هفته تقسیم می‌کنیم تا هر بار فقط رویِ بخشی از صورت کار کنی، نه همه‌چی با هم.</div>
+
+        <div class="section-head" style="padding-right:0;margin-top:14px;">🌱 سابقه‌ی تمرینِ صورت/فک داری؟</div>
+        <div class="seg wo-access-seg" id="jawObLevelSeg">
+          <button type="button" data-val="beginner">نه، اولین‌باره</button>
+          <button type="button" data-val="mid">یه‌کم تجربه دارم</button>
+          <button type="button" data-val="advanced">مدت‌هاست تمرین می‌کنم</button>
+        </div>
+
+        <div class="onboard-err" id="jawObErr" style="display:none;">لطفاً به سوال‌های اجباری جواب بده.</div>
+        <button type="button" class="onboard-btn primary" id="jawObConfirmBtn" style="width:100%;margin-top:16px;">بعدی: چیدمان جلسه‌ها ◀</button>
+        </div>
+
+        <div id="jawObSplitConfirmStep" style="display:none;">
+          <div class="section-head" style="padding-right:0;">📅 چیدمان جلسه‌های تمرینِ فک</div>
+          <div class="onboard-sub" id="jawObSplitConfirmIntro"></div>
+          <div id="jawObSplitSummary" class="split-confirm-summary"></div>
+          <div class="section-head" style="padding-right:0;margin-top:14px;">هر ناحیه رو تو جلسه‌ای که می‌خوای بذار</div>
+          <div style="padding:0 0 10px;font-size:11.5px;color:var(--muted);line-height:1.8;">این ترکیب پیشنهادی ماست؛ اگه خوبه همینو تأیید کن، یا با زدنِ شماره‌ی جلسه، هر ناحیه رو جابه‌جا کن.</div>
+          <div id="jawObSplitRows"></div>
+          <div class="onboard-err" id="jawObSplitConfirmErr" style="display:none;">هر جلسه باید حداقل یه ناحیه داشته باشه؛ یه ناحیه رو جابه‌جا کن.</div>
+          <div class="onboard-nav" style="margin-top:18px;">
+            <button type="button" class="onboard-btn ghost" id="jawObSplitBackBtn">▶ بازگشت</button>
+            <button type="button" class="onboard-btn primary" id="jawObSplitConfirmBtn">تایید و ساخت برنامه ✅</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="jawMainContent" style="display:none;">
+        <div id="jawPlanSummary" style="padding:0 14px 4px;font-size:11.5px;color:var(--accent);font-weight:700;line-height:1.9;"></div>
+        <div class="section">
+          <div class="section-head">📋 برنامه‌ی شخصی‌سازی‌شده‌ی تو</div>
+          <div id="jawPrefsSummary" style="padding:0 14px 14px;font-size:12.5px;color:var(--text);line-height:2.1;"></div>
+          <div style="padding:0 14px 14px;">
+            <button type="button" class="onboard-btn ghost" id="jawEditPrefsBtn" style="width:100%;">🔄 ویرایشِ جواب‌ها</button>
+          </div>
+        </div>
+        <div class="section">
+          <div class="wo-day-pills" id="jawDayPills"></div>
+          <div id="jawDayTitle" style="padding:0 14px 10px;font-size:12.5px;color:var(--muted);"></div>
+          <button type="button" class="analyze-btn" id="jawStartSessionBtn" style="margin:0 14px 14px;width:calc(100% - 28px);">▶️ شروع تمرین امروز</button>
+          <div class="section-head" style="padding:0 14px 6px;font-size:12.5px;">🏋️ حرکت‌های تمرین</div>
+          <div id="jawExerciseListWrap" style="padding:0 14px 16px;"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="sub-panel" data-sub="jawhistory">
+      <div class="section">
+        <div class="section-head">📋 تاریخچه‌ی جلسه‌های تمرین فک</div>
+        <div class="focus-total-card" id="jawHistTotalCard"></div>
+        <div id="jawHistList"></div>
+      </div>
+    </div>
+
+    <div class="sub-panel" data-sub="jawrecovery">
+      <div class="section">
+        <div class="section-head">🔄 ریکاوری عضلات صورت و فک</div>
+        <div style="padding:0 14px 12px;font-size:11.5px;color:var(--muted);line-height:1.85;">هر جلسه‌ی تمرینِ فک که تموم می‌کنی، عضله‌های همون جلسه رو «خسته» علامت می‌زنه و رنگِ قرمز می‌گیرن؛ با گذشتِ زمان به‌تدریج کمرنگ می‌شن تا کامل ریکاوری بشن. ساعتِ ریکاوریِ هر عضله بر اساسِ نوعِ حرکت (صرفاً حالت‌گیریِ صورت در برابرِ حرکت‌های مقاومتیِ ماستر/تمپورالیس) تخمین زده شده، نه یه عددِ ثابت.</div>
+
+        <div id="jawRecoveryImgWrap" style="padding:0 14px 14px;text-align:center;">
+          <div id="jawRecoveryMapStage">
+            <div class="recovery-img-stage" id="jawRecoveryImgStage" style="position:relative;max-width:340px;margin:0 auto;">
+              <canvas id="jawRecoveryCanvas" style="max-width:100%;width:100%;height:auto;display:block;border-radius:14px;background:#fff;"></canvas>
+            </div>
+            <div style="font-size:10.5px;color:var(--muted);line-height:1.8;padding:10px 6px 0;">قرمزِ پررنگ = عضله‌ی تازه‌کارشده و خسته؛ هرچی رنگ کمرنگ‌تر بشه یعنی به ریکاوری کامل (سفید) نزدیک‌تره — دقیقاً مثلِ منطقِ رنگ‌آمیزیِ نقشه‌ی بدنسازی.</div>
+            <div id="jawRecoverySummaryList" style="text-align:right;margin-top:12px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== TAB: MEDITATION (ported) ===================== -->
   <div class="tab-panel" id="tab-meditation">
 
@@ -7448,7 +8440,7 @@ overflow:hidden;
 
       <div class="section">
         <div class="section-head">⏱️ مدت زمان</div>
-        <div class="seg" id="medDurationSeg" style="margin:0 14px 14px;">
+        <div class="seg" id="medDurationSeg" style="margin:0 auto 14px;">
           <button data-min="3">۳ دقیقه</button>
           <button data-min="5" class="active">۵ دقیقه</button>
           <button data-min="10">۱۰ دقیقه</button>
@@ -7488,7 +8480,7 @@ overflow:hidden;
 
       <div class="section">
         <div class="section-head">⏱️ مدت زمان</div>
-        <div class="seg" id="bsDurationSeg" style="margin:0 14px 14px;">
+        <div class="seg" id="bsDurationSeg" style="margin:0 auto 14px;">
           <button data-min="5">۵ دقیقه</button>
           <button data-min="10" class="active">۱۰ دقیقه</button>
           <button data-min="15">۱۵ دقیقه</button>
@@ -7515,7 +8507,7 @@ overflow:hidden;
 
       <div class="section">
         <div class="section-head">⏱️ مدت زمان</div>
-        <div class="seg" id="gratDurationSeg" style="margin:0 14px 14px;">
+        <div class="seg" id="gratDurationSeg" style="margin:0 auto 14px;">
           <button data-min="5">۵ دقیقه</button>
           <button data-min="10" class="active">۱۰ دقیقه</button>
           <button data-min="15">۱۵ دقیقه</button>
@@ -7546,7 +8538,7 @@ overflow:hidden;
 
       <div class="section">
         <div class="section-head">⏱️ مدت زمان</div>
-        <div class="seg" id="voidDurationSeg" style="margin:0 14px 14px;">
+        <div class="seg" id="voidDurationSeg" style="margin:0 auto 14px;">
           <button data-min="3">۳ دقیقه</button>
           <button data-min="5" class="active">۵ دقیقه</button>
           <button data-min="10">۱۰ دقیقه</button>
@@ -7626,7 +8618,7 @@ overflow:hidden;
     <div class="section" id="speechExStory">
       <div class="section-head">📖 داستان‌سازی با کلمات</div>
       <div class="med-intro">چندتا کلمه‌ی کاملاً بی‌ربط به هم می‌گیری؛ باید یه داستان کوتاه و معنی‌دار بسازی که همه‌شون توش جا بشن. هم برای بداهه‌گویی خوبه، هم برای وصل‌کردن جمله‌ها.</div>
-      <div class="seg" id="storyCountSeg" style="margin:0 14px 14px;">
+      <div class="seg" id="storyCountSeg" style="margin:0 auto 14px;">
         <button data-count="2">۲ کلمه</button>
         <button data-count="3" class="active">۳ کلمه</button>
         <button data-count="4">۴ کلمه</button>
@@ -7723,7 +8715,7 @@ overflow:hidden;
     <div class="section" id="brainExMath">
       <div class="section-head">🧮 محاسبه‌ی سریع</div>
       <div class="med-intro">تو ۴۵ ثانیه هرچقدر می‌تونی سریع و درست جواب بده. نوع سوال هر بار عوض می‌شه: جمع، تفریق، ضرب و مقایسه‌ی اعداد؛ زود تکراری نمی‌شه.</div>
-      <div class="seg" id="brainMathLevelSeg" style="margin:0 14px 14px;">
+      <div class="seg" id="brainMathLevelSeg" style="margin:0 auto 14px;">
         <button type="button" data-level="easy" class="active">ساده</button>
         <button type="button" data-level="medium">متوسط</button>
         <button type="button" data-level="hard">سخت</button>
@@ -7753,7 +8745,7 @@ overflow:hidden;
     <div class="section" id="brainExStroop">
       <div class="section-head">🎨 تست استروپ</div>
       <div class="med-intro">اسمِ یه رنگ نوشته می‌شه، ولی با یه رنگِ دیگه رنگ‌آمیزی شده. گاهی باید رنگِ واقعی رو بزنی، گاهی باید خودِ کلمه رو بزنی — هر بار راهنما بالای صفحه می‌گه کدومه، پس هوشیار باش! جای دکمه‌ها هم هر بار به‌هم می‌ریزه که حفظ نشه.</div>
-      <div class="seg" id="brainStroopLevelSeg" style="margin:0 14px 14px;">
+      <div class="seg" id="brainStroopLevelSeg" style="margin:0 auto 14px;">
         <button type="button" data-level="easy" class="active">ساده (۴ رنگ)</button>
         <button type="button" data-level="medium">متوسط (۵ رنگ)</button>
         <button type="button" data-level="hard">سخت (۶ رنگ)</button>
@@ -7782,7 +8774,7 @@ overflow:hidden;
     <div class="section" id="brainExSeq">
       <div class="section-head">🔴 توالی رنگی (حافظه‌ی کاری)</div>
       <div class="med-intro">یه توالی از رنگ‌ها روشن می‌شه (با صدای مخصوص هر رنگ)؛ باید همون ترتیب رو با لمس دکمه‌ها تکرار کنی. هر بار درست بزنی، یه رنگ اضافه می‌شه و سخت‌تر می‌شه. گاهی هم باید توالی رو برعکس (از آخر به اول) تکرار کنی — حواست باشه!</div>
-      <div class="seg" id="brainSeqLevelSeg" style="margin:0 14px 14px;">
+      <div class="seg" id="brainSeqLevelSeg" style="margin:0 auto 14px;">
         <button type="button" data-level="easy" class="active">ساده (۴ رنگ)</button>
         <button type="button" data-level="medium">متوسط (۵ رنگ)</button>
         <button type="button" data-level="hard">سخت (۶ رنگ)</button>
@@ -7804,7 +8796,7 @@ overflow:hidden;
     <div class="section" id="brainExNback">
       <div class="section-head">🧩 N-back (حافظه‌ی کاری)</div>
       <div class="med-intro">یه حرف نشون داده می‌شه. باید بگی همون حرفیه که N تا قبل از این اومده بود یا نه. مراقب حرف‌های شبیه‌سازِ گول‌زننده باش (نزدیک N ولی نه دقیقاً)! هر حرف یه مهلت کوتاه داره، پس تند تصمیم بگیر.</div>
-      <div class="seg" id="brainNbackLevelSeg" style="margin:0 14px 14px;">
+      <div class="seg" id="brainNbackLevelSeg" style="margin:0 auto 14px;">
         <button type="button" data-level="1" class="active">۱-بک</button>
         <button type="button" data-level="2">۲-بک</button>
         <button type="button" data-level="3">۳-بک</button>
@@ -7839,7 +8831,7 @@ overflow:hidden;
     <div class="section" id="brainExOdd">
       <div class="section-head">🔍 پیدا کردن فرق</div>
       <div class="med-intro">یه شبکه از خونه‌های هم‌شکل می‌بینی که فقط یکیشون یه‌کم فرق داره — رنگش کمی روشن‌تر/تیره‌تره یا یه‌کم چرخیده. باید تو کمترین زمان همون یکی رو لمس کنی. برخلاف بازی‌های بالا، این یکی نه حافظه‌ست نه حساب؛ فقط دقت و توجه دیداری‌تو محک می‌زنه. هرچی سطح بالاتر بره، شبکه بزرگ‌تر و فرقش ظریف‌تر می‌شه.</div>
-      <div class="seg" id="brainOddLevelSeg" style="margin:0 14px 14px;">
+      <div class="seg" id="brainOddLevelSeg" style="margin:0 auto 14px;">
         <button type="button" data-level="easy" class="active">ساده (۳×۳)</button>
         <button type="button" data-level="medium">متوسط (۴×۴)</button>
         <button type="button" data-level="hard">سخت (۵×۵)</button>
@@ -7915,6 +8907,17 @@ overflow:hidden;
       <div id="chatUnconfiguredBox"></div>
     </div>
 
+    <!-- وقتی رو دستگاه یه سشنِ ذخیره‌شده هست ولی هنوز نتونستیم از سرور تاییدش کنیم (باز
+         شدنِ اپ بدون نت / نتِ ضعیف)، به‌جای پرت‌کردنِ کاربر به باکسِ ورود/ثبت‌نام (که یعنی
+         انگار خارج شده)، همین حالتِ خنثیِ «در حال اتصال» رو نشون می‌دیم تا سشن تایید بشه. -->
+    <div id="chatConnectingBox" style="display:none;padding:60px 20px;text-align:center;">
+      <div class="upd-spinner"></div>
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px;">در حال اتصال به حسابت…</div>
+      <div style="font-size:11.5px;color:var(--muted);line-height:1.9;">
+        نتت وصل نیست یا ضعیفه. نگران نباش، از اکانتت خارج نشدی — به محض وصل‌شدنِ اینترنت، چت و بقیه‌ی بخش‌های عمومی خودشون بارگذاری می‌شن.
+      </div>
+    </div>
+
     <div id="chatSuspendedBox" style="display:none;">
       <div class="section">
         <div class="suspend-lock-icon"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5h8L20.5 8v8L16 20.5H8L3.5 16V8z"/><path d="M8 8l8 8"/></svg></span></div>
@@ -7937,10 +8940,26 @@ overflow:hidden;
             </div>
           </div>
           <div class="cph-actions">
+            <div class="cgf-wrap">
+              <button class="chat-pill-btn" id="chatGenderFilterBtn" title="فیلترِ جنسیتِ چت" aria-label="فیلترِ جنسیتِ چت"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="15" r="4.5"/><circle cx="16" cy="8.5" r="4"/></svg></span><span class="cpb-label">هردو</span></button>
+              <div class="cm-action-menu-backdrop" id="chatGenderFilterBackdrop"></div>
+              <div class="cgf-menu" id="chatGenderFilterMenu">
+                <button type="button" class="cgf-option" data-value="female">👧 فقط دختر</button>
+                <button type="button" class="cgf-option" data-value="male">👦 فقط پسر</button>
+                <button type="button" class="cgf-option" data-value="both">🚻 هردو</button>
+              </div>
+            </div>
             <button class="chat-pill-btn" id="chatRulesBtn" title="قوانین چت" aria-label="قوانین چت"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4.5h9.5a2 2 0 0 1 2 2V18a2 2 0 0 0 2 2H8a2 2 0 0 1-2-2V4.5z"/><path d="M6 4.5a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2"/><path d="M9 9h6M9 12.5h6"/></svg></span><span class="cpb-label">قوانین</span></button>
             <button class="chat-pill-btn" id="chatAdminManageBtn" style="display:none;" title="مدیریت ادمین‌های چت" aria-label="مدیریت ادمین‌های چت"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l7 2.6v5.4c0 4.6-3 7.8-7 9-4-1.2-7-4.4-7-9V6.1l7-2.6z"/><path d="M9 12l2 2 4-4.2"/></svg></span><span class="cpb-label">ادمین‌ها</span></button>
             <button class="chat-pill-btn" id="chatCooldownBtn" style="display:none;" title="تنظیم کول‌داون بین پیام‌ها" aria-label="تنظیم کول‌داون بین پیام‌ها"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.6 1.8"/><path d="M9.5 2.7h5"/></svg></span><span class="cpb-label">کول‌داون</span></button>
             <button class="chat-pill-btn" id="chatLockBtn" style="display:none;" title="باز/بسته کردن چت عمومی" aria-label="باز/بسته کردن چت عمومی"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2.6"/><path d="M8.4 11V8.2a3.6 3.6 0 0 1 6.9-1.5"/><circle cx="12" cy="15.2" r="1.3" fill="currentColor" stroke="none"/></svg></span><span class="cpb-label" id="chatLockBtnLabel">بستن چت</span></button>
+            <div class="cph-more-wrap" id="chatMoreWrap">
+              <button class="chat-pill-btn" id="chatMoreBtn" title="گزینه‌های بیشتر" aria-label="گزینه‌های بیشتر"><span class="ci"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5.2" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="18.8" r="1.9"/></svg></span></button>
+              <div class="cm-action-menu-backdrop" id="chatMoreMenuBackdrop"></div>
+              <div class="chat-more-menu" id="chatMoreMenu">
+                <button type="button" class="chat-more-option" id="chatSearchOpenBtn"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg></span>جستجو در پیام‌ها</button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="chat-pinned-banner" id="chatPinnedBanner"></div>
@@ -7954,8 +8973,21 @@ overflow:hidden;
           <span class="cuf-text">پیام‌های <b id="chatUserFilterName"></b></span>
           <button type="button" class="cuf-clear" id="chatUserFilterClearBtn">نمایش همه ✕</button>
         </div>
+        <div class="chat-search-bar" id="chatSearchBar">
+          <span class="csb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg></span>
+          <input type="text" id="chatSearchInput" class="csb-input" placeholder="جستجو در پیام‌ها…" autocomplete="off">
+          <span class="csb-count" id="chatSearchCount"></span>
+          <button type="button" class="csb-nav" id="chatSearchPrevBtn" aria-label="نتیجه قبلی" title="نتیجه قبلی" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg></button>
+          <button type="button" class="csb-nav" id="chatSearchNextBtn" aria-label="نتیجه بعدی" title="نتیجه بعدی" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+          <button type="button" class="csb-close" id="chatSearchCloseBtn" aria-label="بستن جستجو" title="بستن جستجو"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
         <div class="chat-messages-wrap" id="chatMessagesWrap">
-          <div class="chat-messages" id="chatMessages"><div class="chat-empty-msg">در حال بارگذاری پیام‌ها...</div></div>
+          <div class="chat-messages" id="chatMessages"><div class="chat-skel">
+            <div class="chat-skel-row"><div class="skel-avatar skel-shimmer"></div><div class="chat-skel-bubble" style="width:58%;"><div class="skel-line skel-shimmer" style="width:90%;"></div><div class="skel-line skel-shimmer" style="width:55%;"></div></div></div>
+            <div class="chat-skel-row own"><div class="chat-skel-bubble" style="width:46%;"><div class="skel-line skel-shimmer" style="width:80%;"></div></div></div>
+            <div class="chat-skel-row"><div class="skel-avatar skel-shimmer"></div><div class="chat-skel-bubble" style="width:68%;"><div class="skel-line skel-shimmer" style="width:95%;"></div><div class="skel-line skel-shimmer" style="width:70%;"></div><div class="skel-line skel-shimmer" style="width:40%;"></div></div></div>
+            <div class="chat-skel-row own"><div class="chat-skel-bubble" style="width:36%;"><div class="skel-line skel-shimmer" style="width:85%;"></div></div></div>
+          </div></div>
           <button type="button" class="chat-scroll-down-btn" id="chatScrollDownBtn" aria-label="رفتن به آخرین پیام" title="رفتن به آخرین پیام">
             <span class="csd-badge" id="chatScrollDownBadge"></span>
             <span class="csd-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg></span>
@@ -7982,7 +9014,7 @@ overflow:hidden;
           <button type="button" data-act="media"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.3"/><circle cx="8.3" cy="9.3" r="1.6"/><path d="M4 16.5l5-4.7 3.5 3 3-3.3 4.5 4.9"/></svg></span> عکس یا ویدیو</button>
           <button type="button" data-act="gif"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5l1.3-4.2a1.6 1.6 0 0 1 2-1.1l11 3.3-4 1.3z"/><rect x="3.5" y="9.5" width="17" height="10.5" rx="2"/><path d="M9 9.5L11 5M14 9.5L16 5"/></svg></span> گیف</button>
         </div>
-
+        <div class="chat-report-hint" id="reportBtnHint"></div>
       </div>
       <div class="cm-action-menu-backdrop" id="cmActionMenuBackdrop"></div>
       <div class="cm-action-menu" id="cmActionMenu"></div>
@@ -8118,17 +9150,47 @@ overflow:hidden;
       <button type="button" class="narration-play-btn narration-play-btn-inline" id="narrationPremiumBtn">🔊 توضیح صوتی اشتراک پرمیوم</button>
     </div>
 
-    <div class="prem-benefit-list">
-      <div class="prem-benefit-item"><span class="emoji">🤝</span><p>با پرمیوم دیگه تنها این مسیرو نمی‌ری — «هم‌مسیر» برات باز می‌شه تا هر شب گزارش روزتو با کسی به اشتراک بذاری که واقعاً کنارته.</p></div>
-      <div class="prem-benefit-item"><span class="emoji">🧠</span><p>کوچ هوش مصنوعیت کاملاً بی‌سقف می‌شه: هر شب هرچقدر لازم داری حرف بزن، تحلیل عمیق شب و گزارش پیشرفت بگیر — انگار یه مربی شخصی همیشه در دسترسته.</p></div>
-      <div class="prem-benefit-item"><span class="emoji">⏳</span><p>دیگه محدود به ۶۰ روز و شدت سبکِ نسخه‌ی رایگان نیستی؛ طول و شدت برنامه‌ت کاملاً دست خودته، دقیقاً مطابق هدف و توان خودت.</p></div>
-      <div class="prem-benefit-item"><span class="emoji">📚</span><p>کل کتابخونه‌ی محتوا — همه‌ی درس‌ها، تمرین‌ها و منابع — بدون هیچ قفلی جلوی پاته و هر وقت لازم داشتی در دسترسته.</p></div>
-      <div class="prem-benefit-item"><span class="emoji">💬</span><p>چت عمومی هم برات کاملاً بی‌محدودیته؛ هر چقدر خواستی با بقیه‌ی اعضا در ارتباط باش، بدون هیچ سقفی.</p></div>
-      <div class="prem-benefit-item"><span class="emoji">🎨</span><p>همه‌ی تم‌ها و گزینه‌های شخصی‌سازی ظاهر اپ هم باز می‌شن؛ اپو دقیقاً مطابق سلیقه‌ی خودت می‌سازی.</p></div>
-      <div class="prem-benefit-item"><span class="emoji">🧘</span><p>حالت‌های تمرکز بیشتر — باشگاه، امتحان، سفر و بقیه — که تو نسخه‌ی رایگان قفلن، کاملاً در اختیارت قرار می‌گیرن.</p></div>
-      <div class="prem-benefit-item"><span class="emoji">💳</span><p>همه‌ی این‌ها فقط با یه پرداخت یک‌بار برای همیشه فعال می‌شه — نه اشتراک ماهانه، نه تمدید دوره‌ای، نه هیچ هزینه‌ی پنهون.</p></div>
-      <div class="prem-benefit-item"><span class="emoji">✨</span><p>پرمیوم فقط چندتا قفل باز نمی‌کنه؛ اپو از یه ابزار محدود به یه همراه واقعی تو این مسیر تبدیل می‌کنه — همراهی که هر شب کنارته.</p></div>
-      <div class="prem-benefit-item"><span class="emoji">🌟</span><p>همین حالا، با یه خرید یک‌بار، نسخه‌ی کامل رو فعال کن و بدون هیچ محدودیتی مسیرتو ادامه بده — بهترین نسخه‌ی خودت منتظرته.</p></div>
+    <div class="prem-journey">
+      <div class="prem-journey-card">
+        <div class="pj-icon">🤝</div>
+        <div class="pj-text">با پرمیوم دیگه تنها این مسیرو نمی‌ری — «هم‌مسیر» برات باز می‌شه تا هر شب گزارش روزتو با کسی به اشتراک بذاری که واقعاً کنارته.</div>
+      </div>
+      <div class="prem-journey-card">
+        <div class="pj-icon">🧠</div>
+        <div class="pj-text">کوچ هوش مصنوعیت کاملاً بی‌سقف می‌شه: هر شب هرچقدر لازم داری حرف بزن، تحلیل عمیق شب و گزارش پیشرفت بگیر — انگار یه مربی شخصی همیشه در دسترسته.</div>
+      </div>
+      <div class="prem-journey-card">
+        <div class="pj-icon">⏳</div>
+        <div class="pj-text">دیگه محدود به ۶۰ روز و شدتِ سبکِ نسخه‌ی رایگان نیستی؛ طول و شدت برنامه‌ت کاملاً دست خودته، دقیقاً مطابق هدف و توان خودت.</div>
+      </div>
+      <div class="prem-journey-card">
+        <div class="pj-icon">📚</div>
+        <div class="pj-text">کل کتابخونه‌ی محتوا — همه‌ی درس‌ها، تمرین‌ها و منابع — بدون هیچ قفلی جلوی پاته و هر وقت لازم داشتی در دسترسته.</div>
+      </div>
+      <div class="prem-journey-card">
+        <div class="pj-icon">💬</div>
+        <div class="pj-text">چت عمومی هم برات کاملاً بی‌محدودیته؛ هر چقدر خواستی با بقیه‌ی اعضا در ارتباط باش، بدون هیچ سقفی.</div>
+      </div>
+      <div class="prem-journey-card">
+        <div class="pj-icon">🎨</div>
+        <div class="pj-text">همه‌ی تم‌ها و گزینه‌های شخصی‌سازی ظاهر اپ هم باز می‌شن؛ اپو دقیقاً مطابق سلیقه‌ی خودت می‌سازی.</div>
+      </div>
+      <div class="prem-journey-card">
+        <div class="pj-icon">🧘</div>
+        <div class="pj-text">حالت‌های تمرکز بیشتر — امتحان، سفر، کافی‌شاپ و بقیه — که تو نسخه‌ی رایگان قفلن، کاملاً در اختیارت قرار می‌گیرن.</div>
+      </div>
+      <div class="prem-journey-card">
+        <div class="pj-icon">💳</div>
+        <div class="pj-text">همه‌ی این‌ها فقط با یه پرداخت یک‌بار برای همیشه فعال می‌شه — نه اشتراک ماهانه، نه تمدید دوره‌ای، نه هیچ هزینه‌ی پنهون.</div>
+      </div>
+      <div class="prem-journey-card">
+        <div class="pj-icon">✨</div>
+        <div class="pj-text">پرمیوم فقط چندتا قفل باز نمی‌کنه؛ اپو از یه ابزار محدود به یه همراه واقعی تو این مسیر تبدیل می‌کنه.</div>
+      </div>
+      <div class="prem-journey-card pj-final">
+        <div class="pj-icon">🌟</div>
+        <div class="pj-text">همین حالا، با یه خرید یک‌بار، نسخه‌ی کامل رو فعال کن و بدون هیچ محدودیتی مسیرتو ادامه بده — بهترین نسخه‌ی خودت منتظرته.</div>
+      </div>
     </div>
 
     <!-- Real remaining-slots widget: numbers come from Supabase (premium_capacity table),
@@ -8288,9 +9350,18 @@ overflow:hidden;
       <button class="lb-refresh-btn" id="lbRefreshBtn" title="بروزرسانی"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 0 1 12.6-5.5M19.5 12a7.5 7.5 0 0 1-12.6 5.5"/><path d="M17.6 3.6v3.4h-3.4M6.4 20.4v-3.4h3.4"/></svg></button>
     </div>
 
-    <div id="lbLoading" class="lb-loading">
-      <div class="lb-spinner"></div>
-      در حال بارگذاری رتبه‌بندی…
+    <div id="lbLoading">
+      <div class="lb-skel-podium">
+        <div class="lb-skel-card"><div class="skel-avatar skel-shimmer"></div><div class="skel-line skel-shimmer"></div><div class="skel-line skel-shimmer"></div></div>
+        <div class="lb-skel-card"><div class="skel-avatar skel-shimmer"></div><div class="skel-line skel-shimmer"></div><div class="skel-line skel-shimmer"></div></div>
+        <div class="lb-skel-card"><div class="skel-avatar skel-shimmer"></div><div class="skel-line skel-shimmer"></div><div class="skel-line skel-shimmer"></div></div>
+      </div>
+      <div class="lb-skel-rows">
+        <div class="lb-skel-row"><div class="skel-line rank skel-shimmer"></div><div class="skel-avatar skel-shimmer"></div><div class="skel-line name skel-shimmer"></div><div class="skel-chip skel-shimmer"></div></div>
+        <div class="lb-skel-row"><div class="skel-line rank skel-shimmer"></div><div class="skel-avatar skel-shimmer"></div><div class="skel-line name skel-shimmer"></div><div class="skel-chip skel-shimmer"></div></div>
+        <div class="lb-skel-row"><div class="skel-line rank skel-shimmer"></div><div class="skel-avatar skel-shimmer"></div><div class="skel-line name skel-shimmer"></div><div class="skel-chip skel-shimmer"></div></div>
+        <div class="lb-skel-row"><div class="skel-line rank skel-shimmer"></div><div class="skel-avatar skel-shimmer"></div><div class="skel-line name skel-shimmer"></div><div class="skel-chip skel-shimmer"></div></div>
+      </div>
     </div>
 
     <div id="lbUnconfigured" class="lb-empty" style="display:none">این بخش هنوز به سرور وصل نشده.</div>
@@ -8421,7 +9492,9 @@ overflow:hidden;
 
   <!-- ===================== TAB: GAMES (قبلاً «حکم» — حالا هابِ بازی‌ها) ===================== -->
   <div class="tab-panel" id="tab-hokm">
-    <!-- ===== انتخاب‌گرِ بازی: 🃏 حکم / 🔤 اسم فامیل ===== -->
+    <!-- ===== انتخاب‌گرِ بازی: 🃏 حکم / 🔤 اسم فامیل / 🔍 دابل =====
+         دابل STAGE 1: فقط موتورِ تولیدِ دسته (بدونِ نماد/کارتِ گرد/چندنفره) — به همون
+         الگویِ کارتِ سومِ این نوار اضافه شده، هیچ‌چیزِ hk-/ef- لمس نشده. -->
     <div class="games-select-bar" id="gamesSelectBar">
       <button type="button" class="games-select-card active" id="gamesSelectHokm" data-game="hokm">
         <span class="games-select-icon">🃏</span>
@@ -8431,13 +9504,21 @@ overflow:hidden;
         <span class="games-select-icon">🔤</span>
         <span class="games-select-label">اسم فامیل</span>
       </button>
+      <button type="button" class="games-select-card" id="gamesSelectDobble" data-game="dobble">
+        <span class="games-select-icon">🔍</span>
+        <span class="games-select-label">دابل</span>
+      </button>
     </div>
 
     <!-- ===== پنلِ بازیِ «حکم» — محتوایِ قبلی، عیناً دست‌نخورده، فقط داخلِ wrapper ===== -->
     <div class="games-game-panel" id="gamesHokmPanel">
     <!-- ===== STAGE 2 — لابی عمومی (ساخت/دیدن/پیوستن به میز) ===== -->
     <div class="hk-lobby-panel" id="hkLobbyPanel">
-      <div class="hk-lobby-loading" id="hkLobbyLoading">در حال بارگذاری لابی...</div>
+      <div class="hk-lobby-loading" id="hkLobbyLoading"><div class="lobby-skel">
+        <div class="lobby-skel-row"><div class="lobby-skel-info"><div class="skel-avatar skel-shimmer"></div><div class="skel-line skel-shimmer"></div></div><div class="skel-chip skel-shimmer"></div></div>
+        <div class="lobby-skel-row"><div class="lobby-skel-info"><div class="skel-avatar skel-shimmer"></div><div class="skel-line skel-shimmer"></div></div><div class="skel-chip skel-shimmer"></div></div>
+        <div class="lobby-skel-row"><div class="lobby-skel-info"><div class="skel-avatar skel-shimmer"></div><div class="skel-line skel-shimmer"></div></div><div class="skel-chip skel-shimmer"></div></div>
+      </div></div>
 
       <!-- وقتی کاربر خودش تو یه میزه (ساخته یا پیوسته) -->
       <div class="hk-myroom-card" id="hkMyRoomCard" style="display:none;">
@@ -8665,6 +9746,138 @@ overflow:hidden;
            رتبه‌بندیِ همه‌ی بازیکن‌ها (esmfamil_final_scores) به‌جایِ برد/باختِ دوتیمی. محتوایِ
            داخلش خالی تو HTML، لازی توسطِ JS (efRenderGameEndOverlay) پر می‌شه. -->
       <div class="ef-gameend-overlay" id="efGameEndOverlay" style="display:none;"></div>
+    </div>
+
+    <!-- ===== پنلِ بازیِ «دابل» — STAGE 1 (فقط موتورِ تولیدِ دسته؛ نمادها، رندرِ کارتِ گرد، لابی
+         و گیم‌پلی هنوز اضافه نشدن، مالِ STAGEهای بعدین). دسته‌ی ۵۵کارتیِ دابل با الگوریتمِ
+         صفحه‌ی تصویریِ متناهیِ مرتبه‌ی ۷ داخلِ app.js (ماژولِ «DOBBLE — STAGE 1») ساخته و
+         اعتبارسنجی می‌شه — هر جفت کارت باید دقیقاً ۱ نمادِ مشترک داشته باشه. این پنل فقط
+         نتیجه‌ی اون اعتبارسنجی رو (برای کاربر و برای دیباگِ خودمون) نشون می‌ده. -->
+    <div class="games-game-panel" id="gamesDobblePanel" style="display:none;">
+      <!-- ===== STAGE 3 — لابیِ عمومیِ دابل (ساخت/دیدن/پیوستن به میز) + شروعِ بازی/دیلِ اول =====
+           دقیقاً هم‌الگو با hkLobbyPanel/efLobbyPanel: RPCهای dobble_02_lobby_rpc.sql +
+           dobble_03_start_room_rpc.sql (باید بعدِ dobble_01_schema.sql، به همین ترتیب، رو
+           Supabase SQL editor اجرا شده باشن) + realtimeِ broadcast دستیِ self:false رویِ
+           کانالِ dobble_lobby (لیستِ میزهای باز) و dobble_room_<roomId> (وضعیتِ خودِ میز).
+           برخلافِ حکم (۴ صندلیِ ثابت)، تعدادِ بازیکن‌های دابل طبقِ سند بینِ ۲ تا ۸ متغیره —
+           سازنده‌ی میز با یه استپرِ عددی (dblMaxPlayersStepper) خودش تعدادِ صندلی‌ها رو انتخاب
+           می‌کنه، و بعداً با دکمه‌ی «شروع بازی» (dblStartGameBtn) دستی شروعش می‌کنه (میز هیچ‌وقت
+           خودکار پر نمی‌شه، هم‌الگو با efStartGameBtn). تطبیقِ نمادها/claim/امتیاز (طبقِ سند
+           مالِ STAGE ۴) هنوز نیومده — این‌جا فقط تا «همه یه کارت دستشونه و کارتِ وسط رو
+           می‌بینن» می‌ره. -->
+      <div class="dbl-lobby-panel" id="dblLobbyPanel">
+        <div class="dbl-lobby-loading" id="dblLobbyLoading"><div class="lobby-skel">
+        <div class="lobby-skel-row"><div class="lobby-skel-info"><div class="skel-avatar skel-shimmer"></div><div class="skel-line skel-shimmer"></div></div><div class="skel-chip skel-shimmer"></div></div>
+        <div class="lobby-skel-row"><div class="lobby-skel-info"><div class="skel-avatar skel-shimmer"></div><div class="skel-line skel-shimmer"></div></div><div class="skel-chip skel-shimmer"></div></div>
+        <div class="lobby-skel-row"><div class="lobby-skel-info"><div class="skel-avatar skel-shimmer"></div><div class="skel-line skel-shimmer"></div></div><div class="skel-chip skel-shimmer"></div></div>
+      </div></div>
+
+        <!-- وقتی کاربر خودش تو یه میزه (ساخته یا پیوسته) — dblMyRoomWaiting و dblPlayScreen
+             هیچ‌وقت هم‌زمان دیده نمی‌شن، dblRenderPlayScreen (app.js) بینشون سوییچ می‌کنه. -->
+        <div class="dbl-myroom-card" id="dblMyRoomCard" style="display:none;">
+          <div class="dbl-myroom-head">
+            <span class="dbl-myroom-title">🪑 میز شما</span>
+            <span class="dbl-myroom-count" id="dblMyRoomCount">۱/۴</span>
+          </div>
+
+          <div class="dbl-myroom-waiting" id="dblMyRoomWaiting">
+            <div class="dbl-myroom-seats" id="dblMyRoomSeats"></div>
+            <div class="dbl-myroom-status" id="dblMyRoomStatus">در انتظار بازیکن‌های بیشتر...</div>
+            <button type="button" class="dbl-start-btn" id="dblStartGameBtn" style="display:none;">شروع بازی</button>
+          </div>
+
+          <!-- STAGE 3، نیمه‌ی دوم: کارتِ خودم + کارتِ وسط، بعدِ dobble_start_room/دیل. خودِ
+               تطبیقِ نماد (کلیک رویِ نماد، claim، تاییدِ میزبان) و شمارشِ کارت‌ها، طبقِ سند
+               مالِ STAGE ۴ هست — این‌جا فقط «دیل شد و دیده می‌شه» رو نشون می‌ده. -->
+          <div class="dbl-play-screen" id="dblPlayScreen" style="display:none;">
+            <div class="dbl-play-status">بازی شروع شد! 🔍</div>
+            <div class="dbl-play-boards" id="dblPlayBoards">
+              <div class="dbl-play-board">
+                <div class="dbl-play-board-label">کارتِ وسط</div>
+                <div class="dbl-play-card-wrap" id="dblCenterCardWrap"></div>
+              </div>
+              <div class="dbl-play-board">
+                <div class="dbl-play-board-label">کارتِ شما</div>
+                <div class="dbl-play-card-wrap" id="dblMyCardWrap"></div>
+              </div>
+            </div>
+
+            <!-- STAGE 4، نیمه‌ی دوم: شمارشِ زنده‌ی کارتِ هر بازیکن — dblRenderScoreboard
+                 (app.js) با dobble_room_scoreboard پرش می‌کنه، هر بارِ دورِ جدید. -->
+            <div class="dbl-scoreboard" id="dblScoreboard"></div>
+          </div>
+
+          <button type="button" class="dbl-leave-btn" id="dblLeaveRoomBtn">خروج از میز</button>
+        </div>
+
+        <!-- وقتی کاربر تو هیچ میزی نیست: لیستِ میزهای باز یا ساختِ میزِ جدید -->
+        <div class="dbl-lobby-browse" id="dblLobbyBrowse" style="display:none;">
+          <button type="button" class="dbl-create-btn" id="dblCreateRoomBtn">+ ساخت میز جدید</button>
+          <div class="dbl-lobby-list-head">میزهای باز</div>
+          <div class="dbl-lobby-list" id="dblLobbyList"></div>
+          <div class="dbl-lobby-empty" id="dblLobbyEmpty" style="display:none;">فعلاً میز بازی در انتظار نیست — اولین نفر باش! 🔍</div>
+        </div>
+
+        <!-- فرمِ ساختِ میز: فقط انتخابِ تعدادِ صندلی (۲ تا ۸) — هیچ تنظیمِ دیگه‌ای فعلاً لازم نیست -->
+        <div class="dbl-create-form" id="dblCreateForm" style="display:none;">
+          <div class="dbl-create-head">
+            <span class="dbl-create-title">ساختِ میزِ دابل</span>
+            <button type="button" class="dbl-create-close-btn" id="dblCreateCloseBtn" aria-label="بستن">✕</button>
+          </div>
+          <div class="dbl-create-section-label">میز برای چند نفر باشه؟</div>
+          <div class="dbl-players-stepper" id="dblMaxPlayersStepper">
+            <button type="button" class="dbl-stepper-btn" id="dblStepperMinus" aria-label="کم‌کردن">−</button>
+            <span class="dbl-stepper-value" id="dblStepperValue">۴ نفر</span>
+            <button type="button" class="dbl-stepper-btn" id="dblStepperPlus" aria-label="زیادکردن">+</button>
+          </div>
+          <button type="button" class="dbl-create-btn dbl-create-submit-btn" id="dblCreateSubmitBtn">ساختِ میز</button>
+        </div>
+      </div>
+
+      <!-- STAGE 4، نیمه‌ی دوم — صفحه‌ی نتیجه‌ی پایانِ بازی: وقتی remaining_deck تمام بشه
+           (dobble_claim_resolve میز رو 'finished' می‌کنه)، این اورلی رویِ dblLobbyPanel باز
+           می‌شه — عیناً هم‌الگو با efGameEndOverlay/efRenderGameEndOverlay. محتواش خالی تو
+           HTML، لازی توسطِ JS (dblRenderGameEndOverlay) پر می‌شه. -->
+      <div class="dbl-gameend-overlay" id="dblGameEndOverlay" style="display:none;"></div>
+
+      <div class="dbl-stage1-card" id="dblStage1Card">
+        <div class="dbl-stage1-head">
+          <span class="dbl-stage1-emoji">🔍</span>
+          <span class="dbl-stage1-title">دابل</span>
+        </div>
+        <div class="dbl-stage1-status" id="dblStage1Status">در حال ساختنِ دسته‌ی کارت‌ها...</div>
+        <div class="dbl-stage1-meta" id="dblStage1Meta" style="display:none;">
+          <div class="dbl-stage1-meta-row"><span>تعدادِ کارت‌ها</span><span id="dblMetaDeckSize">—</span></div>
+          <div class="dbl-stage1-meta-row"><span>تعدادِ نمادها</span><span id="dblMetaSymbolCount">—</span></div>
+          <div class="dbl-stage1-meta-row"><span>نمادِ هر کارت</span><span id="dblMetaSymbolsPerCard">—</span></div>
+          <div class="dbl-stage1-meta-row"><span>چک‌سام</span><span id="dblMetaChecksum">—</span></div>
+        </div>
+        <div class="dbl-stage1-note">🔧 چیدمانِ نمادها رویِ کارتِ گرد و بازیِ چندنفره تو مراحلِ بعدی اضافه می‌شن.</div>
+      </div>
+
+      <!-- ===== STAGE 2، نیمه‌ی اول — ویترینِ بانکِ نمادِ SVG (icon-bank.js).
+           نیمه‌ی دوم (چیدمانِ بدون‌برخورد رویِ کارتِ گردِ دابل) هنوز وصل نشده. ===== -->
+      <div class="dbl-icons-card" id="dblIconsCard" style="display:none;">
+        <div class="dbl-icons-head">
+          <span class="dbl-icons-title">🎨 بانکِ نمادها</span>
+          <span class="dbl-icons-count" id="dblIconsCount">—</span>
+        </div>
+        <div class="dbl-icons-note">هر ۵۷ نمادِ ممکنِ دسته، رندرشده از رویِ همون تعریف‌هایِ SVGیِ مشترک — برای تاییدِ خوانا و متمایز بودنشون قبلِ رفتن به چیدمانِ رویِ کارت.</div>
+        <div class="dbl-icons-grid" id="dblIconsGrid"></div>
+        <div class="dbl-icons-scaletest" id="dblIconsScaleTest"></div>
+      </div>
+
+      <!-- ===== STAGE 2، نیمه‌ی دوم — ویترینِ چیدمانِ بدون‌برخوردِ نمادها رویِ کارتِ گرد
+           (dobble-card.js). چند کارتِ واقعی از دلِ همون دسته‌ی ۵۵کارتیِ STAGE 1 برداشته
+           می‌شن و رندر می‌شن — نه کارتِ فرضی، تا هم چیدمان و هم دسته‌ی واقعی با هم دیده بشن. ===== -->
+      <div class="dbl-cards-card" id="dblCardsCard" style="display:none;">
+        <div class="dbl-cards-head">
+          <span class="dbl-cards-title">🟢 نمونه‌ی کارت‌های گرد</span>
+          <span class="dbl-cards-count" id="dblCardsCount">—</span>
+        </div>
+        <div class="dbl-cards-note">چند کارتِ واقعی از دسته، با چیدمانِ بدون‌برخوردِ نمادها — سایز/زاویه‌ی هر نماد تصادفی و کش‌شده‌ست (رفرش نمی‌کنه جابه‌جا بشه).</div>
+        <div class="dbl-cards-row" id="dblCardsRow"></div>
+      </div>
     </div>
   </div>
 
@@ -9111,7 +10324,7 @@ overflow:hidden;
 
         <div class="section">
           <div class="section-head collapsible" data-target="giBody-focusmode"><span class="gi-ic gi-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg></span><span class="gi-title">حالت تمرکز</span><span class="chevron">▾</span></div>
-          <div id="giBody-focusmode" class="collapsible-body"><div class="gi-desc">با دکمه‌ی «حالت» وسط نوار پایین، یکی از ده‌ها موقعیت واقعی زندگیتو انتخاب کن — از باشگاه و خواب گرفته تا کافی‌شاپ، امتحان، آشپزی، سفر یا حتی محیط کار (برنامه‌نویسی، حسابداری، فروشندگی و بقیه). با انتخابش، اپ یه صفحه‌ی اختصاصی مخصوص همون کار می‌سازه: تایمر تمرکز، یه نکته‌ی کاربردی و یه چک‌لیست مخصوص همون موقعیت. آخر جلسه کیفیتشو با ستاره مشخص کن؛ تعداد و کیفیت جلسه‌هات تو تب پیشرفت ثبت می‌شه و با استفاده‌ی منظم از یه حالت، یه عنوان مخصوص همون کار برات باز می‌شه. چند حالت پایه رایگانن، بقیه مخصوص پرمیومن.</div></div>
+          <div id="giBody-focusmode" class="collapsible-body"><div class="gi-desc">با دکمه‌ی «حالت» وسط نوار پایین، یکی از ده‌ها موقعیت واقعی زندگیتو انتخاب کن — از صبح و خواب گرفته تا کافی‌شاپ، امتحان، آشپزی، سفر یا حتی محیط کار (برنامه‌نویسی، حسابداری، فروشندگی و بقیه). با انتخابش، اپ یه صفحه‌ی اختصاصی مخصوص همون کار می‌سازه: تایمر تمرکز، یه نکته‌ی کاربردی و یه چک‌لیست مخصوص همون موقعیت. آخر جلسه کیفیتشو با ستاره مشخص کن؛ تعداد و کیفیت جلسه‌هات تو تب پیشرفت ثبت می‌شه و با استفاده‌ی منظم از یه حالت، یه عنوان مخصوص همون کار برات باز می‌شه. چند حالت پایه رایگانن، بقیه مخصوص پرمیومن.</div></div>
         </div>
 
       </div>

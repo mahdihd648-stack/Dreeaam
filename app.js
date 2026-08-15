@@ -1705,7 +1705,12 @@ function defaultStoreData(){
     lbPrivacy:{age:false, habit:false, programLen:false, titles:false}, lbLastRank:null,
     reportSentDates:{}, aiFeatureUseCount:{}, xpPenaltyStartDate:null,
     riskNudge:{dismissedKey:null, lastNotifLevel:null},
-    tagAffinity:{}, dailyUsageMinutes:{}, dailyFeatureLog:{} };
+    tagAffinity:{}, dailyUsageMinutes:{}, dailyFeatureLog:{},
+    // بار اول که روزشمار اصلی به قله (۹۰ روز) رسید، این برای همیشه true می‌مونه —
+    // برخلاف peakCelebrated/maxStreak که با «شروع دوباره» صفر می‌شن، این هیچ‌وقت پاک
+    // نمی‌شه، چون قابلیتِ «تعیین دستیِ تاریخ شکست» رو باز می‌کنه. جزئیات کامل پایین فایل.
+    backdateUnlocked:false,
+    timeGuard:{lastDeviceMs:null, lastServerMs:null, suspicious:false, suspiciousSince:null} };
 }
 let storeData = defaultStoreData();
 let today = todayKey();
@@ -1832,6 +1837,13 @@ function updatePlanBadge(){
   const iconEl = document.getElementById('planBadgeIcon');
   const textEl = document.getElementById('planBadgeText');
   const isPremiumNow = !!(storeData.premium || isInTrial());
+  // Pre-paint cache: mirrors the 'checklistApp:lastTheme' pattern used by applyTheme().
+  // storeData.premium loads async, so without this a returning premium user's very first
+  // frame (before this function ever runs) paints the hardcoded free-plan/open-lock badge
+  // that's in the raw HTML. The inline script right after #planBadge in index-45.html reads
+  // this synchronously, before first paint, and flips the badge to premium immediately —
+  // so a premium user can never see the lock badge, not even for a single frame.
+  try{ localStorage.setItem('checklistApp:lastPremium', isPremiumNow ? '1' : '0'); }catch(e){}
   badge.classList.toggle('is-premium', isPremiumNow);
   badge.classList.toggle('is-free', !isPremiumNow);
   if(isPremiumNow){
@@ -1954,6 +1966,17 @@ async function resolveTrialStart(){
   // صداش می‌زنن نگه داشته شده.
   effectiveTrialStartMs = null;
 }
+/* ==================== گزارش روزانه در چت عمومی: هفته‌ی اول اکانت رایگانه ====================
+   بر پایه‌ی publicChatUser.created_at (زمان واقعی ساختِ اکانت رو سرور Supabase Auth، نه
+   داده‌ی محلی) — پس با پاک کردن داده‌ی برنامه ریست نمی‌شه. بعد از این ۷ روز، محدودیتِ
+   قدیمی (یک‌بار در کل، مگر پرمیوم) دوباره برقرار می‌شه. */
+const FREE_REPORT_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+function isInFirstReportWeek(){
+  if(!publicChatUser || !publicChatUser.created_at) return false;
+  const createdMs = new Date(publicChatUser.created_at).getTime();
+  if(isNaN(createdMs)) return false;
+  return (Date.now() - createdMs) < FREE_REPORT_WEEK_MS;
+}
 function isInTrial(){
   // طبق درخواست: بازه‌ی آزمایشی رایگان کاملاً و برای همیشه غیرفعاله. همه‌ی بخش‌های
   // پرمیوم از همون اولین لحظه قفلن — هیچ استثنایی، هیچ باگی. این تابع تنها جایی‌ه
@@ -2041,8 +2064,9 @@ const SOS_ACTIVITIES = [
   "۱۰-۱۵ دقیقه فقط این وسوسه رو observe کن بدون عمل کردن بهش، ببین خودش کم می‌شه",
   "از خودت بپرس: الان واقعاً چی می‌خوام؟ آرامش، توجه، یا فرار از یه حس بد؟"
 ];
-const BREATH_TEXTS = ["دم بگیر... 🫁","نگه‌دار...","بازدم بده...","نگه‌دار..."];
-let sosTimerInterval=null, breathInterval=null, sosSecondsLeft=300;
+let sosTimerInterval=null, sosSecondsLeft=600;
+const SOS_TIMER_TOTAL_SECONDS = 600;
+const SOS_SLIP_UNLOCK_SECONDS = 45;
 
 // Each temptation has its own tailored set of instant alternatives —
 // masturbation keeps the original pool (it already works great); the rest get their own.
@@ -2159,12 +2183,68 @@ function openSOS(){
   const overlay=document.getElementById('sosOverlay');
   pendingCategory = null;
   document.getElementById('sosCatStep').style.display='block';
-  ['sosWhyBox','sosContactBox','sosMaritalBox','breathCircle','sosTimer','sosActivity','sosOutcomeRow'].forEach(id=>{
+  ['sosWhyBox','sosContactBox','sosMaritalBox','sosMyPlanBox','sosChecklist','sosTimerWrap','sosOutcomeRow'].forEach(id=>{
     document.getElementById(id).style.display='none';
   });
   document.getElementById('sosHaltStep').style.display='none';
   document.getElementById('sosSkip').style.display='none';
   overlay.classList.add('show');
+}
+// انتخابِ n موردِ یکتا و به‌ترتیبِ تصادفی از یه آرایه — برایِ ساختنِ چک‌لیستِ هرباره‌ی SOS.
+function sosPickN(arr, n){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+  return a.slice(0, n);
+}
+function renderSosChecklist(items){
+  const wrap = document.getElementById('sosChecklist');
+  wrap.innerHTML = items.map((t,i)=>
+    `<button type="button" class="sos-check-item" data-idx="${i}">
+      <span class="sci-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg></span>
+      <span class="sci-text">${escapeHtml(t)}</span>
+    </button>`
+  ).join('');
+  wrap.querySelectorAll('.sos-check-item').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      btn.classList.toggle('done');
+      updateSosSlipGate();
+    });
+  });
+}
+// «این‌بار نه» رو برایِ چند ثانیه‌ی اول قفل می‌کنه — نه برایِ همیشه، فقط یه مکثِ واقعی
+// جلویِ تصمیمِ آنی می‌ذاره؛ چک‌کردنِ هر موردِ چک‌لیست هم زودتر بازش می‌کنه.
+let sosSlipUnlockTimer = null;
+function updateSosSlipGateLabel(sec){
+  const slipBtn = document.getElementById('sosSlipBtn');
+  if(slipBtn && slipBtn.disabled) slipBtn.textContent = `این‌بار نه (${toFa(sec)})`;
+}
+function unlockSosSlipGate(){
+  clearInterval(sosSlipUnlockTimer);
+  const slipBtn = document.getElementById('sosSlipBtn');
+  if(!slipBtn) return;
+  slipBtn.disabled = false;
+  slipBtn.classList.remove('locked');
+  slipBtn.textContent = 'این‌بار نه';
+}
+// همین‌که یکی از موردهایِ چک‌لیست تیک بخوره (یعنی واقعاً یه اقدامِ عملی انجام شده)،
+// قفلِ زمانی فوراً باز می‌شه — نیازی نیست منتظرِ تمومِ ۴۵ ثانیه بمونه.
+function updateSosSlipGate(){
+  const anyChecked = document.querySelectorAll('#sosChecklist .sos-check-item.done').length > 0;
+  if(anyChecked) unlockSosSlipGate();
+}
+function armSosSlipGate(){
+  const slipBtn = document.getElementById('sosSlipBtn');
+  if(!slipBtn) return;
+  slipBtn.disabled = true;
+  slipBtn.classList.add('locked');
+  let left = SOS_SLIP_UNLOCK_SECONDS;
+  updateSosSlipGateLabel(left);
+  clearInterval(sosSlipUnlockTimer);
+  sosSlipUnlockTimer = setInterval(()=>{
+    left--;
+    if(left<=0) unlockSosSlipGate();
+    else updateSosSlipGateLabel(left);
+  }, 1000);
 }
 function selectTemptationCategory(catId){
   const cat = TEMPTATION_CATEGORIES.find(c=>c.id===catId) || TEMPTATION_CATEGORIES[TEMPTATION_CATEGORIES.length-1];
@@ -2189,37 +2269,44 @@ function selectTemptationCategory(catId){
   const maritalTip = getSOSMaritalTip(cat.id);
   if(maritalTip){ maritalBox.style.display='block'; maritalBox.textContent = maritalTip; }
   else { maritalBox.style.display='none'; maritalBox.textContent=''; }
+
+  // چک‌لیستِ اقدامِ فوری: از استخرِ activities همون دسته‌بندی تصادفی انتخاب می‌شه — هربار
+  // بازکردنِ SOS، ترکیبِ متفاوتی می‌بینه. اگه برنامه‌ی خودِ کاربر (if-then) هم وجود داشته
+  // باشه، جدا و برجسته بالای چک‌لیست نشون داده می‌شه (نه قاطی موردهای عمومی) — همون
+  // یادآوریِ شخصی‌ای که موقعِ آنبوردینگ نوشته.
   const myPlan = storeData.profile && storeData.profile.ifThenPlan && storeData.profile.ifThenPlan.trim();
+  const myPlanBox = document.getElementById('sosMyPlanBox');
+  if(myPlan){ myPlanBox.style.display='block'; myPlanBox.textContent = 'برنامه‌ی خودت: ' + myPlan; }
+  else { myPlanBox.style.display='none'; myPlanBox.textContent=''; }
   const pool = cat.activities && cat.activities.length ? cat.activities : SOS_ACTIVITIES;
-  document.getElementById('sosActivity').style.display='block';
-  document.getElementById('sosActivity').textContent = myPlan ? ('برنامه‌ی خودت: ' + myPlan) : pool[Math.floor(Math.random()*pool.length)];
-  document.getElementById('breathCircle').style.display='flex';
-  document.getElementById('sosTimer').style.display='block';
+  const checklistItems = sosPickN(pool, Math.min(3, pool.length));
+  renderSosChecklist(checklistItems);
+  document.getElementById('sosChecklist').style.display='flex';
+  document.getElementById('sosTimerWrap').style.display='block';
   document.getElementById('sosOutcomeRow').style.display='flex';
 
-  sosSecondsLeft = 300;
+  sosSecondsLeft = SOS_TIMER_TOTAL_SECONDS;
   updateSOSTimerDisplay();
+  const barFill = document.getElementById('sosTimerBarFill');
+  if(barFill) barFill.style.width = '100%';
   clearInterval(sosTimerInterval);
   sosTimerInterval = setInterval(()=>{
     sosSecondsLeft--;
     if(sosSecondsLeft<=0){
       sosSecondsLeft=0;
       clearInterval(sosTimerInterval);
-      document.getElementById('sosTimer').textContent='گذشت! 👏';
-    } else updateSOSTimerDisplay();
+      document.getElementById('sosTimer').textContent='وسوسه رد شد! 👏';
+      if(barFill) barFill.style.width='0%';
+    } else {
+      updateSOSTimerDisplay();
+      if(barFill) barFill.style.width = ((sosSecondsLeft/SOS_TIMER_TOTAL_SECONDS)*100)+'%';
+    }
   },1000);
-  let bIdx=0;
-  const circle=document.getElementById('breathCircle');
-  circle.textContent = BREATH_TEXTS[0];
-  clearInterval(breathInterval);
-  breathInterval = setInterval(()=>{
-    bIdx=(bIdx+1)%BREATH_TEXTS.length;
-    circle.textContent = BREATH_TEXTS[bIdx];
-  },4000);
+  armSosSlipGate();
 }
 function closeSOS(){
   document.getElementById('sosOverlay').classList.remove('show');
-  clearInterval(sosTimerInterval); clearInterval(breathInterval);
+  clearInterval(sosTimerInterval); clearInterval(sosSlipUnlockTimer);
   document.getElementById('sosOutcomeRow').style.display='flex';
   document.getElementById('sosHaltStep').style.display='none';
 }
@@ -2862,9 +2949,13 @@ function checkMilestones(pct){
         storeData.firstDayCompleteShown = true; saveData();
         showCelebration({emoji:MILESTONE_MSG[100].emoji, title:MILESTONE_MSG[100].title,
           text: MILESTONE_MSG[100].text + " این اولین باریه که یه روز رو کامل می‌کنی 👏 هر وقت خواستی، تو منو می‌تونی ببینی نسخه‌ی پرمیوم چه امکانات بیشتری داره 🌟"});
-      } else {
+      } else if(m===100){
         showCelebration(MILESTONE_MSG[m]);
-        if(m===100) pendingInviteNudgeReason = 'daily100';
+        pendingInviteNudgeReason = 'daily100';
+      } else {
+        // ۲۵/۵۰/۷۵٪: به‌جای پاپ‌آپ تمام‌صفحه، فقط یه toast کوتاه — پاپ‌آپ کامل با
+        // کانفتی فقط برای تکمیل ۱۰۰٪ روز (بالا) نگه داشته شده.
+        showToast(MILESTONE_MSG[m].emoji+' '+MILESTONE_MSG[m].title);
       }
       if(m===100) launchConfetti();
     }
@@ -3227,6 +3318,8 @@ function updateLiveCounter(){
     if(!storeData.startTimestamp || isNaN(startMs)){
       grid.style.display = 'none';
       empty.style.display = 'block';
+      const overviewBadgeEmpty = document.getElementById('overviewLiveBadge');
+      if(overviewBadgeEmpty) overviewBadgeEmpty.textContent = '';
       return;
     }
     grid.style.display = 'flex';
@@ -3240,6 +3333,11 @@ function updateLiveCounter(){
     document.getElementById('slHours').textContent = toFaNum2(hours);
     document.getElementById('slMinutes').textContent = toFaNum2(minutes);
     document.getElementById('slSeconds').textContent = toFaNum2(seconds);
+    // خلاصه‌ی کوچولوی همین روز/ساعت رو خودِ دکمه‌ی زیرتبِ «نمای کلی» هم می‌نویسیم — چون
+    // دیفالتِ اپ رو تب «برنامه‌ی روزانه»ست، این تنها جایی می‌مونه که بدون سوییچ زیرتب
+    // بشه یه نگاه به روزشمار انداخت.
+    const overviewBadge = document.getElementById('overviewLiveBadge');
+    if(overviewBadge) overviewBadge.textContent = toFa(days) + ' روز، ' + toFa(hours) + ' ساعت';
     try{ updateCustomCountersLive(); }catch(err2){}
   }catch(err){ console.error('Live counter error', err); }
 }
@@ -3399,6 +3497,13 @@ function updateMountain(){
     daySubEl.textContent = "داری همون نسخه‌ای زندگی می‌کنی که می‌خواستی بشی";
     if(!storeData.peakCelebrated){
       storeData.peakCelebrated = true;
+      // بار اول که واقعاً به قله (۹۰ روز) می‌رسه، قابلیت «تعیین دستی تاریخ شکست» رو
+      // برای همیشه باز می‌کنیم — مگر اینکه همون لحظه ساعت گوشی مشکوک به دستکاری باشه
+      // (tgIsSuspicious، تعریف‌شده در انتهای فایل)، که در اون صورت این بار قفل می‌مونه
+      // و دفعه‌ی بعد که رکورد واقعی به ۹۰ برسه دوباره امتحان می‌شه.
+      if(!storeData.backdateUnlocked && !(typeof tgIsSuspicious==='function' && tgIsSuspicious())){
+        storeData.backdateUnlocked = true;
+      }
       const rw = rewardText(storeData.profile);
       const celebText = "۹۰ روز پشتکار، الان اینجایی. واقعاً به خودت افتخار کن." + (rw ? ` وقتشه اون پاداشی که برای خودت در نظر گرفته بودی رو بگیری: ${rw} 🎁` : '');
       showCelebration({emoji:"🏔️🎉", title:"به قله رسیدی!", text: celebText});
@@ -4398,6 +4503,17 @@ async function applyPendingWidgetToggles(){
     render(); saveData();
   }catch(e){ /* ignore */ }
 }
+/* وقتی کاربر رو بدنه‌ی نوتیفِ چت (نه دکمه‌ی ریپلای) تپ می‌زنه، MainActivity سمتِ native
+   یه پرچم تو SharedPreferences می‌ذاره (چون اون لحظه ممکنه این جاوااسکریپت هنوز کامل
+   لود نشده باشه که مستقیم صداش بزنه) — همون الگویِ applyPendingWidgetToggles بالا، فقط
+   برای AuthBridge.getPendingOpenChat. اینجا هم موقعِ استارت‌آپ هم موقعِ resume چک می‌شه. */
+async function applyPendingOpenChat(){
+  try{
+    if(!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AuthBridge)) return;
+    const res = await window.Capacitor.Plugins.AuthBridge.getPendingOpenChat();
+    if(res && res.pending) enterSubPage('chat');
+  }catch(e){ /* ignore */ }
+}
 /* Tiny badge = the real coach mascot's head (boy: same hair/face as buildCoachSVG), just
    cropped tight above the hoodie collar so it reads clearly at ~20px. Reuses the exact
    skin/hair/eye/brow/mouth markup from buildCoachSVG for the 'happy' and 'concerned' moods
@@ -4515,6 +4631,8 @@ function normalizeAndRenderStoreData(){
   if(storeData.voiceEnabled === undefined) storeData.voiceEnabled = false;
   if(!storeData.appLock) storeData.appLock = {enabled:false, method:'pin', pinHash:null, salt:null, recoveryHash:null, recoverySalt:null};
   if(storeData.appLock && !storeData.appLock.method) storeData.appLock.method = 'pin';
+  if(storeData.backdateUnlocked===undefined) storeData.backdateUnlocked = false;
+  if(!storeData.timeGuard) storeData.timeGuard = {lastDeviceMs:null, lastServerMs:null, suspicious:false, suspiciousSince:null};
   if(storeData.startDate && !storeData.startTimestamp){
     storeData.startTimestamp = dateOnly(storeData.startDate).toISOString();
   }
@@ -4752,12 +4870,14 @@ document.getElementById('lessonArea').addEventListener('focus',(e)=>{
 });
 /* ---------------- Restart journey (relapse reset) ---------------- */
 let journeyResetInProgress = false;
+let journeyResetPendingReason = null; // reasonKey انتخاب‌شده تو مرحله‌ی اول، تا وقتی مرحله‌ی تاریخ تایید بشه
 const streakResetBtnEl = document.getElementById('streakResetBtn');
 if(streakResetBtnEl){
   streakResetBtnEl.addEventListener('click', (e)=>{
     e.stopPropagation();
     const modal = document.getElementById('journeyResetModal');
     if(modal) modal.classList.add('visible');
+    showJourneyResetStep('reason');
   });
 }
 const journeyResetCancelBtnEl = document.getElementById('journeyResetCancelBtn');
@@ -4768,16 +4888,116 @@ if(journeyResetCancelBtnEl){
   });
 }
 document.querySelectorAll('#resetReasonList .reset-reason-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{ performJourneyReset(btn.dataset.reason); });
+  btn.addEventListener('click', ()=>{
+    const reasonKey = btn.dataset.reason;
+    // فقط وقتی که مالک اپه یا خودش یه‌بار روزشمار اصلیش به ۹۰ روز رسیده (storeData.backdateUnlocked)
+    // — و ساعت گوشیش الان مشکوک به دستکاری نیست (tgCanBackdate، تعریف‌شده انتهای فایل) —
+    // مرحله‌ی «تاریخ دقیق» رو نشون بده؛ در غیر این صورت رفتار قبلی: صفر شدن از همین الان.
+    if(typeof tgCanBackdate === 'function' && tgCanBackdate()){
+      journeyResetPendingReason = reasonKey;
+      openJourneyResetDateStep();
+    } else {
+      performJourneyReset(reasonKey);
+    }
+  });
 });
-async function performJourneyReset(reasonKey){
+function showJourneyResetStep(step){
+  const reasonStep = document.getElementById('journeyResetReasonStep');
+  const dateStep = document.getElementById('journeyResetDateStep');
+  if(reasonStep) reasonStep.style.display = (step==='reason') ? '' : 'none';
+  if(dateStep) dateStep.style.display = (step==='date') ? '' : 'none';
+}
+/* ---------------- مرحله‌ی «دقیقاً کِی شکست خوردی؟» (فقط برای کاربران واجدشرایط) ---------------- */
+let journeyResetChosenDate = null; // یه Date واقعی، یا null یعنی «همین الان»
+function tgFloorDate(){
+  // قدیمی‌ترین تاریخی که مجازه به‌عنوان تاریخ شکست انتخاب بشه: تاریخِ شروعِ همینِ روزشمار
+  // فعلی (اگه وجود داره)، وگرنه تا ۳۶۵ روز قبل. یعنی نمی‌شه شکستی رو ثبت کرد که از قبل
+  // از شروع همین دوره‌ست — این جلوی بی‌معنی شدن آمار (streakHistory/leaderboard) رو می‌گیره.
+  if(storeData.startTimestamp){
+    const d = new Date(storeData.startTimestamp);
+    if(!isNaN(d.getTime())) return d;
+  }
+  return new Date(Date.now() - 365*86400000);
+}
+function openJourneyResetDateStep(){
+  journeyResetChosenDate = null;
+  const input = document.getElementById('journeyResetDateInput');
+  const warn = document.getElementById('journeyResetDateWarn');
+  if(warn) warn.style.display = 'none';
+  if(input){
+    // دیفالتِ input رو رو «الان» می‌ذاریم؛ کاربر یا از چیپ‌های سریع استفاده می‌کنه یا خودش دستی عوضش می‌کنه.
+    const now = new Date();
+    input.max = tgToLocalInputValue(now);
+    input.min = tgToLocalInputValue(tgFloorDate());
+    input.value = tgToLocalInputValue(now);
+  }
+  document.querySelectorAll('#journeyResetDateChips .reset-date-chip').forEach(c=>c.classList.remove('active'));
+  const nowChip = document.querySelector('#journeyResetDateChips .reset-date-chip[data-days="0"]');
+  if(nowChip) nowChip.classList.add('active');
+  showJourneyResetStep('date');
+}
+// Date <-> رشته‌ی موردنیازِ input[type=datetime-local] (بدون تبدیل به UTC، بر مبنای ساعت محلی خودِ دستگاه)
+function tgToLocalInputValue(d){
+  const p = n => String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes());
+}
+document.querySelectorAll('#journeyResetDateChips .reset-date-chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    document.querySelectorAll('#journeyResetDateChips .reset-date-chip').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    const daysAgo = parseInt(chip.dataset.days, 10) || 0;
+    const d = new Date(Date.now() - daysAgo*86400000);
+    journeyResetChosenDate = d;
+    const input = document.getElementById('journeyResetDateInput');
+    if(input) input.value = tgToLocalInputValue(d);
+  });
+});
+const journeyResetDateInputEl = document.getElementById('journeyResetDateInput');
+if(journeyResetDateInputEl){
+  journeyResetDateInputEl.addEventListener('input', (e)=>{
+    document.querySelectorAll('#journeyResetDateChips .reset-date-chip').forEach(c=>c.classList.remove('active'));
+    const v = e.target.value;
+    journeyResetChosenDate = v ? new Date(v) : null;
+  });
+}
+const journeyResetDateBackBtnEl = document.getElementById('journeyResetDateBackBtn');
+if(journeyResetDateBackBtnEl){
+  journeyResetDateBackBtnEl.addEventListener('click', ()=>{ showJourneyResetStep('reason'); });
+}
+const journeyResetDateConfirmBtnEl = document.getElementById('journeyResetDateConfirmBtn');
+if(journeyResetDateConfirmBtnEl){
+  journeyResetDateConfirmBtnEl.addEventListener('click', ()=>{
+    const warn = document.getElementById('journeyResetDateWarn');
+    // دوباره امن، مستقل از UI: اگه بین باز شدنِ مودال و همین لحظه ساعت مشکوک شده باشه، رد کن.
+    if(!(typeof tgCanBackdate === 'function' && tgCanBackdate())){
+      if(warn){ warn.textContent = 'به نظر می‌رسه ساعت گوشیت درست تنظیم نیست؛ فعلاً نمی‌شه تاریخ دستی انتخاب کرد.'; warn.style.display='block'; }
+      return;
+    }
+    const chosen = journeyResetChosenDate || new Date();
+    const now = new Date();
+    const floor = tgFloorDate();
+    if(isNaN(chosen.getTime()) || chosen.getTime() > now.getTime()){
+      if(warn){ warn.textContent = 'تاریخ نمی‌تونه تو آینده باشه.'; warn.style.display='block'; }
+      return;
+    }
+    if(chosen.getTime() < floor.getTime()){
+      if(warn){ warn.textContent = 'این تاریخ خیلی قدیمیه — از قبل از شروع همین روزشمار.'; warn.style.display='block'; }
+      return;
+    }
+    if(warn) warn.style.display = 'none';
+    performJourneyReset(journeyResetPendingReason, chosen);
+  });
+}
+async function performJourneyReset(reasonKey, customStartDate){
   if(journeyResetInProgress) return;
   journeyResetInProgress = true;
   document.querySelectorAll('#resetReasonList .reset-reason-btn').forEach(b=> b.disabled = true);
   clearTimeout(saveTimeout);
   const finishedStreakDays = storeData.startDate ? computeStreak() : 0;
-  storeData.startDate = today;
-  storeData.startTimestamp = new Date().toISOString();
+  const isBackdated = customStartDate instanceof Date && !isNaN(customStartDate.getTime());
+  const effectiveStart = isBackdated ? customStartDate : new Date();
+  storeData.startDate = tgDateKeyOf(effectiveStart);
+  storeData.startTimestamp = effectiveStart.toISOString();
   storeData.entries = {};
   storeData.badges = {};
   storeData.streakMilestonesHit = {};
@@ -4791,7 +5011,7 @@ async function performJourneyReset(reasonKey){
   storeData.monthlyReview = null;
   storeData.lessonsReview = null;
   if(!storeData.slipHistory) storeData.slipHistory = [];
-  storeData.slipHistory.push({date: today, reason: reasonKey, days: finishedStreakDays});
+  storeData.slipHistory.push({date: today, reason: reasonKey, days: finishedStreakDays, relapseDate: storeData.startDate, backdated: isBackdated});
   storeData.lastModified = new Date().toISOString();
   try{ await window.storage.set('checklist:data', JSON.stringify(storeData)); }
   catch(e){ console.error('Storage error', e); }
@@ -4814,15 +5034,29 @@ async function performJourneyReset(reasonKey){
   if(modal) modal.classList.remove('visible');
   document.querySelectorAll('#resetReasonList .reset-reason-btn').forEach(b=> b.disabled = false);
   journeyResetInProgress = false;
+  journeyResetPendingReason = null;
+  journeyResetChosenDate = null;
+  showJourneyResetStep('reason');
   try{ normalizeAndRenderStoreData(); }catch(err){ console.error('normalizeAndRenderStoreData failed after reset', err); }
-  showToast('مسیرت از نو شروع شد 🌱');
+  showToast(isBackdated ? 'ثبت شد — روزشمار از تاریخی که مشخص کردی دوباره شروع شد 🌱' : 'مسیرت از نو شروع شد 🌱');
 }
 
 /* ---------------- Confetti ---------------- */
 const canvas=document.getElementById('confettiCanvas');
 const ctx=canvas.getContext('2d');
-function resizeCanvas(){ canvas.width=window.innerWidth; canvas.height=window.innerHeight; }
-resizeCanvas(); window.addEventListener('resize', resizeCanvas);
+function resizeCanvas(){
+  // اگه اندازه واقعاً تغییر نکرده (مثلاً فقط نوار آدرس موبایل موقع اسکرول جمع/باز شده)
+  // canvas رو دوباره alloc نکن؛ همین realloc بی‌مورد وسط اسکرول باعث بریدگی می‌شه.
+  const w = window.innerWidth, h = window.innerHeight;
+  if(canvas.width !== w) canvas.width = w;
+  if(canvas.height !== h) canvas.height = h;
+}
+resizeCanvas();
+let __resizeCanvasRAF = null;
+window.addEventListener('resize', ()=>{
+  if(__resizeCanvasRAF) return; // چند رویداد resize پشت‌هم رو به یک فریم فشرده می‌کنیم
+  __resizeCanvasRAF = requestAnimationFrame(()=>{ __resizeCanvasRAF = null; resizeCanvas(); });
+}, {passive:true});
 function launchConfetti(){
   const colors=['#ff9a3d','#ffb347','#3fb87f','#e2665a','#ffd166'];
   const pieces=[];
@@ -4908,6 +5142,30 @@ function initAmbientMusicAutoplay(){
   document.addEventListener('click', startOnFirstGesture, {once:true});
   document.addEventListener('touchstart', startOnFirstGesture, {once:true});
 }
+// Pause background music when the app goes to the background (home button, app-switcher,
+// screen lock, tab switch...) and resume it automatically when the app comes back to the
+// foreground — only if it was actually playing before it got hidden.
+let musicWasOnBeforeHide = false;
+function pauseMusicForBackground(){
+  if(bgMusicEl && !bgMusicEl.paused){
+    musicWasOnBeforeHide = true;
+    bgMusicEl.pause();
+  }
+}
+function resumeMusicAfterForeground(){
+  if(musicWasOnBeforeHide && storeData.musicEnabled !== false){
+    startMusic().catch(()=>{});
+  }
+  musicWasOnBeforeHide = false;
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden) pauseMusicForBackground();
+  else resumeMusicAfterForeground();
+});
+// Extra safety net: some Android WebViews fire pagehide/pageshow (or just stop the page)
+// on the home-button / recent-apps action without a reliable visibilitychange event.
+window.addEventListener('pagehide', pauseMusicForBackground);
+window.addEventListener('pageshow', resumeMusicAfterForeground);
 
 /* ---------------- Voice narrations (app intro / today-tab / workout / speech / ai-coach / public-chat / premium explainers) ----------------
    Short pre-recorded voice-overs, one per tab. Premium's button always lives inside the premium panel.
@@ -5963,8 +6221,12 @@ const AUTH_GATE_TAB_LABELS = {
 };
 const PUBLIC_AUTH_TABS = { chat:1, leaderboard:1, buddy:1, profile:1, invite:1, goals:1, hokm:1 };
 let pendingAuthTab = null;
+// true فقط از لحظه‌ی باز شدنِ اپ (وقتی یه سشنِ ذخیره‌شده رو دستگاه هست) تا لحظه‌ای که
+// یا واقعاً تاییدش کنیم یا واقعاً نامعتبر بودنش ثابت بشه (بخشِ initChatAuth/confirmRealSignOut).
+// تا وقتی pending‌ه، کاربر رو «خارج‌شده» حساب نمی‌کنیم — نه گیت ثبت‌نام نشونش می‌دیم، نه پرمیومش صفر می‌شه.
+let sessionPending = false;
 function isLoggedIn(){ return !!publicChatUser; }
-function tabNeedsAuth(tabId){ return !!PUBLIC_AUTH_TABS[tabId] && !isLoggedIn(); }
+function tabNeedsAuth(tabId){ return !!PUBLIC_AUTH_TABS[tabId] && !isLoggedIn() && !sessionPending; }
 function showAuthGate(tabId, isWelcome){
   pendingAuthTab = tabId || null;
   const coachEl = document.getElementById('authGateCoachAvatar');
@@ -6017,7 +6279,17 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     document.getElementById('tab-'+targetTab).classList.add('active');
     document.getElementById('tabbar').scrollIntoView({block:'nearest'});
     lastMainTab = targetTab;
+    // اگه این تب جزو یکی از دو دسته‌ی «برنامه‌ریزی»/«رشد فردی» باشه، هم گروهِ نمایش‌داده‌شده‌ی
+    // نوارِ تب و هم هایلایتِ دکمه‌ی پایینِ متناظرش رو با همین دسته یکی می‌کنیم.
+    const tCat = (typeof catOfPrivateTab === 'function') ? catOfPrivateTab(targetTab) : null;
+    if(tCat){
+      document.getElementById('tabbar').dataset.activeCat = tCat;
+      document.querySelectorAll('.mode-btn').forEach(b=>{
+        b.classList.toggle('active', b.dataset.mode === 'private' && b.dataset.cat === tCat);
+      });
+    }
     if(targetTab === 'workout') maybeSuggestWorkoutNarration();
+    if(targetTab === 'jawline') renderJawProgramTab();
     if(targetTab === 'speech') maybeSuggestSpeechNarration();
     if(targetTab === 'ai') maybeSuggestAiNarration();
     // همون ضامنی که setAppMode/showPublicTabInner در انتهاشون صدا می‌زنن، این‌جا هم صدا
@@ -6027,6 +6299,26 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
   });
 });
 
+/* ================= Private tab categories (برنامه‌ریزی / رشد فردی) =================
+   The private tabbar's icon row is split into two groups (see .tabbar-group in the HTML);
+   only one group shows at a time inside #tabbar, switched from the bottom mode-bar's
+   "برنامه‌ریزی"/"رشد فردی" buttons (see the .mode-btn click handler further down, near
+   setAppMode). These two small helpers are shared by both. */
+const PLANNING_TABS = ['today','workout','jawline'];
+const GROWTH_TABS = ['meditation','speech','brain','ai','library'];
+function catOfPrivateTab(tabId){
+  if(PLANNING_TABS.indexOf(tabId) !== -1) return 'planning';
+  if(GROWTH_TABS.indexOf(tabId) !== -1) return 'growth';
+  return null;
+}
+function firstTabOfCat(cat, preferredTab){
+  const list = cat === 'growth' ? GROWTH_TABS : PLANNING_TABS;
+  if(preferredTab && list.indexOf(preferredTab) !== -1) return preferredTab;
+  return list[0];
+}
+
+
+
 /* ================= Focus / Situation Modes (حالت) =================
    هر حالت یه موقعیت واقعیه (باشگاه، پارک، کافه، ...). با انتخابش، اپ وارد
    یه صفحه‌ی اختصاصی می‌شه: تایمر کار عمیق + راهنما/انگیزش + چک‌لیست مخصوص
@@ -6034,7 +6326,6 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
    حالت‌های جدید همینجا به FOCUS_MODES اضافه می‌شن. */
 // آیکون‌های SVG حرفه‌ای برای تب «حالت‌ها» — جایگزین ایموجی‌های قبلی
 const FM_ICON = {
-  gym: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12h1.8M19.7 12h1.8"/><path d="M4.3 9.2v5.6M19.7 9.2v5.6"/><path d="M6.4 12h11.2"/><rect x="6.1" y="8.3" width="2.2" height="7.4" rx="0.8"/><rect x="15.7" y="8.3" width="2.2" height="7.4" rx="0.8"/></svg>',
   sleep: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-5.2a3 3 0 0 1 3-3h9.4a3.6 3.6 0 0 1 3.6 3.6V18"/><path d="M3 18.5h18"/><path d="M5.6 9.8V7.4a1.4 1.4 0 0 1 1.4-1.4h3.4a1.4 1.4 0 0 1 1.4 1.4v2"/></svg>',
   morning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13.2" r="3.6"/><path d="M12 4.5v2M4.6 8.4l1.4 1.4M19.4 8.4l-1.4 1.4"/><path d="M2.5 19h19"/></svg>',
   walk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.6" cy="4.6" r="1.7" fill="currentColor" stroke="none"/><path d="M11.8 8.2l-2.6 3 1.8 2 -0.9 5.4"/><path d="M11.8 8.2l3.7 1.4 1.9 3.4"/><path d="M10.2 13.2l-3.4 2 -1.4 3.6"/><path d="M10.1 18.6l3.4-1.2 2.9 2.6"/></svg>',
@@ -6098,24 +6389,6 @@ const FM_ICON = {
   knitting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4"/><path d="M6.3 6.4c1.7 1 2.9 2.6 3.4 4.5M9.6 5.6c-1.4 1.4-2.1 3.2-2.1 5.2"/><path d="M14.5 12.5l6-1.7M14.5 17l6.5.6"/></svg>',
 };
 const FOCUS_MODES = {
-  gym: {
-    title: 'حالت باشگاه',
-    free: true,
-    icon: FM_ICON.gym,
-    subtitle: 'رو فرم درست تمرکز کن، نه فقط عدد وزنه',
-    color: ['#f97316','#ef4444'],
-    timerLabel: 'زمان تمرکز',
-    tip: 'گوشیتو بذار تو کیف یا حالت مزاحم نشو؛ فقط بین ست‌ها بهش نگاه کن. رو فرم درست حرکات تمرکز کن، نه فقط عدد وزنه — یه ست تمیز خیلی بهتر از یه ست سنگین با فرم غلطه.',
-    checklist: [
-      'گرم کردن (۵ تا ۱۰ دقیقه) قبل از شروع',
-      'یه بطری آب همراهمه',
-      'می‌دونم برنامه‌ی امروز رو کدوم عضله/حرکته',
-      'گوشی رو بی‌صدا یا دور از دسترس گذاشتم',
-      'بین ست‌ها فقط به‌اندازه استراحت می‌کنم، نه بیشتر',
-      'آخر تمرین چند دقیقه کشش و سرد کردن'
-    ],
-    endMessage: (min)=> min>0 ? `آفرین! ${min} دقیقه تمرکز داشتی 💪` : 'حالت باشگاه پایان یافت'
-  },
   sleep: {
     title: 'حالت خواب',
     free: true,
@@ -7155,7 +7428,7 @@ const FOCUS_MODES = {
    simply won't show up in the picker, so keep this in sync when adding a
    new mode above). ---- */
 const FOCUS_MODE_CATEGORIES = [
-  { id:'health', label:'💪 سلامت و بدن', keys:['gym','walk','football','pool','nap','sleep','morning','massage'] },
+  { id:'health', label:'💪 سلامت و بدن', keys:['walk','football','pool','nap','sleep','morning','massage'] },
   { id:'home', label:'🏠 خونه و کارهای روزمره', keys:['cleaning','driving','gardening','cooking'] },
   { id:'shopping', label:'🛍️ خرید', keys:['clothesShopping','supermarket','onlineShopping'] },
   { id:'social', label:'🎉 اجتماعی، خانواده و مناسبت‌ها', keys:['friendHangout','party','date','meeting','familyTime','wedding'] },
@@ -7345,7 +7618,7 @@ const fqSkipBtn = document.getElementById('fqSkipBtn');
 if(fqSkipBtn) fqSkipBtn.addEventListener('click', ()=> finalizeFocusSession(null));
 
 // How many sessions of this mode happened in the last N days — powers the weekly-frequency
-// identity badges (e.g. 3x/week of حالت باشگاه => «ورزشکار»).
+// identity badges (e.g. 3x/week of حالت پیاده‌روی => «ورزشکار هوازی»).
 function focusModeSessionsInDays(mode, days){
   const fs = (storeData.focusSessions||{})[mode];
   if(!fs || !fs.history || !fs.history.length) return 0;
@@ -7365,11 +7638,10 @@ function focusStarsHtml(avg){
 }
 
 /* Derived "identity" titles: use a mode regularly enough (checked via recent-session
-   history above) and the app recognizes you as that kind of person, e.g. حالت باشگاه
-   ۳ بار در هفته → «ورزشکار». These are plugged into the existing BADGES/XP system
+   history above) and the app recognizes you as that kind of person, e.g. حالت پیاده‌روی
+   ۳ بار در هفته → «ورزشکار هوازی». These are plugged into the existing BADGES/XP system
    further down, right after BADGES is defined. */
 const FOCUS_IDENTITIES = [
-  {mode:'gym', id:'identity_athlete', emoji:'🏋️', title:'ورزشکار', weeklyNeeded:3},
   {mode:'painting', id:'identity_painter', emoji:'🎨', title:'نقاش', weeklyNeeded:2},
   {mode:'calligraphy', id:'identity_calligrapher', emoji:'🖋️', title:'خوشنویس', weeklyNeeded:2},
   {mode:'instrumentPractice', id:'identity_musician', emoji:'🎸', title:'نوازنده', weeklyNeeded:3},
@@ -8745,9 +9017,9 @@ if(brainNbackStartBtn) brainNbackStartBtn.addEventListener('click', brainStartNb
    حافظه‌ی توالی/کاری (توالی رنگی و N-back) — فقط دقت و اسکن دیداریه. هر بار یه راند
    تصادفی «رنگ» یا «چرخش» انتخاب می‌شه تا زود قابل‌پیش‌بینی نشه. */
 const BRAIN_ODD_LEVELS = {
-  easy:   { label:'ساده',  cols:3, cells:9,  seconds:45, colorDelta:44, rotateDeg:36 },
-  medium: { label:'متوسط', cols:4, cells:16, seconds:42, colorDelta:28, rotateDeg:24 },
-  hard:   { label:'سخت',   cols:5, cells:25, seconds:38, colorDelta:16, rotateDeg:14 }
+  easy:   { label:'ساده',  cols:3, cells:9,  seconds:45, colorDelta:32, rotateDeg:22 },
+  medium: { label:'متوسط', cols:4, cells:16, seconds:42, colorDelta:20, rotateDeg:12 },
+  hard:   { label:'سخت',   cols:5, cells:25, seconds:38, colorDelta:9,  rotateDeg:5  }
 };
 let brainOddLevel = 'easy';
 let brainOddTimerId = null;
@@ -9052,6 +9324,9 @@ document.querySelectorAll('.subseg').forEach(seg=>{
       if(panel.id === 'tab-today' && btn.dataset.sub === 'history') renderProgramHistory();
       if(panel.id === 'tab-workout' && btn.dataset.sub === 'history') renderWoHistory();
       if(panel.id === 'tab-workout' && btn.dataset.sub === 'recovery') renderRecoveryTab();
+      if(panel.id === 'tab-jawline' && btn.dataset.sub === 'jawrecovery') renderJawRecoveryTab();
+      if(panel.id === 'tab-jawline' && btn.dataset.sub === 'jawprogram') renderJawProgramTab();
+      if(panel.id === 'tab-jawline' && btn.dataset.sub === 'jawhistory') renderJawHistory();
       if(panel.id === 'tab-meditation'){
         stopMeditation();
         stopBodyScan();
@@ -9175,7 +9450,7 @@ if(researchSearchInput){
 }
 
 /* ================= Swipe between tabs ================= */
-const SWIPE_TAB_ORDER = ['today','workout','meditation','speech','brain','ai','library'];
+const SWIPE_TAB_ORDER = ['today','workout','jawline','meditation','speech','brain','ai','library'];
 // ترتیب تب‌های بخش عمومی، دقیقاً هم‌ترازِ دکمه‌های #pubSubnav (چت، لیدربورد، هم‌مسیر، پروفایل)
 const PUB_SWIPE_TAB_ORDER = ['chat','profile','leaderboard','buddy','sos'];
 let swipeStartX = 0, swipeStartY = 0, swipeBlocked = false;
@@ -9242,6 +9517,7 @@ function enterSubPage(tabId){
   document.getElementById('tab-'+tabId).classList.add('active');
   document.getElementById('tabbar').classList.add('hidden-for-subpage');
   document.body.classList.add('subpage-open');
+  if(tabId === 'achievements'){ try{ renderAchievementsPage(); }catch(err){} }
   window.scrollTo(0, 0);
 }
 function exitSubPage(){
@@ -9259,7 +9535,7 @@ function exitSubPage(){
     setAppMode('private', lastMainTab);
   }
 }
-['settingsBackBtn','progressBackBtn','goalsBackBtn','inviteBackBtn','guideBackBtn','updateBackBtn','premiumBackBtn'].forEach(id=>{
+['settingsBackBtn','progressBackBtn','achievementsBackBtn','goalsBackBtn','inviteBackBtn','guideBackBtn','updateBackBtn','premiumBackBtn'].forEach(id=>{
   const btn = document.getElementById(id);
   if(btn) btn.addEventListener('click', exitSubPage);
 });
@@ -9300,7 +9576,12 @@ function setAppMode(mode, targetTab){
   // Instant feedback: highlight the tapped bottom button right away, before any
   // animation, so the tap itself never feels laggy — only the content swap is eased.
   const isFocusTabForHighlight = (mode === 'private' && (targetTab || lastMainTab) === 'focusmode');
-  document.querySelectorAll('.mode-btn').forEach(b=> b.classList.toggle('active', b.dataset.mode === mode && !isFocusTabForHighlight));
+  const catForHighlight = mode === 'private' ? catOfPrivateTab(targetTab || lastMainTab) : null;
+  document.querySelectorAll('.mode-btn').forEach(b=>{
+    const matchesMode = b.dataset.mode === mode;
+    const matchesCat = !b.dataset.cat || b.dataset.cat === catForHighlight;
+    b.classList.toggle('active', matchesMode && matchesCat && !isFocusTabForHighlight);
+  });
   const focusFabBtnEarly = document.getElementById('modeFocusBtn');
   if(focusFabBtnEarly) focusFabBtnEarly.classList.toggle('active', isFocusTabForHighlight);
 
@@ -9312,7 +9593,12 @@ function setAppMode(mode, targetTab){
     // تب «حالت» یه حالت تمام‌صفحه‌ی مستقله: تب‌های بالای بخش خصوصی (امروز/تمرین/...) و
     // هایلایت‌شدن دکمه‌ی «خصوصی» پایین، هیچ ارجاعی به بخش خصوصی نباید نشون بدن.
     const isFocusTab = (mode === 'private' && (targetTab || lastMainTab) === 'focusmode');
-    document.querySelectorAll('.mode-btn').forEach(b=> b.classList.toggle('active', b.dataset.mode === mode && !isFocusTab));
+    const activeCat = mode === 'private' ? catOfPrivateTab(targetTab || lastMainTab) : null;
+    document.querySelectorAll('.mode-btn').forEach(b=>{
+      const matchesMode = b.dataset.mode === mode;
+      const matchesCat = !b.dataset.cat || b.dataset.cat === activeCat;
+      b.classList.toggle('active', matchesMode && matchesCat && !isFocusTab);
+    });
     document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
     const focusFabBtn = document.getElementById('modeFocusBtn');
     if(focusFabBtn) focusFabBtn.classList.toggle('active', isFocusTab);
@@ -9329,6 +9615,8 @@ function setAppMode(mode, targetTab){
       document.getElementById('tabbar').style.display = isFocusTab ? 'none' : '';
       document.getElementById('pubSubnav').classList.remove('show');
       const tId = targetTab || lastMainTab;
+      const tCat = catOfPrivateTab(tId);
+      if(tCat) document.getElementById('tabbar').dataset.activeCat = tCat;
       const targetBtn = document.querySelector('.tab-btn[data-tab="'+tId+'"]');
       if(targetBtn) targetBtn.classList.add('active');
       const targetPanel = document.getElementById('tab-'+tId);
@@ -9371,6 +9659,7 @@ function showPublicTabInner(tabId){
   if(tabId === 'hokm'){
     if(typeof hkLoadLobby === 'function') hkLoadLobby();
     if(typeof efLoadLobby === 'function') efLoadLobby();
+    if(typeof dblLoadLobby === 'function') dblLoadLobby();
   }
   assertModeSeparation();
 }
@@ -9381,7 +9670,22 @@ function showPublicTab(tabId){
 document.querySelectorAll('.mode-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     const mode = btn.dataset.mode;
-    // اگه داخل تب «حالت» هستیم، دکمه‌ی «خصوصی» باید برگردونه به آخرین تب واقعی بخش
+    const cat = btn.dataset.cat;
+    if(mode === 'private' && cat){
+      // یکی از دو دکمه‌ی دسته‌ی بخش خصوصی («برنامه‌ریزی» یا «رشد فردی») زده شده.
+      if(currentAppMode === 'private' && lastMainTab === 'focusmode'){
+        // از تب «حالت» داریم برمی‌گردیم؛ می‌ریم رو همون دسته‌ای که کلیک شده، ترجیحاً
+        // آخرین تبِ واقعیِ همون دسته اگه از قبل توش بودیم.
+        setAppMode('private', firstTabOfCat(cat, lastPrivateContentTab));
+        return;
+      }
+      const tabbarEl = document.getElementById('tabbar');
+      const alreadyThisCat = currentAppMode === 'private' && tabbarEl && tabbarEl.dataset.activeCat === cat;
+      if(alreadyThisCat && !document.body.classList.contains('subpage-open')) return;
+      setAppMode('private', firstTabOfCat(cat, lastMainTab));
+      return;
+    }
+    // اگه داخل تب «حالت» هستیم، دکمه‌ی خصوصی باید برگردونه به آخرین تب واقعی بخش
     // خصوصی، نه اینکه چون currentAppMode از قبل 'private' بوده هیچ اتفاقی نیفته.
     if(mode === 'private' && currentAppMode === 'private' && lastMainTab === 'focusmode'){
       setAppMode('private', lastPrivateContentTab || 'today');
@@ -9400,22 +9704,1964 @@ document.querySelectorAll('.pub-subnav-btn').forEach(btn=>{
   });
 });
 /* ===================== GAMES HUB — انتخاب‌گرِ بازی داخلِ تبِ «بازی‌ها» (قبلاً «حکم») =====================
-   فقط نمایش/عدم‌نمایشِ دو پنلِ gamesHokmPanel و gamesEfPanel؛ هیچ منطقِ hk، RPC، یا DOM دست‌نخورده
-   لمس نشده. */
+   فقط نمایش/عدم‌نمایشِ سه پنلِ gamesHokmPanel، gamesEfPanel، و gamesDobblePanel؛ هیچ منطقِ
+   hk/ef، RPC، یا DOM قبلی دست‌نخورده لمس نشده. کارتِ سومِ «دابل» فقط STAGE 1شه (موتورِ دسته)،
+   برای همین وقتی برای اولین‌بار انتخاب می‌شه dblRenderStage1Status صدا زده می‌شه (لِیزی، نه
+   موقعِ لودِ اپ) تا محاسبه‌ی دسته فقط وقتی لازمه انجام بشه. */
 (function(){
   const selBar = document.getElementById('gamesSelectBar');
   if(!selBar) return;
-  const cards = { hokm: document.getElementById('gamesSelectHokm'), esmfamil: document.getElementById('gamesSelectEf') };
-  const panels = { hokm: document.getElementById('gamesHokmPanel'), esmfamil: document.getElementById('gamesEfPanel') };
+  const cards = { hokm: document.getElementById('gamesSelectHokm'), esmfamil: document.getElementById('gamesSelectEf'), dobble: document.getElementById('gamesSelectDobble') };
+  const panels = { hokm: document.getElementById('gamesHokmPanel'), esmfamil: document.getElementById('gamesEfPanel'), dobble: document.getElementById('gamesDobblePanel') };
   function showGame(game){
     Object.keys(cards).forEach(function(key){
       if(cards[key]) cards[key].classList.toggle('active', key === game);
       if(panels[key]) panels[key].style.display = (key === game) ? '' : 'none';
     });
+    if(game === 'dobble' && typeof window.dblRenderStage1Status === 'function') window.dblRenderStage1Status();
+    if(game === 'dobble' && typeof window.dblRenderStage2aIcons === 'function') window.dblRenderStage2aIcons();
+    if(game === 'dobble' && typeof window.dblRenderStage2bCards === 'function') window.dblRenderStage2bCards();
   }
   selBar.querySelectorAll('.games-select-card').forEach(function(card){
     card.addEventListener('click', function(){ showGame(card.dataset.game); });
   });
+})();
+
+/* ===================== DOBBLE — STAGE 1 (موتورِ تولیدِ دسته، بدونِ نماد/UIِ بازی) =====================
+   دسته‌ی ۵۵کارتیِ دابل رو با الگوریتمِ صفحه‌ی تصویریِ متناهیِ مرتبه‌ی ۷ می‌سازه و اعتبارسنجی
+   می‌کنه — دقیقاً همون الگوریتمی که تو generate-deck.js جدا نوشته و تست شده بود (۵۷ کارتِ
+   تئوریک، تاییدِ pairwise رویِ هر ۱۵۹۶ جفتِ ممکن، بعد کنارگذاشتنِ ۲ کارت برای رسیدن به ۵۵ تای
+   جعبه‌ی واقعیِ Dobble/Spot It، و اعتبارسنجیِ دوباره روی ۵۵ تا)، اینجا سمتِ کلاینت و لِیزی
+   (فقط وقتی کاربر واردِ تبِ «دابل» می‌شه، نه هر بار که کلِ اپ لود می‌شه) اجرا می‌شه — محاسبه‌ش
+   سبکه (چندین‌هزار مقایسه‌ی آرایه‌ی ۸تایی، زیرِ چند میلی‌ثانیه)، برای همین نیازی به cache کردنِ
+   بین‌سشنی نداره؛ فقط تویِ همون سشن یه‌بار ساخته می‌شه (_dblDeckCache) که با هر بار باز کردنِ
+   تب دوباره محاسبه نشه.
+   نمادهای SVG و رندرِ کارتِ گرد (بانکِ نمادِ icon-bank.js که قبلاً آماده شده) جزوِ STAGE 2ن؛
+   اینجا فقط دسته ساخته و اعتبارسنجی می‌شه، و نتیجه رو تو window.DobbleDeck می‌ذاره تا STAGE 2
+   بتونه مستقیم ازش استفاده کنه بدون اینکه دوباره این منطق رو پیاده کنه. */
+(function(){
+  try{
+    if(typeof window === 'undefined') return;
+
+    const DBL_N = 7; // مرتبه‌ی صفحه‌ی تصویری — چون هر کارتِ دابل ۸ نماد داره (n+1=8)، پس n=7 (عددِ اول)
+    const DBL_SYMBOLS_PER_CARD = DBL_N + 1;              // 8
+    const DBL_TOTAL_POINTS = DBL_N * DBL_N + DBL_N + 1;  // 57 — تعدادِ کلِ نمادهای ممکن
+    const DBL_FINAL_DECK_SIZE = 55;                      // طبقِ جعبه‌ی واقعیِ Dobble/Spot It (نه ۵۷ تئوریک)
+
+    // نگاشتِ نقاط: 0..N-1 → نقطه‌ی در-بی‌نهایتِ شیبِ a، N → نقطه‌ی در-بی‌نهایتِ عمودی،
+    // N+1..N+N² → نقطه‌ی آفینِ (x,y) با اندیس N+1+x*N+y — توضیحِ کاملش تو generate-deck.js.
+    function dblInfinitySlopePoint(a){ return a; }
+    function dblInfinityVerticalPoint(){ return DBL_N; }
+    function dblAffinePoint(x, y){ return DBL_N + 1 + x * DBL_N + y; }
+
+    function dblBuildFullDeck(){
+      const lines = [];
+
+      // خطِ در بی‌نهایت: همه‌ی ۸ نقطه‌ی در-بی‌نهایت
+      const lineAtInfinity = [];
+      for(let a=0; a<DBL_N; a++) lineAtInfinity.push(dblInfinitySlopePoint(a));
+      lineAtInfinity.push(dblInfinityVerticalPoint());
+      lines.push(lineAtInfinity);
+
+      // خطوطِ معمولیِ y=a*x+b (mod N)، برای هر (a,b) — 49 خط
+      for(let a=0; a<DBL_N; a++){
+        for(let b=0; b<DBL_N; b++){
+          const line = [dblInfinitySlopePoint(a)];
+          for(let x=0; x<DBL_N; x++){
+            const y = (a * x + b) % DBL_N;
+            line.push(dblAffinePoint(x, y));
+          }
+          lines.push(line);
+        }
+      }
+
+      // خطوطِ عمودیِ x=b — 7 خط
+      for(let b=0; b<DBL_N; b++){
+        const line = [dblInfinityVerticalPoint()];
+        for(let y=0; y<DBL_N; y++) line.push(dblAffinePoint(b, y));
+        lines.push(line);
+      }
+
+      return lines; // جمعاً 1+49+7 = 57 کارت
+    }
+
+    // اعتبارسنجیِ pairwise: برخلافِ اسکریپتِ توسعه (generate-deck.js) که خطا throw می‌کرد،
+    // اینجا چون سمتِ کاربرِ واقعیه، یه نتیجه‌ی {ok, reason} برمی‌گردونه — یه دسته‌ی خراب نباید
+    // کلِ اپ رو خطا بده، فقط باید تو پنلِ استیتوس یه پیامِ خطا نشون بده.
+    function dblValidatePairwise(deck){
+      for(let i=0; i<deck.length; i++){
+        const setI = new Set(deck[i]);
+        if(setI.size !== DBL_SYMBOLS_PER_CARD){
+          return { ok:false, reason: 'کارتِ ' + i + ' تعدادِ نمادِ نادرست داره (' + setI.size + ' به‌جایِ ' + DBL_SYMBOLS_PER_CARD + ').' };
+        }
+        for(let j=i+1; j<deck.length; j++){
+          let common = 0;
+          for(let k=0; k<deck[j].length; k++){ if(setI.has(deck[j][k])) common++; }
+          if(common !== 1){
+            return { ok:false, reason: 'کارت‌های ' + i + ' و ' + j + ' به‌جایِ دقیقاً ۱ نمادِ مشترک، ' + common + ' تا دارن.' };
+          }
+        }
+      }
+      return { ok:true };
+    }
+
+    // چک‌سامِ سبک (xfnv1a — غیرِ رمزنگاری‌شده، فقط برای تشخیصِ اینکه دسته تغییر کرده یا نه؛
+    // برای این منظور نیازی به sha256 نیست، سمتِ کلاینت هم سبک‌تره).
+    function dblSimpleChecksum(deck){
+      let h = 2166136261;
+      const s = JSON.stringify(deck);
+      for(let i=0; i<s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+      return (h >>> 0).toString(16).padStart(8, '0');
+    }
+
+    let _dblDeckCache = null;
+    function dblGetDeck(){
+      if(_dblDeckCache) return _dblDeckCache;
+      const fullDeck = dblBuildFullDeck();
+      const finalDeck = fullDeck.slice(0, DBL_FINAL_DECK_SIZE);
+      const validation = dblValidatePairwise(finalDeck);
+      _dblDeckCache = {
+        version: 1,
+        cards: finalDeck,
+        symbolCount: DBL_TOTAL_POINTS,
+        symbolsPerCard: DBL_SYMBOLS_PER_CARD,
+        deckSize: finalDeck.length,
+        checksum: dblSimpleChecksum(finalDeck),
+        valid: validation.ok,
+        invalidReason: validation.ok ? null : validation.reason,
+      };
+      window.DobbleDeck = _dblDeckCache; // برای STAGEهای بعدی (نمادها/کارتِ گرد/لابی/بازی)
+      return _dblDeckCache;
+    }
+
+    function dblEl(id){ return document.getElementById(id); }
+
+    let _dblStage1Rendered = false;
+    function dblRenderStage1Status(){
+      if(_dblStage1Rendered) return; // دسته وسطِ سشن عوض نمی‌شه، دوباره رندر لازم نیست
+      const statusEl = dblEl('dblStage1Status');
+      const metaEl = dblEl('dblStage1Meta');
+      if(!statusEl) return;
+      try{
+        const deck = dblGetDeck();
+        const totalPairs = Math.round(deck.deckSize * (deck.deckSize - 1) / 2);
+        if(deck.valid){
+          statusEl.textContent = '✅ موتورِ تولیدِ دسته فعاله — هر ' + toFa(totalPairs) + ' جفتِ ممکن از ' + toFa(deck.deckSize) + ' کارت، دقیقاً ۱ نمادِ مشترک دارن.';
+          statusEl.classList.add('dbl-stage1-status-ok');
+        } else {
+          statusEl.textContent = '❌ خطا در دسته: ' + deck.invalidReason;
+          statusEl.classList.add('dbl-stage1-status-error');
+        }
+        if(metaEl){
+          dblEl('dblMetaDeckSize').textContent = toFa(deck.deckSize) + ' کارت';
+          dblEl('dblMetaSymbolCount').textContent = toFa(deck.symbolCount) + ' نماد';
+          dblEl('dblMetaSymbolsPerCard').textContent = toFa(deck.symbolsPerCard) + ' نماد رو هر کارت';
+          dblEl('dblMetaChecksum').textContent = deck.checksum;
+          metaEl.style.display = '';
+        }
+        _dblStage1Rendered = true;
+      }catch(e){
+        statusEl.textContent = '❌ خطا در ساختنِ دسته: ' + (e && e.message ? e.message : 'نامشخص');
+        statusEl.classList.add('dbl-stage1-status-error');
+        console.error('Dobble stage1 build error', e);
+      }
+    }
+
+    window.dblRenderStage1Status = dblRenderStage1Status; // صدا زده می‌شه از سوییچرِ گیم‌هاب بالا
+  }catch(e){ console.error('Dobble stage1 init error', e); }
+})();
+
+/* ===================== DOBBLE — بانکِ نمادِ SVG (icon-bank.js، حالا ادغام‌شده داخلِ app.js) =====================
+   قبلاً یه فایلِ جداگانه‌ی <script defer src="icon-bank.js"> بود؛ حالا عیناً هم‌سبکِ DobbleCard
+   (پایین‌تر) مستقیم داخلِ app.js گنجونده شده — تا استقرار فقط دو فایل (index.html + app.js)
+   لازم داشته باشه، نه سه‌تا. هیچ‌چیزِ منطقی عوض نشده، فقط محلِ فایل. ۵۷ نمادِ SVG (هرکدوم با
+   شناسه‌یِ ۰ تا ۵۶، دقیقاً هم‌شماره‌یِ خروجیِ STAGE ۱) رو به‌صورتِ <symbol id="sym-N"> تعریف
+   می‌کنه؛ DobbleCard پایین‌تر با <use href="#sym-N"> بهشون اشاره می‌کنه. */
+
+/*
+ * بانکِ نمادهای بازیِ دابل — مرحله‌ی ۲ (بخشِ اول).
+ * ============================================================
+ * ۵۷ نمادِ SVG، همه با شناسه‌ی ۰ تا ۵۶ — دقیقاً همون شناسه‌هایی که تو
+ * dobble-deck.json (خروجیِ مرحله‌ی ۱) هر کارت رو باهاشون توصیف کرده.
+ * یعنی کارتِ [3, 17, 22, ...] یعنی «نمادهای sym-3، sym-17، sym-22، ...».
+ *
+ * چرا SVG <symbol> + <use> به‌جای این‌که هر نماد یه <svg> کاملِ جدا باشه؟
+ *   - تعریفِ هر نماد فقط یه‌بار تو DOM میاد (تو یه <defs> پنهان)، و
+ *     هرجا لازم شد فقط با <use href="#sym-N"> بهش اشاره می‌کنیم — سبک‌تر
+ *     از این‌که ۵۵ کارت × ۸ نماد = ۴۴۰ کپیِ کاملِ SVG رو تو صفحه داشته باشیم.
+ *   - چون SVG هست (نه PNG)، تو هر سایز و زاویه‌ی چرخشی که مرحله‌ی ۲
+ *     نیاز داره (۴۰٪ تا ۱۰۰٪، هر زاویه) کاملاً تیز می‌مونه.
+ *
+ * سبکِ بصری (یکسان برای هر ۵۷ نماد، طبق نمونه‌های تاییدشده):
+ *   - viewBox ثابت "0 0 100 100" برای همه، تا اسکیل‌کردن یکنواخت باشه.
+ *   - خطِ دورِ مشکیِ ضخیم (stroke-width معمولاً ۴)، پرکردنِ رنگیِ تخت
+ *     (flat)، حداکثر ۲ تا ۳ رنگ per نماد.
+ *   - شکل‌ها طوری انتخاب شدن که از روی «سیلوئت» هم از هم قابل‌تشخیص
+ *     باشن، نه فقط رنگ — برای کاربرِ رنگ‌کور.
+ */
+
+'use strict';
+
+// نگاشتِ شناسه → اسمِ نماد، فقط برای خوانایی/دیباگ در طولِ توسعه؛
+// خودِ بازی هیچ‌جا به این اسم‌ها وابسته نیست، همه‌چیز با شناسه‌ی عددی کار می‌کنه.
+const SYMBOL_NAMES = [
+  'skull', 'balloon', 'carrot', 'spider', 'cactus', 'zebra', 'sun', 'moon',
+  'star', 'heart', 'lightning', 'cloud', 'raindrop', 'snowflake', 'flame',
+  'anchor', 'lock', 'key', 'umbrella', 'clock', 'bell', 'music-note',
+  'camera', 'lightbulb', 'eye', 'footprint', 'hand', 'mustache', 'crown',
+  'gift-box', 'maple-leaf', 'tree', 'flower', 'mushroom', 'apple', 'banana',
+  'cherries', 'watermelon', 'ice-cream', 'cupcake', 'pizza-slice',
+  'cheese-wedge', 'fish', 'bird', 'cat-face', 'dog-face', 'rabbit', 'turtle',
+  'snail', 'ladybug', 'butterfly', 'bee', 'snake', 'owl', 'penguin',
+  'dolphin', 'ghost-alien',
+];
+
+if (SYMBOL_NAMES.length !== 57) {
+  throw new Error(`SYMBOL_NAMES باید دقیقاً ۵۷ عضو داشته باشه، الان ${SYMBOL_NAMES.length} تاست.`);
+}
+
+// هر تابع، محتوایِ داخلیِ یه <symbol viewBox="0 0 100 100"> رو برمی‌گردونه
+// (خودِ تگِ symbol و id رو تابعِ buildDefsMarkup پایین اضافه می‌کنه).
+const SYMBOL_BODY = [
+  // 0 — skull
+  `<ellipse cx="50" cy="42" rx="30" ry="27" fill="#f2f2f2" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M28 55 Q35 62 32 72" fill="none" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>
+   <path d="M72 55 Q65 62 68 72" fill="none" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>
+   <ellipse cx="37" cy="40" rx="9" ry="11" fill="#1c1c1c"/>
+   <ellipse cx="63" cy="40" rx="9" ry="11" fill="#1c1c1c"/>
+   <path d="M50 48 L45 58 L55 58 Z" fill="#1c1c1c"/>
+   <path d="M38 66 Q50 74 62 66" fill="none" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>`,
+
+  // 1 — balloon
+  `<path d="M50 12 C72 12 80 34 74 52 C69 67 58 74 50 74 C42 74 31 67 26 52 C20 34 28 12 50 12 Z"
+         fill="#e0453f" stroke="#1c1c1c" stroke-width="4"/>
+   <ellipse cx="40" cy="34" rx="8" ry="12" fill="#ffffff" opacity="0.45"/>
+   <path d="M50 74 L46 80 L54 80 Z" fill="#1c1c1c"/>
+   <path d="M50 80 C46 88 54 92 50 100" fill="none" stroke="#1c1c1c" stroke-width="3" stroke-linecap="round"/>`,
+
+  // 2 — carrot
+  `<path d="M40 40 C46 34 54 34 60 40 L52 88 C51 92 49 92 48 88 Z"
+         fill="#f0902e" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M44 44 L47 78 M50 40 L50 82 M56 44 L53 78" stroke="#c9701a" stroke-width="2.5" stroke-linecap="round"/>
+   <path d="M50 40 C46 24 34 22 26 14 C38 16 46 22 50 32 C54 22 62 16 74 14 C66 22 54 24 50 40 Z"
+         fill="#4f9d4a" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>`,
+
+  // 3 — spider
+  `<g stroke="#1c1c1c" stroke-width="4" stroke-linecap="round" fill="none">
+     <path d="M42 46 L18 30"/><path d="M42 52 L14 50"/><path d="M42 58 L18 70"/><path d="M42 64 L24 82"/>
+     <path d="M58 46 L82 30"/><path d="M58 52 L86 50"/><path d="M58 58 L82 70"/><path d="M58 64 L76 82"/>
+   </g>
+   <ellipse cx="50" cy="60" rx="20" ry="17" fill="#232323" stroke="#1c1c1c" stroke-width="3"/>
+   <ellipse cx="50" cy="38" rx="13" ry="12" fill="#232323" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="45" cy="36" r="2.8" fill="#fff"/><circle cx="55" cy="36" r="2.8" fill="#fff"/>`,
+
+  // 4 — cactus
+  `<rect x="42" y="30" width="16" height="58" rx="8" fill="#5cab54" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M42 46 h-14 a8 8 0 0 0 -8 8 v10" fill="none" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>
+   <rect x="12" y="58" width="14" height="16" rx="7" fill="#5cab54" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M58 40 h14 a8 8 0 0 1 8 8 v6" fill="none" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>
+   <rect x="74" y="46" width="14" height="16" rx="7" fill="#5cab54" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M46 34 v50 M54 34 v50" stroke="#3c7d38" stroke-width="2" stroke-linecap="round"/>
+   <circle cx="50" cy="26" r="8" fill="#e874a1" stroke="#1c1c1c" stroke-width="3"/>`,
+
+  // 5 — zebra
+  `<ellipse cx="52" cy="58" rx="30" ry="18" fill="#fff" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M28 46 L22 26 L34 30 Z" fill="#fff" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <g fill="#1c1c1c">
+     <path d="M30 46 q4 -8 10 -10 l2 5 q-6 3 -8 9 Z"/>
+     <path d="M40 44 q4 -9 10 -12 l2 5 q-6 4 -8 11 Z"/>
+     <path d="M52 44 q4 -9 10 -11 l2 5 q-6 3 -8 10 Z"/>
+     <path d="M64 46 q4 -7 9 -8 l1 5 q-5 2 -6 7 Z"/>
+   </g>
+   <circle cx="26" cy="34" r="2.2"/>
+   <path d="M30 72 L26 88 M42 74 L40 90 M62 74 L64 90 M74 70 L78 86"
+         stroke="#1c1c1c" stroke-width="5" stroke-linecap="round"/>
+   <path d="M78 52 q10 -2 8 6 q-2 6 -10 4 Z" fill="#fff" stroke="#1c1c1c" stroke-width="3"/>`,
+
+  // 6 — sun
+  `<g stroke="#1c1c1c" stroke-width="5" stroke-linecap="round">
+     <path d="M50 6 L50 20" /><path d="M50 80 L50 94" />
+     <path d="M6 50 L20 50" /><path d="M80 50 L94 50" />
+     <path d="M18 18 L28 28" /><path d="M72 72 L82 82" />
+     <path d="M82 18 L72 28" /><path d="M28 72 L18 82" />
+   </g>
+   <circle cx="50" cy="50" r="24" fill="#ffce3f" stroke="#1c1c1c" stroke-width="4"/>`,
+
+  // 7 — moon
+  `<path d="M62 16 A32 32 0 1 0 62 84 A24 24 0 1 1 62 16 Z"
+         fill="#f5d76e" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="46" cy="38" r="3" fill="#e0b94a"/><circle cx="40" cy="55" r="2" fill="#e0b94a"/>`,
+
+  // 8 — star
+  `<path d="M50 10 L61 38 L91 40 L67 59 L76 88 L50 71 L24 88 L33 59 L9 40 L39 38 Z"
+         fill="#ffd23f" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>`,
+
+  // 9 — heart
+  `<path d="M50 88 C20 66 8 46 8 30 C8 16 20 8 32 8 C40 8 47 12 50 20 C53 12 60 8 68 8 C80 8 92 16 92 30 C92 46 80 66 50 88 Z"
+         fill="#e0453f" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>`,
+
+  // 10 — lightning
+  `<path d="M56 6 L24 54 L44 54 L38 94 L78 42 L56 42 Z"
+         fill="#f6cf3e" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>`,
+
+  // 11 — cloud
+  `<path d="M26 66 a16 16 0 0 1 -2 -32 a20 20 0 0 1 38 -8 a16 16 0 0 1 22 24 a14 14 0 0 1 -4 16 Z"
+         fill="#eef3f8" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>`,
+
+  // 12 — raindrop
+  `<path d="M50 10 C66 34 78 50 78 64 C78 82 66 92 50 92 C34 92 22 82 22 64 C22 50 34 34 50 10 Z"
+         fill="#5cb3e0" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <ellipse cx="41" cy="58" rx="6" ry="10" fill="#fff" opacity="0.5"/>`,
+
+  // 13 — snowflake
+  `<g stroke="#5cb3e0" stroke-width="5" stroke-linecap="round">
+     <path d="M50 8 L50 92"/><path d="M14 30 L86 70"/><path d="M14 70 L86 30"/>
+   </g>
+   <g stroke="#5cb3e0" stroke-width="4" stroke-linecap="round">
+     <path d="M50 8 L42 18 M50 8 L58 18"/><path d="M50 92 L42 82 M50 92 L58 82"/>
+     <path d="M14 30 L26 28 M14 30 L20 40"/><path d="M86 70 L74 72 M86 70 L80 60"/>
+     <path d="M14 70 L26 72 M14 70 L20 60"/><path d="M86 30 L74 28 M86 30 L80 40"/>
+   </g>`,
+
+  // 14 — flame
+  `<path d="M50 6 C64 24 70 36 70 50 C70 68 58 82 42 82 C24 82 14 68 16 52 C18 60 26 64 30 58 C24 44 30 26 42 16 C40 26 44 32 50 32 C50 22 46 14 50 6 Z"
+         fill="#f0752e" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M44 70 C36 70 32 62 36 54 C38 62 44 64 46 58 C50 62 50 70 44 70 Z" fill="#ffd23f"/>`,
+
+  // 15 — anchor
+  `<circle cx="50" cy="18" r="9" fill="none" stroke="#1c1c1c" stroke-width="5"/>
+   <path d="M50 27 L50 82" stroke="#1c1c1c" stroke-width="6" stroke-linecap="round"/>
+   <path d="M30 40 L70 40" stroke="#1c1c1c" stroke-width="6" stroke-linecap="round"/>
+   <path d="M50 82 C30 82 18 68 18 52" fill="none" stroke="#1c1c1c" stroke-width="6" stroke-linecap="round"/>
+   <path d="M50 82 C70 82 82 68 82 52" fill="none" stroke="#1c1c1c" stroke-width="6" stroke-linecap="round"/>
+   <path d="M18 52 L28 48 L28 58 Z" fill="#1c1c1c"/>
+   <path d="M82 52 L72 48 L72 58 Z" fill="#1c1c1c"/>`,
+
+  // 16 — lock
+  `<rect x="24" y="46" width="52" height="42" rx="8" fill="#5a6472" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M32 46 V32 a18 18 0 0 1 36 0 V46" fill="none" stroke="#1c1c1c" stroke-width="6"/>
+   <circle cx="50" cy="64" r="7" fill="#232323"/>
+   <rect x="47" y="68" width="6" height="12" rx="2" fill="#232323"/>`,
+
+  // 17 — key
+  `<circle cx="30" cy="30" r="18" fill="#f0c419" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="30" cy="30" r="7" fill="#fff" stroke="#1c1c1c" stroke-width="2"/>
+   <path d="M42 42 L82 82" stroke="#f0c419" stroke-width="10" stroke-linecap="round"/>
+   <path d="M42 42 L82 82" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round" fill="none"/>
+   <path d="M68 68 L76 60 M76 76 L84 68" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>`,
+
+  // 18 — umbrella
+  `<path d="M10 48 A40 40 0 0 1 90 48 Z" fill="#e0453f" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M10 48 Q30 40 50 48 Q70 40 90 48" fill="none" stroke="#1c1c1c" stroke-width="3"/>
+   <path d="M50 48 L50 84" stroke="#1c1c1c" stroke-width="5" stroke-linecap="round"/>
+   <path d="M50 84 Q50 94 40 92" fill="none" stroke="#1c1c1c" stroke-width="5" stroke-linecap="round"/>`,
+
+  // 19 — clock
+  `<circle cx="50" cy="50" r="38" fill="#fdf6e3" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="50" cy="50" r="4" fill="#1c1c1c"/>
+   <path d="M50 50 L50 26" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>
+   <path d="M50 50 L68 58" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>
+   <circle cx="50" cy="16" r="2.4" fill="#1c1c1c"/><circle cx="50" cy="84" r="2.4" fill="#1c1c1c"/>
+   <circle cx="16" cy="50" r="2.4" fill="#1c1c1c"/><circle cx="84" cy="50" r="2.4" fill="#1c1c1c"/>`,
+
+  // 20 — bell
+  `<path d="M50 12 a6 6 0 0 1 6 6 v4 c14 4 18 18 18 30 v10 l8 10 H18 l8 -10 V52 c0 -12 4 -26 18 -30 v-4 a6 6 0 0 1 6 -6 Z"
+         fill="#f0c419" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M40 82 a10 10 0 0 0 20 0 Z" fill="#1c1c1c"/>`,
+
+  // 21 — music-note
+  `<circle cx="30" cy="76" r="12" fill="#232323"/>
+   <circle cx="66" cy="68" r="12" fill="#232323"/>
+   <path d="M42 76 L42 20 L78 12 L78 60" fill="none" stroke="#1c1c1c" stroke-width="5" stroke-linecap="round"/>`,
+
+  // 22 — camera
+  `<rect x="14" y="32" width="72" height="50" rx="8" fill="#5a6472" stroke="#1c1c1c" stroke-width="4"/>
+   <rect x="34" y="20" width="24" height="14" rx="4" fill="#5a6472" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="50" cy="58" r="16" fill="#8fa3b8" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="50" cy="58" r="7" fill="#232323"/>
+   <circle cx="72" cy="42" r="3" fill="#f0c419"/>`,
+
+  // 23 — lightbulb
+  `<path d="M50 10 a26 26 0 0 1 16 46 c-4 4 -6 8 -6 14 h-20 c0 -6 -2 -10 -6 -14 A26 26 0 0 1 50 10 Z"
+         fill="#ffe08a" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <rect x="40" y="70" width="20" height="8" rx="2" fill="#8fa3b8" stroke="#1c1c1c" stroke-width="3"/>
+   <rect x="42" y="80" width="16" height="8" rx="2" fill="#5a6472" stroke="#1c1c1c" stroke-width="3"/>
+   <path d="M44 34 L50 46 L58 30" fill="none" stroke="#f0c419" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`,
+
+  // 24 — eye
+  `<path d="M6 50 C24 22 76 22 94 50 C76 78 24 78 6 50 Z"
+         fill="#fff" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="50" cy="50" r="17" fill="#5cb3e0" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="50" cy="50" r="8" fill="#1c1c1c"/>
+   <circle cx="45" cy="44" r="3" fill="#fff"/>`,
+
+  // 25 — footprint
+  `<ellipse cx="50" cy="62" rx="18" ry="26" fill="#c98b5e" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="34" cy="24" r="7" fill="#c98b5e" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="48" cy="16" r="8" fill="#c98b5e" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="63" cy="18" r="7.5" fill="#c98b5e" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="75" cy="28" r="6" fill="#c98b5e" stroke="#1c1c1c" stroke-width="3"/>`,
+
+  // 26 — hand
+  `<path d="M34 92 V50 a6 6 0 0 1 12 0 V34 a6 6 0 0 1 12 0 V30 a6 6 0 0 1 12 0 V38 a6 6 0 0 1 12 0 V60 c0 20 -12 32 -24 32 Z"
+         fill="#f2c49b" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>`,
+
+  // 27 — mustache
+  `<path d="M10 50 C20 32 34 46 40 50 C44 40 50 40 50 50 C50 40 56 40 60 50 C66 46 80 32 90 50 C82 44 72 62 50 54 C28 62 18 44 10 50 Z"
+         fill="#232323" stroke="#1c1c1c" stroke-width="3" stroke-linejoin="round"/>`,
+
+  // 28 — crown
+  `<path d="M14 40 L30 62 L50 30 L70 62 L86 40 L82 78 H18 Z"
+         fill="#f0c419" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="14" cy="38" r="6" fill="#f0c419" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="50" cy="26" r="6" fill="#f0c419" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="86" cy="38" r="6" fill="#f0c419" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="38" cy="62" r="4" fill="#e0453f"/><circle cx="50" cy="62" r="4" fill="#5cb3e0"/><circle cx="62" cy="62" r="4" fill="#4f9d4a"/>`,
+
+  // 29 — gift-box
+  `<rect x="16" y="42" width="68" height="46" fill="#e0453f" stroke="#1c1c1c" stroke-width="4"/>
+   <rect x="16" y="42" width="68" height="14" fill="#c93a35" stroke="#1c1c1c" stroke-width="4"/>
+   <rect x="44" y="42" width="12" height="46" fill="#f0c419" stroke="#1c1c1c" stroke-width="3"/>
+   <path d="M50 42 C30 42 26 20 40 18 C50 16 50 32 50 42 Z" fill="#f0c419" stroke="#1c1c1c" stroke-width="3"/>
+   <path d="M50 42 C70 42 74 20 60 18 C50 16 50 32 50 42 Z" fill="#f0c419" stroke="#1c1c1c" stroke-width="3"/>`,
+
+  // 30 — maple-leaf
+  `<path d="M50 10 L56 28 L74 18 L66 36 L88 38 L70 50 L84 66 L62 60 L64 82 L50 66 L36 82 L38 60 L16 66 L30 50 L12 38 L34 36 L26 18 L44 28 Z"
+         fill="#e0453f" stroke="#1c1c1c" stroke-width="3.5" stroke-linejoin="round"/>
+   <path d="M50 60 L50 94" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>`,
+
+  // 31 — tree
+  `<path d="M50 10 L70 40 H58 L76 62 H60 L74 82 H26 L40 62 H24 L42 40 H30 Z"
+         fill="#4f9d4a" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <rect x="44" y="82" width="12" height="12" fill="#8a5a34" stroke="#1c1c1c" stroke-width="3"/>`,
+
+  // 32 — flower
+  `<g fill="#e874a1" stroke="#1c1c1c" stroke-width="3.5">
+     <circle cx="50" cy="26" r="16"/><circle cx="50" cy="74" r="16"/>
+     <circle cx="26" cy="50" r="16"/><circle cx="74" cy="50" r="16"/>
+   </g>
+   <circle cx="50" cy="50" r="15" fill="#ffd23f" stroke="#1c1c1c" stroke-width="4"/>`,
+
+  // 33 — mushroom
+  `<path d="M14 46 a36 30 0 0 1 72 0 Z" fill="#e0453f" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="30" cy="30" r="4.5" fill="#fff"/><circle cx="50" cy="20" r="5" fill="#fff"/><circle cx="70" cy="30" r="4.5" fill="#fff"/>
+   <path d="M36 46 h28 v24 a14 14 0 0 1 -28 0 Z" fill="#f2dcb3" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>`,
+
+  // 34 — apple
+  `<path d="M50 30 C34 18 14 28 14 52 C14 74 34 90 50 90 C66 90 86 74 86 52 C86 28 66 18 50 30 Z"
+         fill="#e0453f" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M50 30 C48 20 50 12 58 8" fill="none" stroke="#6b4a2b" stroke-width="4" stroke-linecap="round"/>
+   <path d="M50 16 C58 8 68 10 68 18 C60 22 52 20 50 16 Z" fill="#4f9d4a" stroke="#1c1c1c" stroke-width="3"/>`,
+
+  // 35 — banana
+  `<path d="M22 30 C20 54 32 78 60 82 C74 84 84 76 84 66 C74 74 62 72 52 62 C40 50 34 38 36 24 Z"
+         fill="#f6da3e" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M84 66 C88 66 90 70 88 74 C84 76 80 74 80 70 Z" fill="#8a5a34" stroke="#1c1c1c" stroke-width="2.5"/>`,
+
+  // 36 — cherries
+  `<path d="M40 40 C40 22 54 14 62 16" fill="none" stroke="#4f9d4a" stroke-width="4" stroke-linecap="round"/>
+   <path d="M40 40 C46 24 56 18 62 16" fill="none" stroke="#4f9d4a" stroke-width="4" stroke-linecap="round"/>
+   <circle cx="32" cy="66" r="18" fill="#e0453f" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="64" cy="70" r="18" fill="#c93a35" stroke="#1c1c1c" stroke-width="4"/>
+   <ellipse cx="26" cy="60" rx="4" ry="6" fill="#fff" opacity="0.4"/>`,
+
+  // 37 — watermelon
+  `<path d="M10 60 A40 40 0 0 1 90 60 Z" fill="#e0453f" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M10 60 A40 40 0 0 1 90 60" fill="none" stroke="#4f9d4a" stroke-width="8"/>
+   <path d="M18 58 A32 32 0 0 1 82 58" fill="none" stroke="#fff" stroke-width="3"/>
+   <circle cx="38" cy="46" r="2.6" fill="#232323"/><circle cx="50" cy="38" r="2.6" fill="#232323"/><circle cx="62" cy="46" r="2.6" fill="#232323"/>`,
+
+  // 38 — ice-cream
+  `<path d="M36 46 L64 46 L52 90 Z" fill="#e0b98f" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M38 47 L46 84 M50 47 L52 88 M62 47 L54 84" stroke="#8a5a34" stroke-width="2" stroke-linecap="round"/>
+   <circle cx="50" cy="32" r="22" fill="#f6b8c9" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="50" cy="14" r="6" fill="#e0453f" stroke="#1c1c1c" stroke-width="3"/>`,
+
+  // 39 — cupcake
+  `<path d="M26 54 L74 54 L66 88 H34 Z" fill="#f0c419" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M28 54 L36 62 L44 54 L52 62 L60 54 L68 62 L72 54" fill="none" stroke="#1c1c1c" stroke-width="2.5"/>
+   <path d="M28 54 a22 20 0 0 1 44 0 Z" fill="#fdf6f0" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M50 34 a14 14 0 0 1 0 -20 a14 14 0 0 1 0 20 Z" fill="#fdf6f0" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="50" cy="10" r="5" fill="#e0453f" stroke="#1c1c1c" stroke-width="2.5"/>`,
+
+  // 40 — pizza-slice
+  `<path d="M50 10 L90 88 L10 88 Z" fill="#f0c419" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M20 68 L80 68" stroke="#e0b060" stroke-width="6" stroke-linecap="round"/>
+   <circle cx="50" cy="42" r="6" fill="#e0453f" stroke="#1c1c1c" stroke-width="2.5"/>
+   <circle cx="38" cy="58" r="5" fill="#e0453f" stroke="#1c1c1c" stroke-width="2.5"/>
+   <circle cx="62" cy="58" r="5" fill="#4f9d4a" stroke="#1c1c1c" stroke-width="2.5"/>`,
+
+  // 41 — cheese-wedge
+  `<path d="M14 30 L70 14 L90 78 L14 78 Z" fill="#f0c419" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="40" cy="42" r="6" fill="#e0b060" stroke="#1c1c1c" stroke-width="2.5"/>
+   <circle cx="62" cy="34" r="4.5" fill="#e0b060" stroke="#1c1c1c" stroke-width="2.5"/>
+   <circle cx="56" cy="58" r="7" fill="#e0b060" stroke="#1c1c1c" stroke-width="2.5"/>`,
+
+  // 42 — fish
+  `<path d="M12 50 C30 30 60 30 78 50 C60 70 30 70 12 50 Z" fill="#5cb3e0" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M78 50 L94 36 L94 64 Z" fill="#3f8fc0" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="30" cy="46" r="4" fill="#1c1c1c"/>
+   <path d="M30 50 a10 6 0 0 0 12 0" fill="none" stroke="#1c1c1c" stroke-width="2.5"/>`,
+
+  // 43 — bird
+  `<ellipse cx="46" cy="56" rx="30" ry="22" fill="#5cb3e0" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="70" cy="42" r="14" fill="#5cb3e0" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M82 42 L94 38 L84 48 Z" fill="#f0c419" stroke="#1c1c1c" stroke-width="2.5"/>
+   <circle cx="74" cy="38" r="2.6" fill="#1c1c1c"/>
+   <path d="M30 56 Q16 50 12 62 Q22 62 30 66 Z" fill="#3f8fc0" stroke="#1c1c1c" stroke-width="3"/>`,
+
+  // 44 — cat-face
+  `<path d="M22 20 L36 40 L20 44 Z" fill="#f0902e" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M78 20 L64 40 L80 44 Z" fill="#f0902e" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="50" cy="54" r="34" fill="#f0902e" stroke="#1c1c1c" stroke-width="4"/>
+   <ellipse cx="38" cy="50" rx="5" ry="7" fill="#1c1c1c"/><ellipse cx="62" cy="50" rx="5" ry="7" fill="#1c1c1c"/>
+   <path d="M50 58 L46 64 L54 64 Z" fill="#e0453f"/>
+   <path d="M10 60 L30 58 M10 70 L30 64 M90 60 L70 58 M90 70 L70 64" stroke="#1c1c1c" stroke-width="2.5" stroke-linecap="round"/>`,
+
+  // 45 — dog-face
+  `<path d="M18 24 Q10 46 24 58 Q18 40 26 26 Z" fill="#c9975c" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M82 24 Q90 46 76 58 Q82 40 74 26 Z" fill="#c9975c" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="50" cy="54" r="32" fill="#e0b98f" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="38" cy="50" r="4.5" fill="#1c1c1c"/><circle cx="62" cy="50" r="4.5" fill="#1c1c1c"/>
+   <ellipse cx="50" cy="62" rx="9" ry="6" fill="#fff" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="50" cy="60" r="4" fill="#1c1c1c"/>
+   <path d="M50 68 Q50 78 58 76" fill="none" stroke="#e0453f" stroke-width="4" stroke-linecap="round"/>`,
+
+  // 46 — rabbit
+  `<path d="M34 12 C24 12 20 30 26 50 C30 44 36 40 40 40 C36 30 32 20 34 12 Z" fill="#f2e3d8" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M66 12 C76 12 80 30 74 50 C70 44 64 40 60 40 C64 30 68 20 66 12 Z" fill="#f2e3d8" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="50" cy="60" r="30" fill="#f2e3d8" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="40" cy="56" r="4" fill="#1c1c1c"/><circle cx="60" cy="56" r="4" fill="#1c1c1c"/>
+   <ellipse cx="50" cy="66" rx="4" ry="3" fill="#e0a1b0"/>`,
+
+  // 47 — turtle
+  `<ellipse cx="50" cy="52" rx="32" ry="26" fill="#5cab54" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M50 30 L60 46 L50 62 L40 46 Z M28 40 L40 46 L28 58 Z M72 40 L60 46 L72 58 Z M50 62 L60 46 L72 58 L50 76 L28 58 L40 46 Z"
+         fill="none" stroke="#2f6d2b" stroke-width="2.5"/>
+   <circle cx="24" cy="30" r="9" fill="#5cab54" stroke="#1c1c1c" stroke-width="3.5"/>
+   <circle cx="20" cy="28" r="1.8" fill="#1c1c1c"/>
+   <path d="M28 74 L20 84 M40 78 L36 90 M60 78 L64 90 M72 74 L80 84" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>`,
+
+  // 48 — snail
+  `<path d="M62 60 a18 18 0 1 1 -18 -18 a10 10 0 1 1 -10 10" fill="none" stroke="#f0902e" stroke-width="6" stroke-linecap="round"/>
+   <circle cx="62" cy="60" r="18" fill="#f6cf8e" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M44 74 C24 74 14 66 14 60 C14 68 24 78 40 80 Z" fill="#5cab54" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M16 62 L8 50 M22 64 L18 52" stroke="#5cab54" stroke-width="3" stroke-linecap="round"/>`,
+
+  // 49 — ladybug
+  `<path d="M50 20 a30 30 0 0 1 30 30 v10 a30 30 0 0 1 -60 0 v-10 a30 30 0 0 1 30 -30 Z"
+         fill="#e0453f" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <path d="M50 20 L50 90" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="38" cy="46" r="5" fill="#1c1c1c"/><circle cx="62" cy="46" r="5" fill="#1c1c1c"/>
+   <circle cx="36" cy="68" r="4.5" fill="#1c1c1c"/><circle cx="64" cy="68" r="4.5" fill="#1c1c1c"/>
+   <path d="M30 20 a20 12 0 0 1 40 0 Z" fill="#232323"/>
+   <circle cx="40" cy="14" r="2" fill="#1c1c1c"/><circle cx="60" cy="14" r="2" fill="#1c1c1c"/>`,
+
+  // 50 — butterfly
+  `<path d="M50 20 C40 4 10 8 12 30 C14 46 34 44 50 34 Z" fill="#e874a1" stroke="#1c1c1c" stroke-width="3.5" stroke-linejoin="round"/>
+   <path d="M50 20 C60 4 90 8 88 30 C86 46 66 44 50 34 Z" fill="#e874a1" stroke="#1c1c1c" stroke-width="3.5" stroke-linejoin="round"/>
+   <path d="M50 34 C38 46 20 50 18 66 C16 80 34 82 50 62 Z" fill="#f0c419" stroke="#1c1c1c" stroke-width="3.5" stroke-linejoin="round"/>
+   <path d="M50 34 C62 46 80 50 82 66 C84 80 66 82 50 62 Z" fill="#f0c419" stroke="#1c1c1c" stroke-width="3.5" stroke-linejoin="round"/>
+   <path d="M50 18 L50 66" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round"/>`,
+
+  // 51 — bee
+  `<ellipse cx="50" cy="56" rx="24" ry="20" fill="#f6cf3e" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M32 44 h36 M28 56 h44 M32 68 h36" stroke="#232323" stroke-width="7" stroke-linecap="round"/>
+   <ellipse cx="30" cy="38" rx="16" ry="12" fill="#eaf4fb" opacity="0.8" stroke="#1c1c1c" stroke-width="2"/>
+   <ellipse cx="60" cy="34" rx="16" ry="12" fill="#eaf4fb" opacity="0.8" stroke="#1c1c1c" stroke-width="2"/>
+   <path d="M40 38 L34 26 M60 38 L66 26" stroke="#1c1c1c" stroke-width="3" stroke-linecap="round"/>`,
+
+  // 52 — snake
+  `<path d="M14 78 C14 60 34 60 34 44 C34 28 14 28 14 14"
+         fill="none" stroke="#5cab54" stroke-width="16" stroke-linecap="round"/>
+   <circle cx="14" cy="14" r="11" fill="#5cab54" stroke="#1c1c1c" stroke-width="4"/>
+   <circle cx="10" cy="10" r="2" fill="#1c1c1c"/>
+   <path d="M22 8 L32 4 M22 10 L30 12" stroke="#e0453f" stroke-width="2.5" stroke-linecap="round"/>
+   <path d="M14 78 C14 60 34 60 34 44 C34 28 14 28 14 14" fill="none" stroke="#1c1c1c" stroke-width="4"/>`,
+
+  // 53 — owl
+  `<ellipse cx="50" cy="58" rx="32" ry="30" fill="#a9805a" stroke="#1c1c1c" stroke-width="4"/>
+   <path d="M28 30 L20 12 L38 22 Z M72 30 L80 12 L62 22 Z" fill="#a9805a" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="36" cy="52" r="14" fill="#fff" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="64" cy="52" r="14" fill="#fff" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="36" cy="52" r="6" fill="#1c1c1c"/><circle cx="64" cy="52" r="6" fill="#1c1c1c"/>
+   <path d="M50 60 L44 70 L56 70 Z" fill="#f0902e" stroke="#1c1c1c" stroke-width="2.5"/>`,
+
+  // 54 — penguin
+  `<ellipse cx="50" cy="56" rx="28" ry="34" fill="#232323" stroke="#1c1c1c" stroke-width="4"/>
+   <ellipse cx="50" cy="62" rx="16" ry="24" fill="#fff"/>
+   <circle cx="42" cy="36" r="3.2" fill="#fff"/><circle cx="58" cy="36" r="3.2" fill="#fff"/>
+   <circle cx="42" cy="37" r="1.6" fill="#1c1c1c"/><circle cx="58" cy="37" r="1.6" fill="#1c1c1c"/>
+   <path d="M46 42 L54 42 L50 48 Z" fill="#f0902e" stroke="#1c1c1c" stroke-width="2"/>
+   <path d="M36 84 L30 92 L42 90 Z M64 84 L70 92 L58 90 Z" fill="#f0902e" stroke="#1c1c1c" stroke-width="2.5" stroke-linejoin="round"/>`,
+
+  // 55 — dolphin
+  `<path d="M10 60 C20 30 50 20 70 30 C80 20 92 22 90 30 C86 34 82 34 80 36 C92 40 92 52 82 54 C70 56 58 50 50 56 C40 62 24 68 10 60 Z"
+         fill="#7fa8c9" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="66" cy="34" r="2.6" fill="#1c1c1c"/>
+   <path d="M40 58 L34 72 L48 62 Z" fill="#5c86a8" stroke="#1c1c1c" stroke-width="3" stroke-linejoin="round"/>`,
+
+  // 56 — ghost-alien
+  `<path d="M50 10 C68 10 78 26 78 44 C78 58 70 60 74 70 C68 68 66 74 60 72 C56 78 50 78 46 72 C40 74 38 68 32 70 C36 60 22 58 22 44 C22 26 32 10 50 10 Z"
+         fill="#9b7fd4" stroke="#1c1c1c" stroke-width="4" stroke-linejoin="round"/>
+   <circle cx="50" cy="42" r="12" fill="#fff" stroke="#1c1c1c" stroke-width="3"/>
+   <circle cx="50" cy="42" r="5" fill="#1c1c1c"/>`,
+];
+
+if (SYMBOL_BODY.length !== 57) {
+  throw new Error(`SYMBOL_BODY باید دقیقاً ۵۷ عضو داشته باشه، الان ${SYMBOL_BODY.length} تاست.`);
+}
+
+// ---------------------------------------------------------------------
+// ساختِ رشته‌ی کاملِ <defs> شاملِ همه‌ی ۵۷ <symbol>، آماده برای تزریق
+// به DOM (یک‌بار، در ابتدای صفحه). display:none روی خودِ <svg> بیرونی
+// چون این فقط انبارِ تعریف‌هاست، هیچ‌وقت مستقیم دیده نمی‌شه.
+// ---------------------------------------------------------------------
+function buildSymbolDefsMarkup() {
+  const symbols = SYMBOL_BODY.map((body, i) => (
+    `<symbol id="sym-${i}" viewBox="0 0 100 100">${body}</symbol>`
+  )).join('\n');
+  return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true"><defs>${symbols}</defs></svg>`;
+}
+
+// این تابع رو یک‌بار، قبل از رندرِ اولین DobbleCard، صدا بزن (مثلاً
+// موقعِ ورود به تبِ بازی). اگه چندبار صدا زده بشه هم مشکلی نیست —
+// خودش چک می‌کنه که قبلاً تزریق نشده باشه، تا تعریف‌ها تکراری نشن.
+let _defsInjected = false;
+function injectSymbolDefs() {
+  if (_defsInjected) return;
+  if (typeof document === 'undefined') return; // (برای اجرای احتمالی خارج از مرورگر، مثل تست)
+  const holder = document.createElement('div');
+  holder.innerHTML = buildSymbolDefsMarkup();
+  document.body.appendChild(holder.firstElementChild);
+  _defsInjected = true;
+}
+
+const SYMBOL_COUNT = SYMBOL_BODY.length; // 57 — باید با symbolCount توی dobble-deck.json یکی باشه
+
+// اکسپورت به سبکِ ساده (بدون بستنِ به سیستمِ ماژولِ خاصی، چون بقیه‌ی
+// پروژه هم به‌صورتِ اسکریپتِ ساده لود می‌شه، نه import/export ماژولی).
+if (typeof window !== 'undefined') {
+  window.DobbleIconBank = { SYMBOL_NAMES, SYMBOL_COUNT, injectSymbolDefs, buildSymbolDefsMarkup };
+}
+
+/* ===================== DOBBLE — DobbleCard (چیدمانِ بدون‌برخوردِ ۸ نماد رویِ کارتِ گرد + رندرِ SVG) =====================
+   قبلاً فایلِ جداگانه‌ی dobble-card.js بود؛ حالا مستقیم داخلِ app.js گنجونده شده تا وابسته به
+   یه اسکریپتِ بیرونیِ اضافه نباشه (index.html دیگه لازم نیست dobble-card.js رو جدا لود کنه).
+   ورودی: آرایه‌ای از ۸ شناسه‌ی نماد (همون‌هایی که تو دسته‌ی STAGE 1 برای هر کارت اومده).
+   خروجی: یه <svg> که کارتِ گرد رو با نمادهای چیده‌شده (بدون همپوشانی، هرکدوم سایز/زاویه‌ی
+   متفاوت) رسم می‌کنه. چیدمان seeded-random و کش‌شده‌ست، پس بینِ رندرهای بعدی ثابت می‌مونه. */
+(function(){
+  if(typeof window === 'undefined') return;
+
+  // تنظیماتِ چیدمان — سایزِ نمادها یه‌کمی بزرگ‌تر از نسخه‌ی اولیه تنظیم شده (baseSymbolSize و
+  // minSizeFraction بالاتر رفتن) تا کارت‌ها پرتر و منسجم‌تر دیده بشن، بدون اینکه نمادها روی هم بیفتن
+  // (الگوریتمِ fallback هنوز خودش موقعِ برخورد سایز رو لازم به لازم کوچیک می‌کنه).
+  const LAYOUT_CONFIG = {
+    cardDiameter: 520,       // سایزِ پایه‌ی کارت به px (خودِ SVG با viewBox اسکیل می‌شه، پس روی هر صفحه‌ای درست دیده می‌شه)
+    symbolCountPerCard: 8,
+    minSizeFraction: 0.48,   // قبلاً 0.40 بود — کف‌ِ سایز رو بالاتر بردیم
+    maxSizeFraction: 1.05,   // قبلاً 1.00 بود
+    baseSymbolSize: 172,     // قبلاً 150 بود — اندازه‌ی "پایه"‌ی یه نماد (px روی بومِ ۵۲۰ی کارت) پیش از اعمالِ sizeFraction تصادفی
+    maxAttemptsPerSymbol: 80,  // قبل از کوچیک‌کردنِ اجباری، این‌قدر موقعیتِ تصادفی امتحان کن
+    shrinkStep: 0.92,          // هر بار که گیر کرد، سایز رو ۸٪ کوچیک‌تر کن و دوباره امتحان کن
+    minShrinkFraction: 0.28,   // قبلاً 0.22 بود — زیرِ این سایز دیگه کوچیک نکن
+    paddingBetweenSymbols: 5,  // قبلاً 6 بود — کمی فاصله‌ی کمتر بینِ نمادها، هم‌راستا با نمادهای بزرگ‌تر
+    edgePadding: 10,           // px فاصله‌ی حداقلیِ نمادها از لبه‌ی دایره‌ی کارت
+  };
+
+  // کشِ چیدمانِ کارت‌ها: cacheKey → [{id, x, y, size, rotation}, ...]
+  const _layoutCache = new Map();
+
+  // عددساز تصادفیِ قطعی (seeded) — اگه یه seed معلوم بدیم (مثلاً بر اساسِ خودِ کارت)، حتی اگه
+  // کشِ حافظه پاک بشه (مثلاً کاربر صفحه رو رفرش کرد وسطِ بازی) همون چیدمانِ قبلی دوباره تولید می‌شه.
+  function makeSeededRandom(seedStr) {
+    // هش سادۀ رشته به یه عددِ ۳۲بیتی (xfnv1a) — فقط برای seed کردن، نه امنیتی.
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < seedStr.length; i++) {
+      h ^= seedStr.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    let state = h >>> 0;
+    return function rnd() {
+      // mulberry32
+      state |= 0; state = (state + 0x6D2B79F5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /**
+   * چیدمانِ بدون‌برخوردِ ۸ نماد رو برای یه کارت محاسبه می‌کنه.
+   * الگوریتم: برای هر نماد، تا maxAttemptsPerSymbol بار یه موقعیتِ تصادفی امتحان می‌کنه؛
+   * اگه با نمادهای قبلیِ همون کارت برخورد نداشت و کامل داخلِ مرزِ دایره موند، قبولش می‌کنه.
+   * اگه بعدِ همه‌ی تلاش‌ها جای خالی پیدا نشد، سایزِ نماد رو یه‌پله کوچیک‌تر می‌کنه و دوباره
+   * تلاش می‌کنه (fallback) — این یعنی هیچ‌وقت گیر نمی‌کنه، فقط ممکنه نمادِ آخر کمی کوچیک‌تر از بقیه بشه.
+   */
+  function computeCardLayout(symbolIds, cacheKey) {
+    const key = cacheKey || symbolIds.join(',');
+    if (_layoutCache.has(key)) return _layoutCache.get(key);
+
+    const rnd = makeSeededRandom(key);
+    const R = LAYOUT_CONFIG.cardDiameter / 2;
+    const placed = []; // {x, y, r} — r = شعاعِ تقریبیِ نماد (برای تشخیصِ برخورد)
+
+    const layout = symbolIds.map((symId) => {
+      let sizeFraction = LAYOUT_CONFIG.minSizeFraction +
+        rnd() * (LAYOUT_CONFIG.maxSizeFraction - LAYOUT_CONFIG.minSizeFraction);
+
+      let placedOk = false;
+      let x = 0, y = 0, iconRadius = 0;
+
+      while (!placedOk) {
+        iconRadius = (LAYOUT_CONFIG.baseSymbolSize * sizeFraction) / 2;
+        const maxCenterDist = R - iconRadius - LAYOUT_CONFIG.edgePadding;
+
+        if (maxCenterDist <= 0) {
+          // حتی با کوچیک‌ترین سایزِ مجاز هم جا نمی‌شه (نباید پیش بیاد با تنظیماتِ فعلی،
+          // ولی محافظتِ اضافه‌ست) — همون مرکز رو بذار.
+          x = 0; y = 0; placedOk = true; break;
+        }
+
+        let attempt = 0;
+        while (attempt < LAYOUT_CONFIG.maxAttemptsPerSymbol) {
+          // موقعیتِ تصادفی داخلِ دایره (با sqrt برای توزیعِ یکنواخت، نه فقط نزدیکِ مرکز)
+          const angle = rnd() * Math.PI * 2;
+          const dist = Math.sqrt(rnd()) * maxCenterDist;
+          const cx = Math.cos(angle) * dist;
+          const cy = Math.sin(angle) * dist;
+
+          const collides = placed.some((p) => {
+            const dx = p.x - cx, dy = p.y - cy;
+            const minDist = p.r + iconRadius + LAYOUT_CONFIG.paddingBetweenSymbols;
+            return (dx * dx + dy * dy) < (minDist * minDist);
+          });
+
+          if (!collides) {
+            x = cx; y = cy; placedOk = true;
+            break;
+          }
+          attempt++;
+        }
+
+        if (!placedOk) {
+          // fallback: نماد رو کوچیک‌تر کن و از اول امتحان کن
+          const nextFraction = sizeFraction * LAYOUT_CONFIG.shrinkStep;
+          if (nextFraction < LAYOUT_CONFIG.minShrinkFraction) {
+            // دیگه بیشتر کوچیک نمی‌کنیم؛ همین سایزِ کمینه رو با بهترین موقعیتِ ممکن
+            // (مرکز، اگه جای دیگه‌ای نبود) قبول کن تا گیر نکنیم.
+            sizeFraction = LAYOUT_CONFIG.minShrinkFraction;
+            iconRadius = (LAYOUT_CONFIG.baseSymbolSize * sizeFraction) / 2;
+            x = 0; y = 0; placedOk = true;
+          } else {
+            sizeFraction = nextFraction;
+          }
+        }
+      }
+
+      placed.push({ x, y, r: iconRadius });
+
+      return {
+        id: symId,
+        x: R + x, // مختصات نسبت به گوشه‌ی بالا-چپِ بومِ SVG (نه مرکز)
+        y: R + y,
+        size: iconRadius * 2,
+        rotation: Math.floor(rnd() * 360),
+      };
+    });
+
+    _layoutCache.set(key, layout);
+    return layout;
+  }
+
+  /**
+   * یه کارتِ گردِ کامل (SVG) با ۸ نمادِ چیده‌شده می‌سازه و برمی‌گردونه.
+   * قبلش باید DobbleIconBank.injectSymbolDefs() یه‌بار صدا زده شده باشه.
+   */
+  function renderDobbleCard(symbolIds, options) {
+    options = options || {};
+    if (symbolIds.length !== LAYOUT_CONFIG.symbolCountPerCard) {
+      throw new Error(`هر کارتِ دابل باید دقیقاً ${LAYOUT_CONFIG.symbolCountPerCard} نماد داشته باشه، ${symbolIds.length} تا دریافت شد.`);
+    }
+
+    const layout = computeCardLayout(symbolIds, options.cacheKey);
+    const D = LAYOUT_CONFIG.cardDiameter;
+    const R = D / 2;
+
+    const useTags = layout.map((item) => {
+      const half = item.size / 2;
+      // چرخش حولِ مرکزِ خودِ نماد (نه مرکزِ کارت)
+      return `<use href="#sym-${item.id}" x="${item.x - half}" y="${item.y - half}" ` +
+        `width="${item.size}" height="${item.size}" ` +
+        `transform="rotate(${item.rotation} ${item.x} ${item.y})" ` +
+        `data-symbol-id="${item.id}" class="dobble-symbol" style="cursor:pointer"/>`;
+    }).join('\n');
+
+    const svgMarkup = `<svg class="dobble-card" viewBox="0 0 ${D} ${D}" width="${D}" height="${D}" xmlns="http://www.w3.org/2000/svg" style="touch-action:manipulation">
+    <circle cx="${R}" cy="${R}" r="${R - 4}" fill="#ffffff" stroke="#1c1c1c" stroke-width="4"/>
+    ${useTags}
+  </svg>`;
+
+    if (options.container) {
+      options.container.innerHTML = svgMarkup;
+      return options.container.querySelector('svg.dobble-card');
+    }
+    return svgMarkup;
+  }
+
+  // برای تست/دیباگِ مستقل: کشِ چیدمان رو خالی می‌کنه (یعنی دفعه‌ی بعد که یه کارت رندر بشه،
+  // چیدمانش از نو محاسبه می‌شه). هیچ‌وقت وسطِ یه بازیِ درحالِ‌اجرا این رو صدا نزن — فقط برای تستِ بصری در توسعه‌ست.
+  function _debugClearLayoutCache() {
+    _layoutCache.clear();
+  }
+
+  window.DobbleCard = { computeCardLayout, renderDobbleCard, LAYOUT_CONFIG, _debugClearLayoutCache };
+})();
+
+/* ===================== DOBBLE — STAGE 2، نیمه‌ی اول (ویترینِ بانکِ نمادِ SVG) =====================
+   فقط رندرِ آزمایشیِ ۵۷ نمادِ icon-bank.js برای تاییدِ بصری — نه چیدمانِ رویِ کارتِ گرد
+   (اون نیمه‌ی دومِ STAGE 2ه، هنوز اضافه نشده). منطق:
+   ۱) یه‌بار defsِ SVG (تعریفِ هر ۵۷ نماد) رو به DOM تزریق می‌کنه (DobbleIconBank.injectSymbolDefs).
+   ۲) یه گریدِ ساده از هر ۵۷ نماد تو سایزِ یکسان (۵۲px) می‌سازه، فقط برای دیدنِ همه‌شون کنارِ هم.
+   ۳) یه ردیفِ جداگانه‌ی «تستِ مقیاس/چرخش» می‌سازه: یه نمادِ ثابت رو تو ۵ سایزِ مختلف (از ۴۰٪
+      تا ۱۰۰٪، دقیقاً بازه‌ای که سندِ چیدمانِ کارت قراره ازش استفاده کنه) و چند زاویه‌ی چرخشِ
+      متفاوت نشون می‌ده، تا مطمئن بشیم چون SVGن، اسکیل/چرخش هیچ افتِ کیفیتی نداره.
+   مثلِ STAGE 1، لِیزیه (فقط اولین‌بارِ بازِ شدنِ تبِ دابل رندر می‌شه، نه موقعِ لودِ اپ). */
+(function(){
+  try{
+    if(typeof window === 'undefined') return;
+
+    let _dblIconsRendered = false;
+    function dblIconEl(id){ return document.getElementById(id); }
+
+    function dblRenderStage2aIcons(){
+      if(_dblIconsRendered) return; // بانکِ نماد ثابته، دوباره رندر لازم نیست
+      const card = dblIconEl('dblIconsCard');
+      const grid = dblIconEl('dblIconsGrid');
+      const scaleWrap = dblIconEl('dblIconsScaleTest');
+      const countEl = dblIconEl('dblIconsCount');
+      if(!card || !grid || !window.DobbleIconBank) return; // اگه icon-bank.js لود نشده باشه، بی‌سروصدا رد شو
+
+      try{
+        window.DobbleIconBank.injectSymbolDefs();
+        const total = window.DobbleIconBank.SYMBOL_COUNT;
+
+        // ۱) گریدِ کاملِ ۵۷ نماد، تو سایزِ یکسان — برای اسکنِ سریعِ چشمی
+        const gridHtml = [];
+        for(let i=0; i<total; i++){
+          gridHtml.push(
+            '<div class="dbl-icons-cell">' +
+              '<div class="dbl-icons-swatch"><svg width="52" height="52" viewBox="0 0 100 100"><use href="#sym-' + i + '"/></svg></div>' +
+              '<span class="dbl-icons-idx">#' + i + '</span>' +
+            '</div>'
+          );
+        }
+        grid.innerHTML = gridHtml.join('');
+
+        // ۲) ردیفِ تستِ مقیاس/چرخش — یه نمادِ متمایز (ستاره، #8) تو ۵ سایز از ۴۰٪ تا ۱۰۰٪
+        //    (طبقِ minSizeFraction/maxSizeFraction سندِ چیدمانِ کارت) + زاویه‌های مختلف.
+        const scaleSteps = [
+          { frac:0.40, rot:0 },
+          { frac:0.55, rot:70 },
+          { frac:0.70, rot:140 },
+          { frac:0.85, rot:220 },
+          { frac:1.00, rot:300 },
+        ];
+        const testSymbolId = Math.min(8, total - 1); // #8 = star
+        const baseSize = 90; // px، پایه‌ی نمایش (فقط برای این ویترین، ربطی به baseSymbolSizeِ کارت نداره)
+        const scaleHtml = scaleSteps.map((step)=>{
+          const px = Math.round(baseSize * step.frac);
+          return '<div class="dbl-icons-scaletest-item">' +
+            '<svg width="' + px + '" height="' + px + '" viewBox="0 0 100 100" style="transform:rotate(' + step.rot + 'deg)">' +
+              '<use href="#sym-' + testSymbolId + '"/>' +
+            '</svg>' +
+            '<span class="dbl-icons-scaletest-label">' + Math.round(step.frac*100) + '% / ' + step.rot + '°</span>' +
+          '</div>';
+        });
+        if(scaleWrap) scaleWrap.innerHTML = scaleHtml.join('');
+
+        if(countEl) countEl.textContent = toFa(total) + ' نماد';
+        card.style.display = '';
+        _dblIconsRendered = true;
+      }catch(e){
+        console.error('Dobble stage2a icons render error', e);
+      }
+    }
+
+    window.dblRenderStage2aIcons = dblRenderStage2aIcons; // صدا زده می‌شه از سوییچرِ گیم‌هاب بالا
+  }catch(e){ console.error('Dobble stage2a init error', e); }
+})();
+
+/* ===================== DOBBLE — STAGE 2، نیمه‌ی دوم (ویترینِ کارتِ گردِ چیده‌شده) =====================
+   چند کارتِ واقعی از دسته‌ی ۵۵کارتیِ STAGE 1 (window.DobbleDeck) رو با renderDobbleCard
+   (dobble-card.js — چیدمانِ بدون‌برخوردِ ۸ نماد رویِ دایره) رندر می‌کنه. هنوز هیچ منطقِ
+   بازی/لابی نیست، فقط تاییدِ بصریِ چیدمان: نمادها نباید رویِ هم بیفتن، باید کاملاً داخلِ
+   مرزِ کارت بمونن، و تو سایزهای مختلف (طبقِ چیدمان، ۴۰٪ تا ۱۰۰٪) خوانا بمونن.
+   وابسته به دو ماژولِ قبلی: باید بعدِ dblRenderStage1Status (که window.DobbleDeck رو پر
+   می‌کنه) و بعدِ injectSymbolDefsِ STAGE 2الف اجرا بشه — برای همین تو showGame، هر سه به
+   ترتیب صدا زده می‌شن. */
+(function(){
+  try{
+    if(typeof window === 'undefined') return;
+
+    let _dblCardsRendered = false;
+    function dblCardEl(id){ return document.getElementById(id); }
+
+    function dblRenderStage2bCards(){
+      if(_dblCardsRendered) return; // چیدمانِ کارت‌ها کش‌شده‌ست و ثابت می‌مونه، دوباره رندر لازم نیست
+      const card = dblCardEl('dblCardsCard');
+      const row = dblCardEl('dblCardsRow');
+      const countEl = dblCardEl('dblCardsCount');
+      if(!card || !row || !window.DobbleCard || !window.DobbleIconBank) return; // اگه dobble-card.js/icon-bank.js لود نشده، بی‌سروصدا رد شو
+      if(!window.DobbleDeck || !window.DobbleDeck.valid) return; // بدونِ دسته‌ی معتبر (STAGE 1) کارتی نداریم که رندر کنیم
+
+      try{
+        window.DobbleIconBank.injectSymbolDefs(); // اگه STAGE 2الف قبلاً صداش زده باشه، خودش idempotent‌ه
+
+        const cards = window.DobbleDeck.cards;
+        // چهار کارتِ پخش‌شده تو دسته (نه پشتِ‌سرِهم) تا تنوعِ چیدمان‌ها هم دیده بشه؛
+        // هر جفتِ ازشون طبقِ قاعده‌ی دابل دقیقاً ۱ نمادِ مشترک دارن (اثباتش کارِ STAGE 1 بود).
+        const sampleIdxs = [0, 1, Math.floor(cards.length / 2), cards.length - 1]
+          .filter((idx, i, arr) => arr.indexOf(idx) === i && idx < cards.length);
+
+        const itemsHtml = sampleIdxs.map((idx, i) => {
+          const svgMarkup = window.DobbleCard.renderDobbleCard(cards[idx], { cacheKey: 'stage2b-sample-' + idx });
+          const bigClass = (i === 0) ? ' dbl-cards-item-big' : '';
+          return '<div class="dbl-cards-item' + bigClass + '">' +
+            svgMarkup +
+            '<span class="dbl-cards-item-label">card #' + idx + '</span>' +
+          '</div>';
+        });
+        row.innerHTML = itemsHtml.join('');
+
+        if(countEl) countEl.textContent = toFa(sampleIdxs.length) + ' نمونه از ' + toFa(cards.length) + ' کارت';
+        card.style.display = '';
+        _dblCardsRendered = true;
+      }catch(e){
+        console.error('Dobble stage2b cards render error', e);
+      }
+    }
+
+    window.dblRenderStage2bCards = dblRenderStage2bCards; // صدا زده می‌شه از سوییچرِ گیم‌هاب بالا
+  }catch(e){ console.error('Dobble stage2b init error', e); }
+})();
+
+/* ===================== DOBBLE — STAGE 3 (لابیِ عمومی + شروعِ بازی/دیلِ کارتِ اول) =====================
+   دقیقاً هم‌الگو با ماژولِ لابیِ حکم/اسم‌فامیل بالا (IIFE جدا، پیشوندِ مخصوصِ خودش، try/catch
+   دورِ کل تا اگه خطایی داد بقیه‌ی اپ از کار نیفته). از جدول‌ها/RPCهای dobble_01_schema.sql +
+   dobble_02_lobby_rpc.sql + dobble_03_start_room_rpc.sql استفاده می‌کنه (هر سه باید قبلش،
+   به همین ترتیب، تو Supabase SQL editor اجرا شده باشن).
+   realtimeِ لابی عیناً همون سبکِ hokm_lobby/esmfamil_lobby: broadcast دستی (self:false)، نه
+   postgres_changes — کانالِ dobble_lobby فقط یه پیامِ سبکِ «یه‌جا عوض شد» می‌فرسته، خودِ
+   دیتا هربار از دلِ RPC (منبعِ واقعیِ حقیقت) دوباره خونده می‌شه؛ نه اینکه دیتا داخلِ payloadِ
+   broadcast سوار بشه (که هم مصرفِ پیام رو زیاد می‌کرد هم امکانِ ناهماهنگیِ کلاینت‌ها رو).
+   نیمه‌ی دومِ همین مرحله (کانالِ per-room + دکمه‌ی «شروع بازی» + شافل/دیلِ کارتِ اول)
+   هم دقیقاً همین اصل رو نگه می‌داره: رویدادِ dobble_room_<roomId> هم فقط یه پینگه
+   (game_started)، خودِ کارتِ من/کارتِ وسط همیشه با dobble_current_state خونده می‌شه — نه از
+   دلِ payloadِ broadcast (برخلافِ esmfamil_current_round که این‌ها رو تو payload می‌فرسته؛
+   این‌جا عمداً یه‌دست موندیم با سبکِ خودِ dobble_lobby بالا).
+
+   تفاوتِ اصلی با میزِ حکم (۴ صندلیِ ثابت): تعدادِ بازیکن‌های دابل طبقِ سند بینِ ۲ تا ۸ متغیره،
+   برای همین (هم‌الگو با اسم‌فامیل که میزبان دستی «شروع بازی» می‌زنه) سازنده‌ی میز اول تعدادِ
+   صندلی‌ها رو با یه استپرِ عددی انتخاب می‌کنه (dobble_create_room با p_max_players)، و میز
+   خودش هیچ‌وقت خودکار «پر» تلقی نمی‌شه — چون تصمیمِ «کِی شروع کنیم» با میزبانه، نه با پرشدنِ
+   صندلی‌ها.
+
+   نکته‌ی مهم دربابِ dobble_leave_room: اگه سازنده‌ی میز (که قراره تو STAGE ۴ «میزبانِ
+   تاییدکننده‌ی claimها» هم باشه) وسطِ راه بره، RPC خودش created_by رو به نفرِ بعدی (کم‌ترین
+   seat) منتقل می‌کنه — یعنی مشکلِ «قطعیِ میزبان» که تو سندِ STAGE 5 نگرانش بودن، چون این‌جا
+   میزبان یه ستونِ دیتابیسه نه یه کلاینتِ زنده، اصلاً پیش نمیاد. همین برایِ dobble_start_room
+   هم برقراره: اگه بینِ ساختنِ میز و زدنِ «شروع بازی» سازنده عوض بشه (رفتنِ سازنده‌ی قبلی)،
+   only_creator_can_start رو created_by بروزِ همون لحظه چک می‌کنه، نه یه مقدارِ کش‌شده.
+
+   این مرحله فقط تا «همه یه کارت دستشونه و کارتِ وسط رو می‌بینن» می‌ره — دقیقاً هم‌ارزِ
+   لحظه‌ی efHandleRoundStarted قبل از STAGE ۴ اسم‌فامیل. خودِ claimِ نمادِ مشترک، تاییدِ
+   میزبان، انیمیشن/sfx، شمارشِ زنده، و پایانِ بازی — که قبلاً این‌جا «هنوز نیومده» علامت
+   خورده بودن — پایین‌تر، تویِ ماژولِ STAGE ۴ (نیمه‌ی اول: claim/داوری، نیمه‌ی دوم: شمارشِ
+   زنده/فیدبک/پایانِ بازی) اضافه شدن. */
+(function(){
+  try{
+    if(typeof window === 'undefined') return;
+
+    let dblLobbyChannel = null;
+    let dblMyRoom = null;       // { room_id, room_status, seats_filled, max_players, my_seat, is_creator } یا null
+    let dblOpenRooms = [];      // [{ room_id, seats_filled, max_players, created_at }]
+    let dblLobbyBusy = false;
+    let dblSelectedMaxPlayers = 4; // پیش‌فرضِ فرمِ ساختِ میز؛ استپر بینِ ۲ تا ۸ نگهش می‌داره
+
+    // STAGE 3، نیمه‌ی دوم: کانالِ per-room (dobble_room_<roomId>) — جدا از dblLobbyChannel
+    // که فقط برایِ لیستِ میزهای بازِ لابیِ عمومیه. هر بازیکنی که تو یه میزه (چه waiting چه
+    // playing) روش سابسکرایب می‌مونه، عیناً موازیِ efRoomChannel/hk3RoomChannel.
+    let dblRoomChannel = null;
+    let dblRoomChannelId = null;
+    let dblStartBusy = false;
+    // وضعیتِ لحظه‌ایِ بازیِ درحالِ اجرا (بعدِ 'playing' شدنِ میز) — همیشه از dobble_current_state
+    // (منبعِ واقعیِ حقیقتِ روی سرور) پر می‌شه، نه از خودِ payloadِ broadcast؛ همون اصلی که
+    // برایِ dblLobbyChannel هم رعایت شده (پیام فقط یه پینگه، دیتا همیشه با RPC دوباره خونده می‌شه).
+    let dblGameState = null; // { centerCardIdx, myCardIdx, remainingCount } یا null
+    // نگاشتِ user_id → current_card_idxِ واقعی/سرورمعتبرِ همه‌ی بازیکن‌هایِ میز — فقط رویِ
+    // کلاینتِ میزبان پر می‌شه (dobble_host_player_cards RPC، فقط برایِ created_by خودِ میز
+    // چیزی برمی‌گردونه). دلیلِ وجودش: تویِ dblHostResolveRoundBuffer دیگه به my_card_idxِ
+    // خودِ payloadِ claim (که هر کلاینتی، حتی با کنسولِ مرورگر، می‌تونه هرچی بخواد توش
+    // بذاره) اعتماد نمی‌کنیم — بجاش کارتِ واقعیِ فرستنده رو از همینجا می‌خونیم.
+    let dblHostPlayerCards = {};
+
+    // ===================== DOBBLE — STAGE 5، کوارتر ۱ از ۴ (قطعیِ یه بازیکنِ وسطِ بازی) =====================
+    // عیناً هم‌الگو با hk7StartHeartbeat/efStartHeartbeat: هر DBL_HEARTBEAT_MS، فقط وقتی
+    // واقعاً وسطِ یه میزِ 'playing'ایم، dobble_heartbeat (dobble_06_stage5_q1_heartbeat.sql)
+    // صدا زده می‌شه — یه RPCِ سبک که فقط last_seen_atِ خودِ من رو تازه می‌کنه. تفاوتِ عمدی
+    // با hk7: اون‌جا سکوتِ طولانی میز رو لغو می‌کرد؛ این‌جا طبقِ صریحِ سندِ STAGE ۵
+    // («وضعیتش «قطع» نشون داده بشه، ولی از بازی حذف نشه تا برگرده») هیچ لغو/حذفی نیست —
+    // فقط یه رفرشِ اسکوربورد که برچسبِ «قطع» رو (سمتِ کلاینت، از رویِ last_seen_at) به‌روز
+    // نگه می‌داره. میزبان قطع بشه چی؟ — عمداً این‌جا نیست، کوارترِ ۲.
+    const DBL_HEARTBEAT_MS = 20000;
+    // آستانه‌ی «قطع»: دو تیکِ هارت‌بیت + یه بافرِ سخاوتمندانه برایِ لتنسیِ شبکه — قدری بیشتر
+    // از هم‌مقدارِ hk7 (که میز رو لغو می‌کرد و می‌تونست سخت‌گیرتر باشه)، چون این‌جا خطایِ
+    // «زودتر از موقع قطع نشون دادن» آزاردهنده‌تر از یکی-دو ثانیه دیرتر تشخیص‌دادنه.
+    const DBL_DISCONNECT_MS = 50000;
+    let dblHeartbeatTimer = null;
+
+    async function dblHeartbeatTick(){
+      try{
+        if(!dblMyRoom || dblMyRoom.room_status !== 'playing') return;
+        const roomIdAtCall = dblMyRoom.room_id;
+        const { error } = await sb.rpc('dobble_heartbeat', { p_room_id: roomIdAtCall });
+        if(error) throw error;
+        if(!dblMyRoom || dblMyRoom.room_id !== roomIdAtCall) return; // تا رفتنِ RPC از میز دیگه‌ای رد شدیم
+        // اسکوربورد رو دوباره می‌خونیم تا last_seen_atِ بقیه هم تازه بشه — این تنها راهیه که
+        // «بقیه چطور بفهمن» (سؤالِ سند) جواب می‌گیره؛ بدونِ این، برچسبِ «قطع» فقط موقعِ
+        // claim/شروعِ دورِ بعدی رفرش می‌شد، نه به‌محضِ گذشتنِ آستانه.
+        await dblFetchScoreboard(roomIdAtCall);
+        if(dblMyRoom && dblMyRoom.room_id === roomIdAtCall) dblRenderScoreboard();
+        // کوارترِ ۲ — اگه خودم میزبان نیستم، همین‌جا (رویِ هر تیکِ هارت‌بیتِ خودم) از سرور
+        // می‌پرسم «میزبانِ فعلی خیلی وقته بی‌خبره؟». تصمیم کاملاً سمتِ dobble_reassign_
+        // host_if_stale (dobble_07_stage5_q2_host_failover.sql) گرفته می‌شه؛ من فقط
+        // نتیجه رو منعکس می‌کنم. میزبان خودش این چک رو صدا نمی‌زنه چون معنی نداره خودش
+        // رو به‌عنوانِ «قطع» چک کنه.
+        if(dblMyRoom && dblMyRoom.room_id === roomIdAtCall && !dblMyRoom.is_creator){
+          await dblCheckHostFailover(roomIdAtCall);
+        }
+      }catch(e){ console.warn('dblHeartbeatTick failed', e); }
+    }
+
+    async function dblCheckHostFailover(roomId){
+      try{
+        const { data, error } = await sb.rpc('dobble_reassign_host_if_stale', { p_room_id: roomId });
+        if(error) throw error;
+        const row = (data && data.length) ? data[0] : null;
+        if(!row || !row.host_changed) return;
+        if(!dblMyRoom || dblMyRoom.room_id !== roomId) return; // تا برگشتنِ RPC از میز دیگه‌ای رد شدیم
+        await dblRefreshMyRoom(); // is_creatorِ من رو تازه می‌کنه — شاید خودم میزبانِ جدید باشم
+        dblRenderLobby();
+        if(typeof showToast === 'function'){
+          showToast('میزبانِ قبلی بیش از حد بی‌خبر موند؛ میزبانیِ روم به یه بازیکنِ دیگه منتقل شد.', 'info');
+        }
+        // پینگِ سبک، تا میزبانِ *جدید* (اگه خودم نبودم) هم فوری بفهمه، نه با تیکِ هارت‌بیتِ
+        // بعدیِ خودش — عیناً هم‌الگو با پینگ‌هایِ round_resolved/game_started.
+        if(dblRoomChannel){
+          dblRoomChannel.send({ type: 'broadcast', event: 'host_changed', payload: { room_id: roomId } });
+        }
+      }catch(e){ console.warn('dblCheckHostFailover failed', e); }
+    }
+
+    async function dblHandleHostChanged(){
+      try{
+        if(!dblMyRoom) return;
+        await dblRefreshMyRoom();
+        dblRenderLobby();
+      }catch(e){ console.warn('dblHandleHostChanged failed', e); }
+    }
+
+    function dblStartHeartbeat(){
+      if(dblHeartbeatTimer) return;
+      dblHeartbeatTimer = setInterval(dblHeartbeatTick, DBL_HEARTBEAT_MS);
+      dblHeartbeatTick(); // یه‌بار فوری؛ لازم نیست ۲۰ ثانیه‌ی اول منتظرِ اولین تیک بمونیم
+    }
+    function dblStopHeartbeat(){
+      if(dblHeartbeatTimer){ clearInterval(dblHeartbeatTimer); dblHeartbeatTimer = null; }
+    }
+
+    // ===================== DOBBLE — STAGE 4، نیمه‌ی اول (ادعایِ تطبیقِ نماد + داوریِ میزبان) =====================
+    // چون خودِ محتوایِ کارت‌ها (کدوم ۸ نماد رویِ کدوم کارته) هیچ‌وقت وارد دیتابیس نمی‌شه
+    // (تصمیمِ STAGE ۱ — window.DobbleDeck یه فایلِ ثابتِ سمتِ کلاینته)، سرور به‌تنهایی
+    // نمی‌تونه تطبیقِ نمادِ یه claim رو اعتبارسنجی کنه؛ برای همین طبقِ سند، میزبان (همون
+    // سازنده‌ی میز، dblMyRoom.is_creator) مرجعِ نهاییِ داوریه: هر claim (چه از خودِ کلاینتِ
+    // میزبان، چه broadcastِ بقیه‌ی بازیکن‌ها) رو با window.DobbleDeck خودش چک می‌کنه، و فقط
+    // نتیجه‌ی نهایی رو با dobble_claim_resolve رویِ دیتابیس ثبت می‌کنه (منبعِ واقعیِ حقیقت
+    // بازم RPCه، نه خودِ تصمیمِ کلاینت — عیناً همون اصلی که تویِ STAGE ۳ رعایت شده بود).
+    // این متغیرها همه فقط سمتِ کلاینتِ میزبان معنا دارن؛ بازیکنِ عادی هیچ‌وقت بهشون کاری نداره.
+    // (نیمه‌ی دومِ همین STAGE — شمارشِ زنده‌ی کارتِ همه/فیدبکِ برد-باختِ claim/صفحه‌ی پایانِ
+    // بازی — چند صد خط پایین‌تر، بعدِ dblRenderPlayScreen، با متغیرهایِ dblScoreboard/
+    // dblProfileCache می‌آد؛ اون بخش سمتِ همه‌ی بازیکن‌ها معنا داره، نه فقط میزبان.)
+    let dblClaimRoundBuffer = [];       // claimهای جمع‌شده برایِ دورِ بازِ فعلی، قبل از داوری
+    let dblClaimRoundTimer = null;      // تایمرِ بافرِ کوتاه — تا claimِ هم‌زمانِ چندنفر با ts واقعی داوری بشه، نه ترتیبِ رسیدن به شبکه
+    let dblClaimRoundCenterIdx = null;  // این بافر مالِ کدوم center_card_idxه (برایِ رد کردنِ claimِ دورِ قبلاً تمام‌شده)
+    let dblClaimRoundResolving = false; // از لحظه‌ی پیداشدنِ برنده تا برگشتنِ RPC، claimِ جدید پذیرفته نشه
+    let dblClaimedForCenterIdx = null;  // خودِ من (هر بازیکنی) برایِ همین center_card_idx قبلاً claim فرستادم یا نه — جلویِ اسپمِ لمسِ پیاپی
+    const DBL_CLAIM_BUFFER_MS = 180;    // فرصتِ کوتاه برایِ رسیدنِ claimِ بقیه، طوری که واقعاً سریع‌ترین‌ِ درست برنده بشه
+
+    // ===================== DOBBLE — STAGE 4، نیمه‌ی دوم (شمارشِ زنده + فیدبکِ claim + پایانِ بازی) =====================
+    // dblScoreboard: خروجیِ dobble_room_scoreboard (dobble_05_scoreboard_rpc.sql) —
+    // [{user_id, seat, card_count}]، همیشه هم‌زمان با dblGameState رفرش می‌شه (پایین‌تر،
+    // dblFetchCurrentState). هم برایِ شمارشِ زنده‌ی زیرِ دو کارت مصرف می‌شه، هم برایِ
+    // رتبه‌بندیِ صفحه‌ی نتیجه‌ی پایانِ بازی (dblRenderGameEndOverlay) — یه منبعِ دیتا، دو جا
+    // مصرف، دقیقاً هم‌اصلِ خودِ dblGameState.
+    let dblScoreboard = [];
+    // dblProfileCache: {user_id → نامِ نمایشی}، عیناً هم‌الگو با efProfileCache — فقط برایِ
+    // اسمِ بازیکن‌ها تو اسکوربورد/صفحه‌ی نتیجه لازمه، جدولِ profiles با policyِ SELECTِ باز
+    // (همون فرضی که efEnsureProfilesLoaded هم رویِ‌ش سوار بود).
+    let dblProfileCache = {};
+    const DBL_CLAIM_FEEDBACK_MS = 520; // باید هم‌اندازه‌یِ مدتِ انیمیشنِ dbl-claim-success/reject تو CSS بمونه
+
+    function dblLobbyEl(id){ return document.getElementById(id); }
+
+    function dblMinAgoLabel(createdAt){
+      try{
+        const min = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
+        return min < 1 ? 'همین الان' : (toFa(min) + ' دقیقه پیش');
+      }catch(e){ return ''; }
+    }
+
+    function dblLobbyErrorMessage(e){
+      const msg = (e && e.message) || '';
+      if(msg.indexOf('already_in_room') > -1 || msg.indexOf('already_in_this_room') > -1) return 'شما همین الان تو یه میز دیگه‌اید.';
+      if(msg.indexOf('room_full') > -1) return 'این میز همین الان پر شد؛ لیست به‌روزرسانی شد.';
+      if(msg.indexOf('room_not_open') > -1 || msg.indexOf('room_not_found') > -1) return 'این میز دیگه در دسترس نیست.';
+      if(msg.indexOf('invalid_max_players') > -1) return 'تعدادِ صندلی باید بینِ ۲ تا ۸ باشه.';
+      // STAGE 5، کوارتر ۳: dobble_create_room بیشتر از ۵ بار ساختِ میز تویِ ۱۰ دقیقه رو رد می‌کنه.
+      if(msg.indexOf('rate_limited') > -1) return 'تویِ چند دقیقه‌ی اخیر چندین میز ساختی؛ یه‌کم صبر کن.';
+      if(msg.indexOf('only_creator_can_start') > -1) return 'فقط سازنده‌ی میز می‌تونه بازی رو شروع کنه.';
+      if(msg.indexOf('room_not_waiting') > -1) return 'این میز از قبل شروع شده یا تمومه.';
+      if(msg.indexOf('not_enough_players') > -1) return 'برای شروعِ بازی، حداقل ۲ نفر لازمه.';
+      if(msg.indexOf('not_authenticated') > -1) return 'برای این کار باید وارد حساب بشی.';
+      return 'مشکلی پیش اومد، دوباره امتحان کن.';
+    }
+
+    async function dblRefreshMyRoom(){
+      try{
+        const { data, error } = await sb.rpc('dobble_my_active_room');
+        if(error) throw error;
+        dblMyRoom = (data && data.length) ? data[0] : null;
+      }catch(e){
+        console.warn('dblRefreshMyRoom failed', e);
+        dblMyRoom = null;
+      }
+    }
+
+    // ===================== DOBBLE — STAGE 5، کوارتر ۳ از ۴ (تمیزکاریِ روم‌هایِ رهاشده) =====================
+    // fire-and-forget عمدیه: تمیزکاری هیچ ربطی به نمایشِ لیست نداره، پس نه منتظرش می‌مونیم
+    // نه خطاش رو به کاربر نشون می‌دیم — اگه شکست بخوره، صرفاً همون میزهایِ قدیمی یه بارِ
+    // دیگه (لودِ بعدیِ لابی) امتحان می‌شن. جزئیاتِ آستانه/دلیلِ 'waiting'-فقط تویِ
+    // dobble_08_stage5_q3_cleanup_ratelimit.sql.
+    async function dblRefreshOpenRooms(){
+      sb.rpc('dobble_cleanup_abandoned_rooms').catch(function(){});
+      try{
+        const { data, error } = await sb.rpc('dobble_list_open_rooms');
+        if(error) throw error;
+        dblOpenRooms = data || [];
+      }catch(e){
+        console.warn('dblRefreshOpenRooms failed', e);
+        dblOpenRooms = [];
+      }
+    }
+
+    function dblRenderOpenRoomsList(){
+      const listEl = dblLobbyEl('dblLobbyList');
+      const emptyEl = dblLobbyEl('dblLobbyEmpty');
+      if(!listEl) return;
+      if(!dblOpenRooms.length){
+        listEl.innerHTML = '';
+        if(emptyEl) emptyEl.style.display = 'block';
+        return;
+      }
+      if(emptyEl) emptyEl.style.display = 'none';
+      listEl.innerHTML = dblOpenRooms.map(function(r){
+        const filled = r.seats_filled || 0;
+        return '<div class="dbl-room-card">'
+          + '<div class="dbl-room-info">'
+          + '<span class="dbl-room-icon">🔍</span>'
+          + '<span class="dbl-room-count">' + toFa(filled) + '/' + toFa(r.max_players) + ' نفر</span>'
+          + '<span class="dbl-room-meta">' + dblMinAgoLabel(r.created_at) + '</span>'
+          + '</div>'
+          + '<button type="button" class="dbl-room-join-btn" data-join-room="' + escapeHtml(r.room_id) + '">پیوستن</button>'
+          + '</div>';
+      }).join('');
+    }
+
+    // مقدارِ فعلیِ استپر رو رو خودِ UI بازتاب می‌ده + دکمه‌های منها/بعلاوه رو سرِ مرزِ ۲/۸ غیرفعال می‌کنه.
+    function dblRenderStepperValue(){
+      const valEl = dblLobbyEl('dblStepperValue');
+      if(valEl) valEl.textContent = toFa(dblSelectedMaxPlayers) + ' نفر';
+      const minusBtn = dblLobbyEl('dblStepperMinus');
+      const plusBtn = dblLobbyEl('dblStepperPlus');
+      if(minusBtn) minusBtn.disabled = dblSelectedMaxPlayers <= 2;
+      if(plusBtn) plusBtn.disabled = dblSelectedMaxPlayers >= 8;
+    }
+
+    function dblResetCreateForm(){
+      dblSelectedMaxPlayers = 4;
+      dblRenderStepperValue();
+    }
+
+    function dblRenderLobby(){
+      try{
+        const loadingEl = dblLobbyEl('dblLobbyLoading');
+        const myCard = dblLobbyEl('dblMyRoomCard');
+        const browse = dblLobbyEl('dblLobbyBrowse');
+        const form = dblLobbyEl('dblCreateForm');
+        if(loadingEl) loadingEl.style.display = 'none';
+        if(!myCard || !browse) return;
+        if(dblMyRoom){
+          if(form) form.style.display = 'none';
+          browse.style.display = 'none';
+          myCard.style.display = 'block';
+          const filled = dblMyRoom.seats_filled || 1;
+          const total = dblMyRoom.max_players || filled;
+          const countEl = dblLobbyEl('dblMyRoomCount');
+          if(countEl) countEl.textContent = toFa(filled) + '/' + toFa(total);
+          const seatsWrap = dblLobbyEl('dblMyRoomSeats');
+          if(seatsWrap){
+            let dots = '';
+            for(let i = 0; i < total; i++){
+              dots += '<span class="dbl-seat-dot' + (i < filled ? ' dbl-seat-dot-filled' : '') + '"></span>';
+            }
+            seatsWrap.innerHTML = dots;
+          }
+          // STAGE 3، نیمه‌ی دوم: دکمه‌ی «شروع بازی» فقط برایِ سازنده، فقط با حداقل ۲ نفر —
+          // دقیقاً هم‌الگو با efStartGameBtn/efMyRoom.is_creator. به‌محضِ 'playing' شدنِ میز،
+          // dblRenderPlayScreen خودش dblMyRoomWaiting (شاملِ همین دکمه/متنِ وضعیت) رو مخفی
+          // و صفحه‌ی بازی رو جاش نشون می‌ده.
+          const statusEl = dblLobbyEl('dblMyRoomStatus');
+          const startBtn = dblLobbyEl('dblStartGameBtn');
+          const canStart = !!dblMyRoom.is_creator && filled >= 2;
+          if(startBtn){
+            startBtn.style.display = canStart ? '' : 'none';
+            startBtn.disabled = dblStartBusy;
+          }
+          if(statusEl){
+            if(canStart) statusEl.textContent = 'آماده‌ی شروعه — هر وقت خواستی بزن «شروع بازی»!';
+            else if(dblMyRoom.is_creator) statusEl.textContent = 'در انتظارِ حداقل یه بازیکنِ دیگه...';
+            else statusEl.textContent = 'در انتظارِ شروعِ بازی توسط سازنده‌ی میز...';
+          }
+          dblRenderPlayScreen(); // STAGE 3، نیمه‌ی دوم — خودش تصمیم می‌گیره waiting/playing کدوم دیده بشه
+        } else {
+          if(form) form.style.display = 'none';
+          myCard.style.display = 'none';
+          browse.style.display = 'block';
+          dblRenderOpenRoomsList();
+        }
+      }catch(e){ console.warn('dblRenderLobby failed', e); }
+    }
+
+    // =====================================================================
+    // STAGE 3، نیمه‌ی دوم — کانالِ per-room، دکمه‌ی «شروع بازی»، شافل/دیلِ کارتِ اول.
+    // RPCهاش (dobble_start_room/dobble_current_state) تو dobble_03_start_room_rpc.sql ان،
+    // باید بعدِ dobble_01_schema.sql و dobble_02_lobby_rpc.sql رو Supabase SQL editor اجرا
+    // شده باشن. طبقِ همون اصلِ بالا (پینگِ سبک + رفچِ دوباره از RPC)، رویدادِ این کانال
+    // (game_started) هیچ دیتایی حمل نمی‌کنه جز room_id — خودِ کارتِ من/کارتِ وسط همیشه با
+    // dobble_current_state خونده می‌شه، هم برایِ بقیه‌ی بازیکن‌ها موقعِ broadcast، هم برایِ
+    // خودِ من موقعِ لودِ صفحه (اگه میز از قبل 'playing' بوده و broadcastِ لحظه‌ای رو از دست
+    // داده باشم — مثلِ رفرشِ وسطِ بازی).
+    // =====================================================================
+
+    async function dblFetchCurrentState(roomId){
+      try{
+        const { data, error } = await sb.rpc('dobble_current_state', { p_room_id: roomId });
+        if(error) throw error;
+        const row = (data && data.length) ? data[0] : null;
+        dblGameState = row ? {
+          centerCardIdx: row.center_card_idx,
+          myCardIdx: row.my_card_idx,
+          remainingCount: row.remaining_count,
+          // STAGE 4، نیمه‌ی دوم: تنها راهِ تشخیصِ پایانِ بازی — وقتی dobble_claim_resolve آخرین
+          // کارتِ remaining_deck رو مصرف می‌کنه، status رو رویِ خودِ ردیفِ میز 'finished' می‌کنه؛
+          // dblMyRoom.room_status عمداً این‌جا استفاده نمی‌شه چون dobble_my_active_room میزهایِ
+          // 'finished' رو از اساس برنمی‌گردونه (پس بعدِ پایانِ بازی دیگه رفرش نمی‌شه/تکیه‌گاه نیست).
+          roomStatus: row.room_status
+        } : null;
+      }catch(e){ console.warn('dblFetchCurrentState failed', e); dblGameState = null; }
+      // اسکوربوردِ زنده همیشه هم‌زمان با وضعیتِ بازی می‌آد — هر دو تصویرِ لحظه‌ایِ همون میزن،
+      // جدا نگه‌داشتنِ رفچ‌شون فقط ریسکِ ناهماهنگی (مثلاً کارتِ عوض‌شده ولی شمارشِ کهنه) داشت.
+      await dblFetchScoreboard(roomId);
+      await dblFetchHostPlayerCards(roomId);
+    }
+
+    // فقط رویِ کلاینتِ میزبان چیزی برمی‌گردونه (dobble_host_player_cards خودش created_by
+    // رو چک می‌کنه)؛ برایِ بقیه یه آرایه‌ی خالی — بی‌ضرر، چون dblHostResolveRoundBuffer هم
+    // خودش فقط رویِ کلاینتِ میزبان اجرا می‌شه. اینجا صدا زده می‌شه (نه فقط موقعِ claim) تا
+    // همیشه تازه باشه: شروعِ بازی، بعدِ هر claimِ قطعی‌شده، و رفرشِ صفحه‌ی وسطِ بازی.
+    async function dblFetchHostPlayerCards(roomId){
+      try{
+        if(!dblMyRoom || !dblMyRoom.is_creator){ dblHostPlayerCards = {}; return; }
+        const { data, error } = await sb.rpc('dobble_host_player_cards', { p_room_id: roomId });
+        if(error) throw error;
+        const map = {};
+        (data || []).forEach(function(r){ map[r.user_id] = r.current_card_idx; });
+        dblHostPlayerCards = map;
+      }catch(e){ console.warn('dblFetchHostPlayerCards failed', e); dblHostPlayerCards = {}; }
+    }
+
+    // dobble_room_scoreboard (STAGE 4، نیمه‌ی دوم) — شمارشِ کارتِ همه‌ی بازیکن‌هایِ میز، به
+    // ترتیبِ seat. اگه صدازننده خودش تو میز نباشه، RPC عمداً ردیفِ خالی برمی‌گردونه (نه ارور)
+    // — همون رفتاری که dobble_current_state هم داشت.
+    async function dblFetchScoreboard(roomId){
+      try{
+        const { data, error } = await sb.rpc('dobble_room_scoreboard', { p_room_id: roomId });
+        if(error) throw error;
+        dblScoreboard = data || [];
+        await dblEnsureProfilesLoaded(dblScoreboard.map(function(r){ return r.user_id; }));
+      }catch(e){ console.warn('dblFetchScoreboard failed', e); dblScoreboard = []; }
+    }
+
+    // عیناً هم‌الگو با efEnsureProfilesLoaded — جدولِ profiles مستقیم (نه یه RPC)، چون
+    // policyِ SELECTش از قبل باز فرض شده (همون فرضی که ماژولِ اسم‌فامیل رویِ‌ش سوار بود).
+    async function dblEnsureProfilesLoaded(ids){
+      try{
+        const missing = ids.filter(function(id){ return !dblProfileCache[id]; });
+        if(!missing.length || !sb) return;
+        const { data, error } = await sb.from('profiles').select('id,username').in('id', missing);
+        if(error) throw error;
+        (data || []).forEach(function(p){ dblProfileCache[p.id] = displayName(p.username); });
+      }catch(e){ console.warn('dblEnsureProfilesLoaded failed', e); }
+      finally{
+        ids.forEach(function(id){ if(!dblProfileCache[id]) dblProfileCache[id] = 'کاربر'; });
+      }
+    }
+
+    // شمارشِ زنده — زیرِ دو کارت، رویِ صفحه‌ی همه (دقیقاً خواسته‌ی سند: «شمارشِ کارتِ هر
+    // بازیکن، همیشه روی صفحه‌ی همه دیده بشه، زنده»). ردیفِ خودم با dbl-scoreboard-row-me
+    // برجسته می‌شه — عیناً هم‌اصلِ efScoreRowsHtml.
+    // STAGE 5/۱: تشخیصِ «قطع» کاملاً سمتِ کلاینته (last_seen_atِ خامِ هر ردیف از
+    // dobble_room_scoreboard می‌آد، دیتابیس خودش قضاوتی نمی‌کنه — بالاتر تویِ
+    // dobble_06_stage5_q1_heartbeat.sql توضیح داده شده چرا). خودم رو هیچ‌وقت «قطع» نشون
+    // نمی‌دیم؛ چون همین لحظه که این تابع صدا زده می‌شه یعنی تبم بازه (حتی اگه یه تیکِ
+    // هارت‌بیت به هر دلیلی دیر رسیده باشه، این خودِ من گیج‌کننده‌ست، نه اطلاعاتِ مفید).
+    function dblRenderScoreboard(){
+      try{
+        const wrap = dblLobbyEl('dblScoreboard');
+        if(!wrap) return;
+        const myId = publicChatUser && publicChatUser.id;
+        const now = Date.now();
+        wrap.innerHTML = (dblScoreboard || []).map(function(r){
+          const name = dblProfileCache[r.user_id] || 'کاربر';
+          const isMe = !!(myId && r.user_id === myId);
+          const lastSeenMs = r.last_seen_at ? new Date(r.last_seen_at).getTime() : null;
+          const isDisconnected = !isMe && lastSeenMs != null && (now - lastSeenMs) > DBL_DISCONNECT_MS;
+          return '<div class="dbl-scoreboard-row' + (isMe ? ' dbl-scoreboard-row-me' : '')
+              + (isDisconnected ? ' dbl-scoreboard-row-disconnected' : '') + '">'
+            + '<span class="dbl-scoreboard-name">' + escapeHtml(name) + (isMe ? ' (شما)' : '')
+              + (isDisconnected ? ' <span class="dbl-scoreboard-disconnected-badge">قطع</span>' : '') + '</span>'
+            + '<span class="dbl-scoreboard-count">🂠 ' + toFa(r.card_count || 0) + '</span>'
+            + '</div>';
+        }).join('');
+      }catch(e){ console.warn('dblRenderScoreboard failed', e); }
+    }
+
+    // فقط رویِ dblPlayBoards (کارتِ من + کارتِ وسط با هم) — یه پالسِ سبز اگه claimِ *من*
+    // برنده شد، یه لرزشِ قرمز اگه *من* claim فرستاده بودم ولی برنده نشدم؛ اگه نه claim
+    // فرستاده بودم نه بردم (یعنی فقط داشتم تماشا می‌کردم)، هیچ فیدبکِ خاصی لازم نیست — طبقِ
+    // سند («انیمیشن/فیدبک لحظه‌ای برای کاربری که claim کرده»، نه برایِ همه). کلاسِ قبلی رو
+    // اول حذف + یه ری‌فلوی اجباری (offsetWidth) می‌کنیم تا اگه دو دورِ متوالی هر دو رد بشن،
+    // انیمیشنِ دوم هم از اول پخش بشه (وگرنه چون کلاس از قبل رویِ المانه، دوباره اضافه‌کردنش
+    // اثری نداره).
+    function dblApplyClaimOutcome(winnerUserId, iClaimedThisRound){
+      try{
+        if(!winnerUserId) return;
+        const myId = publicChatUser && publicChatUser.id;
+        const won = !!(myId && winnerUserId === myId);
+        if(!won && !iClaimedThisRound) return;
+        const boards = dblLobbyEl('dblPlayBoards');
+        const cls = won ? 'dbl-claim-success' : 'dbl-claim-reject';
+        if(won) sfxSuccess(); else sfxError();
+        if(boards){
+          boards.classList.remove('dbl-claim-success', 'dbl-claim-reject');
+          void boards.offsetWidth;
+          boards.classList.add(cls);
+          setTimeout(function(){ boards.classList.remove(cls); }, DBL_CLAIM_FEEDBACK_MS);
+        }
+      }catch(e){ console.warn('dblApplyClaimOutcome failed', e); }
+    }
+
+    // صفحه‌ی نتیجه‌ی پایانِ بازی — عیناً هم‌الگو با efRenderGameEndOverlay: پرکردنِ innerHTML +
+    // نمایانِ اورلی + قلاب‌کردنِ دکمه‌ی «بازگشت به لابی». برخلافِ dblLeaveRoom، این دکمه عمداً
+    // dobble_leave_room رو صدا نمی‌زنه (میزِ 'finished' دیگه صندلی‌ای نداره که آزاد بشه؛
+    // dobble_my_active_room هم اصلاً میزهایِ finished رو برنمی‌گردونه) — فقط وضعیتِ محلی رو
+    // ریست و برمی‌گرده به لیستِ میزهای باز. تمیزکاریِ خودِ ردیفِ میزِ finished تو دیتابیس،
+    // طبقِ سند، مالِ STAGE ۵ (روم‌های رهاشده)ه.
+    function dblRenderGameEndOverlay(){
+      try{
+        const overlay = dblLobbyEl('dblGameEndOverlay');
+        if(!overlay) return;
+        if(!dblScoreboard || !dblScoreboard.length){ overlay.style.display = 'none'; return; }
+        const sorted = dblScoreboard.slice().sort(function(a, b){ return (b.card_count || 0) - (a.card_count || 0); });
+        const medals = ['🥇', '🥈', '🥉'];
+        const myId = publicChatUser && publicChatUser.id;
+        const rows = sorted.map(function(r, i){
+          const name = dblProfileCache[r.user_id] || 'کاربر';
+          const isMe = !!(myId && r.user_id === myId);
+          const rank = medals[i] || ('#' + toFa(i + 1));
+          return '<div class="dbl-gameend-row' + (isMe ? ' dbl-gameend-row-me' : '') + '">'
+            + '<span class="dbl-gameend-rank">' + rank + '</span>'
+            + '<span class="dbl-gameend-name">' + escapeHtml(name) + (isMe ? ' (شما)' : '') + '</span>'
+            + '<span class="dbl-gameend-score">' + toFa(r.card_count || 0) + ' کارت</span>'
+            + '</div>';
+        }).join('');
+
+        overlay.innerHTML =
+          '<div class="dbl-gameend-card">' +
+            '<div class="dbl-gameend-emoji">🏁</div>' +
+            '<div class="dbl-gameend-title">بازی تموم شد!</div>' +
+            '<div class="dbl-gameend-rows">' + rows + '</div>' +
+            '<button type="button" class="dbl-gameend-btn" id="dblBackLobbyFromEndBtn">بازگشت به لابی</button>' +
+          '</div>';
+        overlay.style.display = 'flex';
+
+        const backBtn = dblLobbyEl('dblBackLobbyFromEndBtn');
+        if(backBtn){
+          backBtn.addEventListener('click', function(){
+            overlay.style.display = 'none';
+            dblMyRoom = null;
+            dblGameState = null;
+            dblScoreboard = [];
+            dblUnsubscribeRoomChannel();
+            dblRefreshOpenRooms().then(dblRenderLobby);
+          });
+        }
+      }catch(e){ console.warn('dblRenderGameEndOverlay failed', e); }
+    }
+
+    function dblSubscribeRoomChannel(roomId){
+      try{
+        if(!sb || !roomId) return;
+        if(dblRoomChannel && dblRoomChannelId === roomId) return;
+        if(dblRoomChannel){ try{ sb.removeChannel(dblRoomChannel); }catch(e){} dblRoomChannel = null; }
+        dblRoomChannelId = roomId;
+        dblRoomChannel = sb.channel('dobble_room_' + roomId, { config: { broadcast: { self: false } } })
+          .on('broadcast', { event: 'game_started' }, function(msg){
+            dblHandleGameStarted(msg && msg.payload);
+          })
+          // STAGE 4، نیمه‌ی اول: claim فقط برایِ میزبان معنا داره. خودِ میزبان claimِ خودش رو
+          // مستقیم صدا می‌زنه (پایین‌تر، dblSendClaim) — چون self:false پژواکِ broadcastِ
+          // خودمون رو بهمون برنمی‌گردونه؛ این هندلر فقط claimِ رسیده از بقیه رو می‌شنوه.
+          .on('broadcast', { event: 'claim' }, function(msg){
+            dblHostReceiveClaim(msg && msg.payload);
+          })
+          // round_resolved مثلِ game_started سبکه، ولی STAGE ۴/نیمه‌ی دوم یه فیلدِ نمایشی
+          // (winner_user_id) بهش اضافه کرد — خودِ وضعیتِ جدید (کارتِ من/کارتِ وسط/شمارش‌ها)
+          // بازم همیشه با dobble_current_state+dobble_room_scoreboard دوباره خونده می‌شه، نه
+          // از دلِ همین payload؛ میزبان خودش تویِ dblHostFinalizeClaim مستقیم این‌کارو
+          // می‌کنه، این هندلر مالِ بقیه‌ست.
+          .on('broadcast', { event: 'round_resolved' }, function(msg){
+            dblHandleRoundResolved(msg && msg.payload);
+          })
+          // STAGE 5، کوارتر ۲: فقط یه پینگِ سبک — دیتایِ واقعی (is_creatorِ من عوض شده یا
+          // نه) همیشه با dblRefreshMyRoom دوباره خونده می‌شه، عیناً هم‌الگو با بقیه‌ی
+          // پینگ‌هایِ این کانال.
+          .on('broadcast', { event: 'host_changed' }, function(){
+            dblHandleHostChanged();
+          })
+          .subscribe();
+      }catch(e){ console.warn('dblSubscribeRoomChannel failed', e); }
+    }
+
+    function dblUnsubscribeRoomChannel(){
+      try{ if(dblRoomChannel) sb.removeChannel(dblRoomChannel); }catch(e){}
+      dblRoomChannel = null; dblRoomChannelId = null;
+      dblStopHeartbeat(); // STAGE 5/۱: ترکِ میز/پایانِ بازی/رفرش یعنی دیگه لازم نیست پینگ بفرستیم
+      // ترکِ میز یعنی هر بافرِ داوریِ نیمه‌کاره/claimِ ثبت‌شده‌ی این میز دیگه بی‌معنیه —
+      // وگرنه مثلاً اگه بعداً همین کاربر تویِ یه میزِ دیگه دقیقاً به همون center_card_idx
+      // برسه، claimِ قدیمی اشتباهی نادیده گرفته می‌شد.
+      dblClaimRoundBuffer = [];
+      dblClaimRoundTimer && clearTimeout(dblClaimRoundTimer);
+      dblClaimRoundTimer = null;
+      dblClaimRoundCenterIdx = null;
+      dblClaimRoundResolving = false;
+      dblClaimedForCenterIdx = null;
+      // STAGE 4، نیمه‌ی دوم: اسکوربورد/پروفایل‌کش هم مالِ همین میزن — ترکِ میز یعنی دورِ
+      // بعدی (میزِ دیگه) باید از صفر بخونتشون، نه دیتایِ کهنه‌ی میزِ قبلی رو لحظه‌ای نشون بده.
+      dblScoreboard = [];
+    }
+
+    // یه بازیکنِ دیگه (میزبان) dobble_start_room رو صدا زده — پیام فقط یه پینگه، دیتای واقعی
+    // رو همین‌جا با dobble_current_state می‌خونیم (بالاتر توضیح داده شد چرا).
+    async function dblHandleGameStarted(payload){
+      try{
+        if(!dblMyRoom) return;
+        dblClaimedForCenterIdx = null; // بازیِ تازه شروع شده؛ اندیسِ کارتِ وسطِ بازیِ قبلی دیگه ربطی نداره
+        await dblRefreshMyRoom(); // status از 'waiting' به 'playing' عوض شده
+        if(dblMyRoom) await dblFetchCurrentState(dblMyRoom.room_id);
+        dblStartHeartbeat(); // STAGE 5/۱: از همین لحظه که واقعاً 'playing' شدیم
+        dblRenderLobby();
+      }catch(e){ console.warn('dblHandleGameStarted failed', e); }
+    }
+
+    // کارتِ خودم + کارتِ وسط رو (اگه میز 'playing'ه و dblGameState پره) رندر می‌کنه؛ وگرنه
+    // صفحه‌ی بازی رو مخفی و بخشِ waiting (seats/status/دکمه‌ی شروع) رو نشون می‌ده. یه
+    // data-attribute رویِ خودِ wrap نگه می‌داریم تا اگه اندیسِ کارت عوض نشده، renderDobbleCard
+    // دوباره صدا زده نشه (خودِ اون تابع هم داخلی cacheِ چیدمان داره، ولی innerHTML=... بازم
+    // یه ری‌فلوی بی‌فایده‌ست — دقیقاً همون دلیلِ _dblCardsRendered تو STAGE 2ب).
+    function dblRenderPlayScreen(){
+      try{
+        const screen = dblLobbyEl('dblPlayScreen');
+        const waiting = dblLobbyEl('dblMyRoomWaiting');
+        if(!screen || !waiting) return;
+        if(!dblMyRoom || dblMyRoom.room_status !== 'playing' || !dblGameState){
+          screen.style.display = 'none';
+          waiting.style.display = '';
+          return;
+        }
+        // STAGE 4، نیمه‌ی دوم: پایانِ بازی — dobble_claim_resolve آخرین کارتِ remaining_deck
+        // رو مصرف کرده و status رو 'finished' کرده. صفحه‌ی بازی/waiting هر دو مخفی می‌شن،
+        // فقط اورلیِ نتیجه (dblRenderGameEndOverlay) دیده می‌شه؛ تا کلیکِ «بازگشت به لابی»
+        // هم عمداً دست‌نخورده می‌مونه (نه دوباره رندر می‌شه، نه بسته).
+        if(dblGameState.roomStatus === 'finished'){
+          screen.style.display = 'none';
+          waiting.style.display = 'none';
+          dblRenderGameEndOverlay();
+          return;
+        }
+        const staleEndOverlay = dblLobbyEl('dblGameEndOverlay');
+        if(staleEndOverlay) staleEndOverlay.style.display = 'none'; // میزِ تازه (بعدِ «بازگشت به لابی» یه دورِ قبلی)؛ اورلیِ کهنه رو مخفی نگه دار
+        waiting.style.display = 'none';
+        screen.style.display = '';
+        // STAGE 4، نیمه‌ی اول: یه‌بار (dataset.dblClaimWired، هم‌سبکِ dblWireLobbyControls)
+        // رویِ خودِ صفحه‌ی بازی گوشِ لمس/کلیک وصل می‌کنیم — چه کارتِ من چه کارتِ وسط.
+        dblWirePlayScreenTapHandler(screen);
+        // window.DobbleDeck (STAGE 1) و window.DobbleCard/window.DobbleIconBank (STAGE 2)
+        // هر سه باید قبلِ اینجا لود شده باشن — همون‌طور که STAGE 2ب هم رویِ همینا سوار بود.
+        if(!window.DobbleDeck || !window.DobbleDeck.valid || !window.DobbleCard || !window.DobbleIconBank) return;
+        window.DobbleIconBank.injectSymbolDefs(); // idempotent
+        const cards = window.DobbleDeck.cards;
+        const myWrap = dblLobbyEl('dblMyCardWrap');
+        const centerWrap = dblLobbyEl('dblCenterCardWrap');
+        if(myWrap && dblGameState.myCardIdx != null && cards[dblGameState.myCardIdx]
+           && myWrap.dataset.dblCardIdx !== String(dblGameState.myCardIdx)){
+          myWrap.dataset.dblCardIdx = String(dblGameState.myCardIdx);
+          myWrap.innerHTML = window.DobbleCard.renderDobbleCard(
+            cards[dblGameState.myCardIdx],
+            { cacheKey: 'play-my-' + dblMyRoom.room_id + '-' + dblGameState.myCardIdx }
+          );
+        }
+        if(centerWrap && dblGameState.centerCardIdx != null && cards[dblGameState.centerCardIdx]
+           && centerWrap.dataset.dblCardIdx !== String(dblGameState.centerCardIdx)){
+          centerWrap.dataset.dblCardIdx = String(dblGameState.centerCardIdx);
+          centerWrap.innerHTML = window.DobbleCard.renderDobbleCard(
+            cards[dblGameState.centerCardIdx],
+            { cacheKey: 'play-center-' + dblMyRoom.room_id + '-' + dblGameState.centerCardIdx }
+          );
+          // کارتِ وسط واقعاً عوض شد (دورِ جدید) — می‌تونم دوباره claim بفرستم. توجه: پایانِ
+          // بازی (centerCardIdx == null) دیگه اصلاً به این‌جا نمی‌رسه — بالاتر (roomStatus
+          // === 'finished') زودتر return شده.
+          dblClaimedForCenterIdx = null;
+        }
+        // STAGE 4، نیمه‌ی دوم: شمارشِ زنده — هر بارِ رندرِ صفحه‌ی بازی (چه دورِ عوض‌شده، چه
+        // فقط یه رفرشِ معمولی) دوباره کشیده می‌شه؛ خودِ dblFetchScoreboard قبل‌ترش دیتا رو
+        // تازه کرده (پایین‌تر تویِ dblFetchCurrentState).
+        dblRenderScoreboard();
+      }catch(e){ console.warn('dblRenderPlayScreen failed', e); }
+    }
+
+    // ===================== DOBBLE — STAGE 4، نیمه‌ی اول (ادامه): لمسِ نماد → claim =====================
+    // یه‌بار، با event delegation رویِ خودِ dblPlayScreen (نه جداگانه رویِ هرکدوم از دو
+    // کارت)، به هر دو کارت هم‌زمان گوش می‌ده. کاربر می‌تونه نمادِ مشترک رو رویِ هرکدوم از
+    // دو کارت لمس کنه — فرقی نداره، چون فقط symbol_id لازمه (اعتبارسنجیِ نهایی همیشه رویِ
+    // هر دو کارت با هم چک می‌شه، پایین‌تر تویِ dblHostResolveRoundBuffer).
+    // نمادها با <use href="#sym-N"/> رندر می‌شن — همون قراردادِ icon-bank.js که STAGE 2الف/۲ب
+    // هم برایِ نمایشِ نمادها ازش استفاده می‌کردن (injectSymbolDefs یه defsِ <symbol id="sym-N">
+    // تزریق می‌کنه، renderDobbleCard هم طبیعتاً با همون <use>ها به دلِ همون defs اشاره می‌کنه).
+    // چون <use> خودش یه المانِ واقعیِ SVGه (نه shadow DOM)، لمسِ مستقیمِ روش e.target رو
+    // دقیقاً همون <use> می‌ذاره؛ closest('use') فقط برایِ اطمینانِ بیشتره.
+    function dblWirePlayScreenTapHandler(screen){
+      try{
+        if(!screen || screen.dataset.dblClaimWired) return;
+        screen.dataset.dblClaimWired = '1';
+        screen.addEventListener('click', function(e){
+          const useEl = e.target && e.target.closest ? e.target.closest('use') : null;
+          if(!useEl) return;
+          const href = useEl.getAttribute('href') || useEl.getAttribute('xlink:href') || '';
+          const m = href.match(/#sym-(\d+)/);
+          if(!m) return;
+          dblSendClaim(parseInt(m[1], 10));
+        });
+      }catch(e){ console.warn('dblWirePlayScreenTapHandler failed', e); }
+    }
+
+    // بازیکن (هرکی، حتی خودِ میزبان) نمادی رو لمس کرده که فکر می‌کنه بینِ کارتِ خودش و
+    // کارتِ وسط مشترکه. اعتبارسنجیِ واقعی این‌جا نیست (کلاینتِ فرستنده نمی‌تونه به ادعایِ
+    // خودش اعتماد کنه) — فقط یه ادعاست؛ میزبانه که تصمیمِ نهایی رو می‌گیره.
+    function dblSendClaim(symbolId){
+      try{
+        if(!sb || !publicChatUser || !dblMyRoom || dblMyRoom.room_status !== 'playing') return;
+        if(!dblGameState || dblGameState.centerCardIdx == null || dblGameState.myCardIdx == null) return;
+        // جلویِ اسپمِ لمسِ پیاپی رویِ همون دور: تا وقتی کارتِ وسط عوض نشده، دوباره claim
+        // نفرست (این‌جا فرقی نمی‌کنه لمسِ قبلی درست بود یا غلط — خودِ فرستنده نمی‌دونه،
+        // برایِ هر دور فقط یه‌بار claim کافیه).
+        if(dblClaimedForCenterIdx === dblGameState.centerCardIdx) return;
+        dblClaimedForCenterIdx = dblGameState.centerCardIdx;
+        const payload = {
+          user_id: publicChatUser.id,
+          my_card_idx: dblGameState.myCardIdx,
+          center_card_idx: dblGameState.centerCardIdx,
+          symbol_id: symbolId,
+          ts: Date.now()
+        };
+        if(dblMyRoom.is_creator){
+          // میزبان خودش داوره؛ چون کانال self:false پژواکِ broadcastِ خودمون رو بهمون
+          // برنمی‌گردونه، باید مستقیم صداش بزنیم — وگرنه claimِ خودِ میزبان هیچ‌وقت شنیده نمی‌شه.
+          dblHostReceiveClaim(payload);
+        } else if(dblRoomChannel){
+          dblRoomChannel.send({ type: 'broadcast', event: 'claim', payload: payload });
+        }
+      }catch(e){ console.warn('dblSendClaim failed', e); }
+    }
+
+    // فقط رویِ کلاینتِ میزبان اجرا می‌شه (چه claimِ خودِ میزبان، چه claimِ رسیده از بقیه‌ی
+    // بازیکن‌ها رویِ کانال). یه بافرِ کوتاه (DBL_CLAIM_BUFFER_MS) نگه می‌داریم تا claimهایی
+    // که تقریباً هم‌زمان (ولی به‌خاطرِ تاخیرِ شبکه چندمیلی‌ثانیه با فاصله) می‌رسن، بر اساسِ
+    // ts واقعیِ لمس (نه ترتیبِ رسیدن به میزبان) داوری بشن — طوری که واقعاً سریع‌ترینِ درست
+    // برنده باشه، نه هرکی پیامش زودتر به شبکه رسیده.
+    function dblHostReceiveClaim(payload){
+      try{
+        if(!dblMyRoom || !dblMyRoom.is_creator) return; // فقط میزبان داوری می‌کنه
+        if(!payload || !dblGameState || dblGameState.centerCardIdx == null) return;
+        if(payload.center_card_idx !== dblGameState.centerCardIdx) return; // claimِ یه دورِ قبلاً تمام‌شده، بی‌فایده‌ست
+        if(dblClaimRoundResolving) return; // این دور همین الان داره قطعی می‌شه؛ دیگه claim نپذیر
+        if(dblClaimRoundCenterIdx !== dblGameState.centerCardIdx){
+          // شروعِ بافرِ جدید برایِ این دور
+          dblClaimRoundBuffer = [];
+          dblClaimRoundCenterIdx = dblGameState.centerCardIdx;
+          if(dblClaimRoundTimer) clearTimeout(dblClaimRoundTimer);
+          dblClaimRoundTimer = setTimeout(dblHostResolveRoundBuffer, DBL_CLAIM_BUFFER_MS);
+        }
+        dblClaimRoundBuffer.push(payload);
+      }catch(e){ console.warn('dblHostReceiveClaim failed', e); }
+    }
+
+    // بافرِ این دور بسته شده؛ حالا بر اساسِ ts (زودتر اول) هرکدوم از claimها که واقعاً
+    // نمادِ درست انتخاب کرده باشه (بینِ کارتِ *واقعیِ سرورمعتبرِ* خودش و کارتِ وسط مشترک
+    // باشه) رو به‌عنوانِ برنده قبول کن — اگه سریع‌ترین claim نمادِ اشتباه بود، سراغِ بعدی برو.
+    //
+    // نکته‌ی امنیتی: عمداً از c.my_card_idxِ خودِ payload استفاده نمی‌کنیم — اون فقط ادعایِ
+    // خودِ فرستنده‌ست و هر کلاینتی (حتی با کنسولِ مرورگر، بدونِ اینکه اصلاً UI رو لمس کنه)
+    // می‌تونه هر عددی توش بذاره، نه لزوماً کارتِ واقعیِ خودش. بجاش از dblHostPlayerCards
+    // (نتیجه‌ی dobble_host_player_cards، مستقیم از رویِ ردیفِ دیتابیس) کارتِ واقعیِ همون
+    // user_id رو می‌خونیم — این دیگه چیزی نیست که خودِ فرستنده بتونه دستکاری کنه.
+    function dblHostResolveRoundBuffer(){
+      try{
+        dblClaimRoundTimer = null;
+        if(dblClaimRoundResolving) return;
+        if(!window.DobbleDeck || !window.DobbleDeck.valid){
+          dblClaimRoundBuffer = []; dblClaimRoundCenterIdx = null; return;
+        }
+        const centerIdx = dblClaimRoundCenterIdx;
+        const centerCard = window.DobbleDeck.cards[centerIdx];
+        const claims = dblClaimRoundBuffer.slice().sort(function(a, b){ return a.ts - b.ts; });
+        for(let i = 0; i < claims.length; i++){
+          const c = claims[i];
+          const verifiedCardIdx = dblHostPlayerCards[c.user_id];
+          const myCard = (centerCard && verifiedCardIdx != null) ? window.DobbleDeck.cards[verifiedCardIdx] : null;
+          if(!myCard || !centerCard) continue;
+          if(myCard.indexOf(c.symbol_id) === -1 || centerCard.indexOf(c.symbol_id) === -1) continue; // نمادِ اشتباه (یا کارتِ جعلی)، بعدی رو چک کن
+          dblClaimRoundResolving = true;
+          dblHostFinalizeClaim(c.user_id, centerIdx);
+          return;
+        }
+        // هیچ‌کدومِ این دسته معتبر نبود؛ بافر رو خالی کن — claimِ بعدی (اگه بیاد) دورِ جدیدی می‌سازه.
+        dblClaimRoundBuffer = [];
+        dblClaimRoundCenterIdx = null;
+      }catch(e){ console.warn('dblHostResolveRoundBuffer failed', e); }
+    }
+
+    // برنده مشخص شد؛ فقط همین‌جا (میزبان) با dobble_claim_resolve رویِ دیتابیس قطعیش
+    // می‌کنیم — طبقِ همون اصلِ کلیِ کلِ ماژول، منبعِ واقعیِ حقیقت همیشه RPCه، نه خودِ
+    // تصمیمِ کلاینت. بعدِ موفقیت، هم خودِ میزبان state رو رفرش/رندر می‌کنه، هم یه پینگِ
+    // round_resolved (بدونِ دیتا، عیناً هم‌سبکِ game_started) broadcast می‌کنه تا بقیه هم
+    // دوباره از dobble_current_state بخونن.
+    async function dblHostFinalizeClaim(winnerUserId, expectedCenterIdx){
+      // STAGE 4، نیمه‌ی دوم: قبلِ رفتن سراغِ RPC (که بعدش dblGameState.centerCardIdx عوض
+      // می‌شه)، یادداشت می‌کنیم آیا خودِ میزبان هم برایِ همین دور claim فرستاده بود یا نه —
+      // برایِ فیدبکِ برد/ردِّ خودِ میزبان لازمه (dblApplyClaimOutcome پایین‌تر).
+      const iClaimedThisRound = (dblClaimedForCenterIdx === expectedCenterIdx);
+      try{
+        const { error } = await sb.rpc('dobble_claim_resolve', {
+          p_room_id: dblMyRoom.room_id,
+          p_winner_user_id: winnerUserId,
+          p_expected_center_card_idx: expectedCenterIdx
+        });
+        if(error) throw error;
+        await dblFetchCurrentState(dblMyRoom.room_id);
+        dblRenderPlayScreen();
+        dblApplyClaimOutcome(winnerUserId, iClaimedThisRound);
+        if(dblRoomChannel){
+          // winner_user_id تویِ payload اضافه شد (برخلافِ game_started/round_resolvedِ قبلی
+          // که فقط پینگ بودن) — چون بقیه‌ی بازیکن‌ها هم برایِ فیدبکِ برد/ردِّ *خودشون*
+          // (dblHandleRoundResolved پایین‌تر) باید بدونن برنده کی بود؛ این یه دیتایِ نمایشیِ
+          // بی‌خطره (همینه که تویِ اسکوربورد هم علنی دیده می‌شه)، نه یه تصمیمِ اعتمادی —
+          // منبعِ واقعیِ حقیقت هنوز dobble_claim_resolve/dobble_current_stateه.
+          dblRoomChannel.send({ type: 'broadcast', event: 'round_resolved', payload: { room_id: dblMyRoom.room_id, winner_user_id: winnerUserId } });
+        }
+      }catch(e){
+        // stale_center_card یعنی یه مسیرِ دیگه قبلاً همین دور رو قطعی کرده (نباید پیش بیاد،
+        // چون فقط همین تابع صداش می‌زنه، ولی برایِ ایمنی)؛ فقط دوباره سینک کن، گیر نکن.
+        console.warn('dblHostFinalizeClaim failed', e);
+        await dblFetchCurrentState(dblMyRoom.room_id);
+        dblRenderPlayScreen();
+      }finally{
+        dblClaimRoundResolving = false;
+        dblClaimRoundBuffer = [];
+        dblClaimRoundCenterIdx = null;
+      }
+    }
+
+    // یه بازیکنِ دیگه claim رو قطعی کرد (یا خودِ میزبان از مسیرِ dblHostFinalizeClaim) —
+    // پیام فقط یه پینگه (بدونِ دیتا)، وضعیتِ واقعی رو دوباره از dobble_current_state
+    // می‌خونیم (عیناً هم‌اصلِ dblHandleGameStarted بالا).
+    async function dblHandleRoundResolved(payload){
+      try{
+        if(!dblMyRoom) return;
+        // عیناً هم‌دلیلِ dblHostFinalizeClaim بالا: قبلِ رفچِ وضعیتِ جدید (که centerCardIdx
+        // رو عوض می‌کنه)، چک کن آیا *من* برایِ همین دور claim فرستاده بودم یا نه.
+        const iClaimedThisRound = !!(dblGameState && dblClaimedForCenterIdx === dblGameState.centerCardIdx);
+        await dblFetchCurrentState(dblMyRoom.room_id);
+        dblRenderPlayScreen();
+        dblApplyClaimOutcome(payload && payload.winner_user_id, iClaimedThisRound);
+      }catch(e){ console.warn('dblHandleRoundResolved failed', e); }
+    }
+
+    // فقط سازنده، فقط وقتی میز 'waiting'ه و حداقل ۲ نفرن — dobble_start_room خودش هم اینا رو
+    // چک می‌کنه (only_creator_can_start/room_not_waiting/not_enough_players)، این‌جا فقط UI
+    // رو گارد می‌کنه (دقیقاً هم‌الگو با efStartGame).
+    async function dblStartGame(){
+      if(dblStartBusy || !dblMyRoom || !dblMyRoom.is_creator) return;
+      if(!sb) return;
+      dblStartBusy = true;
+      const btn = dblLobbyEl('dblStartGameBtn');
+      if(btn) btn.disabled = true;
+      const roomId = dblMyRoom.room_id;
+      try{
+        const { error } = await sb.rpc('dobble_start_room', { p_room_id: roomId });
+        if(error) throw error;
+        dblClaimedForCenterIdx = null; // بازیِ تازه شروع شده؛ اندیسِ کارتِ وسطِ بازیِ قبلی دیگه ربطی نداره
+        await dblRefreshMyRoom();
+        await dblFetchCurrentState(roomId);
+        dblSubscribeRoomChannel(roomId); // احتیاطی — معمولاً از قبل (تو dblLoadLobby/dblCreateRoom) سابسکرایب بودیم
+        if(dblRoomChannel){
+          dblRoomChannel.send({ type: 'broadcast', event: 'game_started', payload: { room_id: roomId } });
+        }
+        dblRenderLobby();
+        // میز دیگه تو لیستِ میزهای بازِ لابیِ عمومی نباید بمونه — بقیه‌ی کاربرهای لابی رو خبر کن.
+        dblBroadcastLobbyUpdate(roomId);
+      }catch(e){
+        console.error('dblStartGame failed', e);
+        if(typeof showToast === 'function') showToast(dblLobbyErrorMessage(e), 'error');
+        await dblRefreshMyRoom();
+        dblRenderLobby();
+      }finally{
+        dblStartBusy = false;
+        const btn2 = dblLobbyEl('dblStartGameBtn');
+        if(btn2) btn2.disabled = false;
+      }
+    }
+
+    function dblSubscribeLobbyChannel(){
+      try{
+        if(dblLobbyChannel || !sb) return;
+        dblLobbyChannel = sb.channel('dobble_lobby', { config: { broadcast: { self: false } } })
+          .on('broadcast', { event: 'update' }, function(msg){
+            dblHandleLobbyBroadcast(msg && msg.payload);
+          })
+          .subscribe();
+      }catch(e){ console.warn('dblSubscribeLobbyChannel failed', e); }
+    }
+
+    async function dblHandleLobbyBroadcast(payload){
+      try{
+        await dblRefreshMyRoom();
+        if(dblMyRoom){
+          dblSubscribeRoomChannel(dblMyRoom.room_id); // STAGE 3، نیمه‌ی دوم
+          // این حالتِ نادریه (مثلاً وسطِ همین رفچ یه بازیکنِ دیگه بازی رو شروع کرد)؛ چون
+          // game_started معمولاً از رویِ dblRoomChannel می‌رسه نه dblLobbyChannel، این فقط
+          // یه محافظِ اضافه‌ست تا هیچ‌وقت گیر نکنیم رویِ 'playing' بدونِ dblGameState.
+          if(dblMyRoom.room_status === 'playing' && !dblGameState) await dblFetchCurrentState(dblMyRoom.room_id);
+        } else {
+          dblUnsubscribeRoomChannel(); // STAGE 3، نیمه‌ی دوم
+          dblGameState = null;
+          await dblRefreshOpenRooms();
+        }
+        dblRenderLobby();
+      }catch(e){ console.warn('dblHandleLobbyBroadcast failed', e); }
+    }
+
+    function dblBroadcastLobbyUpdate(roomId){
+      try{
+        if(!dblLobbyChannel || !roomId) return;
+        dblLobbyChannel.send({ type: 'broadcast', event: 'update', payload: { room_id: roomId } });
+      }catch(e){ console.warn('dblBroadcastLobbyUpdate failed', e); }
+    }
+
+    async function dblCreateRoom(){
+      if(dblLobbyBusy) return;
+      dblLobbyBusy = true;
+      const submitBtn = dblLobbyEl('dblCreateSubmitBtn');
+      if(submitBtn) submitBtn.disabled = true;
+      try{
+        if(!sb || !publicChatUser) return;
+        const { error } = await sb.rpc('dobble_create_room', { p_max_players: dblSelectedMaxPlayers });
+        if(error) throw error;
+        dblResetCreateForm();
+        await dblRefreshMyRoom();
+        if(dblMyRoom) dblSubscribeRoomChannel(dblMyRoom.room_id); // STAGE 3، نیمه‌ی دوم
+        dblRenderLobby();
+        if(dblMyRoom) dblBroadcastLobbyUpdate(dblMyRoom.room_id);
+      }catch(e){
+        console.error('dblCreateRoom failed', e);
+        if(typeof showToast === 'function') showToast(dblLobbyErrorMessage(e), 'error');
+        await dblRefreshMyRoom();
+        if(!dblMyRoom) await dblRefreshOpenRooms();
+        dblRenderLobby();
+      }finally{
+        dblLobbyBusy = false;
+        if(submitBtn) submitBtn.disabled = false;
+      }
+    }
+
+    async function dblJoinRoom(roomId){
+      if(dblLobbyBusy || !roomId) return;
+      dblLobbyBusy = true;
+      try{
+        if(!sb || !publicChatUser) return;
+        const { error } = await sb.rpc('dobble_join_room', { p_room_id: roomId });
+        if(error) throw error;
+        await dblRefreshMyRoom();
+        if(dblMyRoom) dblSubscribeRoomChannel(dblMyRoom.room_id); // STAGE 3، نیمه‌ی دوم
+        dblRenderLobby();
+        dblBroadcastLobbyUpdate(roomId);
+      }catch(e){
+        console.error('dblJoinRoom failed', e);
+        if(typeof showToast === 'function') showToast(dblLobbyErrorMessage(e), 'error');
+        await dblRefreshMyRoom();
+        if(!dblMyRoom) await dblRefreshOpenRooms();
+        dblRenderLobby();
+      }finally{
+        dblLobbyBusy = false;
+      }
+    }
+
+    async function dblLeaveRoom(){
+      if(dblLobbyBusy || !dblMyRoom) return;
+      dblLobbyBusy = true;
+      const roomId = dblMyRoom.room_id;
+      try{
+        const { error } = await sb.rpc('dobble_leave_room', { p_room_id: roomId });
+        if(error) throw error;
+        dblMyRoom = null;
+        dblUnsubscribeRoomChannel(); // STAGE 3، نیمه‌ی دوم
+        dblGameState = null;
+        await dblRefreshOpenRooms();
+        dblRenderLobby();
+        dblBroadcastLobbyUpdate(roomId);
+      }catch(e){
+        console.error('dblLeaveRoom failed', e);
+        if(typeof showToast === 'function') showToast(dblLobbyErrorMessage(e), 'error');
+        await dblRefreshMyRoom();
+        dblRenderLobby();
+      }finally{
+        dblLobbyBusy = false;
+      }
+    }
+
+    function dblWireLobbyControls(){
+      const createRoomBtn = dblLobbyEl('dblCreateRoomBtn');
+      if(createRoomBtn && !createRoomBtn.dataset.dblWired){
+        createRoomBtn.dataset.dblWired = '1';
+        createRoomBtn.addEventListener('click', function(){
+          const browse = dblLobbyEl('dblLobbyBrowse');
+          const form = dblLobbyEl('dblCreateForm');
+          if(browse) browse.style.display = 'none';
+          if(form) form.style.display = 'block';
+        });
+      }
+      const createCloseBtn = dblLobbyEl('dblCreateCloseBtn');
+      if(createCloseBtn && !createCloseBtn.dataset.dblWired){
+        createCloseBtn.dataset.dblWired = '1';
+        createCloseBtn.addEventListener('click', function(){
+          const browse = dblLobbyEl('dblLobbyBrowse');
+          const form = dblLobbyEl('dblCreateForm');
+          if(form) form.style.display = 'none';
+          if(browse) browse.style.display = 'block';
+          dblResetCreateForm();
+        });
+      }
+      const stepperMinus = dblLobbyEl('dblStepperMinus');
+      if(stepperMinus && !stepperMinus.dataset.dblWired){
+        stepperMinus.dataset.dblWired = '1';
+        stepperMinus.addEventListener('click', function(){
+          if(dblSelectedMaxPlayers > 2){ dblSelectedMaxPlayers--; dblRenderStepperValue(); }
+        });
+      }
+      const stepperPlus = dblLobbyEl('dblStepperPlus');
+      if(stepperPlus && !stepperPlus.dataset.dblWired){
+        stepperPlus.dataset.dblWired = '1';
+        stepperPlus.addEventListener('click', function(){
+          if(dblSelectedMaxPlayers < 8){ dblSelectedMaxPlayers++; dblRenderStepperValue(); }
+        });
+      }
+      const submitBtn = dblLobbyEl('dblCreateSubmitBtn');
+      if(submitBtn && !submitBtn.dataset.dblWired){
+        submitBtn.dataset.dblWired = '1';
+        submitBtn.addEventListener('click', dblCreateRoom);
+      }
+      const leaveBtn = dblLobbyEl('dblLeaveRoomBtn');
+      if(leaveBtn && !leaveBtn.dataset.dblWired){
+        leaveBtn.dataset.dblWired = '1';
+        leaveBtn.addEventListener('click', dblLeaveRoom);
+      }
+      const startBtn = dblLobbyEl('dblStartGameBtn');
+      if(startBtn && !startBtn.dataset.dblWired){
+        startBtn.dataset.dblWired = '1';
+        startBtn.addEventListener('click', dblStartGame);
+      }
+      const listEl = dblLobbyEl('dblLobbyList');
+      if(listEl && !listEl.dataset.dblWired){
+        listEl.dataset.dblWired = '1';
+        listEl.addEventListener('click', function(e){
+          const jbtn = e.target.closest('[data-join-room]');
+          if(!jbtn) return;
+          dblJoinRoom(jbtn.dataset.joinRoom);
+        });
+      }
+    }
+
+    async function dblLoadLobby(){
+      try{
+        if(!sb || !publicChatUser) return;
+        dblWireLobbyControls();
+        dblRenderStepperValue();
+        dblSubscribeLobbyChannel();
+        const loadingEl = dblLobbyEl('dblLobbyLoading');
+        if(loadingEl && !dblMyRoom && !dblOpenRooms.length) loadingEl.style.display = 'block';
+        await dblRefreshMyRoom();
+        if(dblMyRoom){
+          dblSubscribeRoomChannel(dblMyRoom.room_id); // STAGE 3، نیمه‌ی دوم
+          // اگه صفحه تازه باز شده و میز از قبل 'playing' بوده (مثلاً رفرشِ وسطِ بازی)، تنها
+          // راهِ فهمیدنِ کارتِ من/کارتِ وسط همینه — broadcastِ game_started فقط لحظه‌ای که
+          // اتفاق افتاده به گوشِ سابسکرایب‌شده‌ها می‌رسه، نه به کسی که الان صفحه رو باز کرده.
+          if(dblMyRoom.room_status === 'playing'){
+            await dblFetchCurrentState(dblMyRoom.room_id);
+            dblStartHeartbeat(); // STAGE 5/۱: رفرشِ صفحه/بازگشت به تب وسطِ یه میزِ از‌قبل‌درحال‌بازی
+          }
+        } else {
+          await dblRefreshOpenRooms();
+        }
+        dblRenderLobby();
+      }catch(e){ console.warn('dblLoadLobby failed', e); }
+    }
+
+    // تنها نقطه‌ی ورودیِ عمومی که app.js صداش می‌زنه (از showPublicTabInner، کنارِ hkLoadLobby/efLoadLobby).
+    window.dblLoadLobby = dblLoadLobby;
+
+  }catch(e){ console.warn('Dobble lobby module failed to load', e); }
 })();
 
 document.getElementById('modeFocusBtn').addEventListener('click', ()=>{
@@ -9716,7 +11962,7 @@ function renderBadges(){
   let changed=false;
   const html = BADGES.map(b=>{
     const earned = !!b.check();
-    if(earned && !storeData.badges[b.id]){ storeData.badges[b.id]=true; changed=true;
+    if(earned && !storeData.badges[b.id]){ storeData.badges[b.id]=new Date().toISOString(); changed=true;
       showCelebration({emoji:b.emoji, title:'نشان جدید: '+b.title, text:'یه دستاورد دیگه به مجموعه‌ات اضافه شد.'});
       launchConfetti();
     }
@@ -9725,6 +11971,47 @@ function renderBadges(){
   grid.innerHTML = html;
   if(changed) saveData();
   try{ updateHeaderBadgesUI(); }catch(err){}
+  try{ renderAchievementsPage(); }catch(err){}
+}
+// صفحه‌ی «دستاوردها» (آیکونِ جامِ هدر): همون نشان‌های تب پیشرفت، ولی به‌جای گرید،
+// یه لیستِ زمانی -- جدیدترین بالا -- که کنار هر کدوم تاریخ و ساعتِ دقیقِ گرفتنش رو
+// نشون می‌ده. storeData.badges[id] از قبل از این تغییر فقط true بود (بدون زمان)؛
+// اون نشان‌های قدیمی همچنان به‌عنوان «گرفته‌شده» شمرده می‌شن، منتها چون زمانِ واقعی‌شون
+// معلوم نیست به‌جای تاریخ یه پیام می‌بینن و همیشه ته لیست می‌رن.
+function renderAchievementsPage(){
+  const list = document.getElementById('achievementsList');
+  const empty = document.getElementById('achievementsEmpty');
+  if(!list) return;
+  const earned = BADGES
+    .filter(b => storeData.badges && storeData.badges[b.id])
+    .map(b => ({ badge:b, at: storeData.badges[b.id] }))
+    .sort((a,b) => {
+      const at_ = (typeof a.at === 'string') ? Date.parse(a.at) : -1;
+      const bt_ = (typeof b.at === 'string') ? Date.parse(b.at) : -1;
+      return bt_ - at_;
+    });
+  if(earned.length === 0){
+    list.innerHTML = '';
+    if(empty) empty.style.display = '';
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+  list.innerHTML = earned.map(({badge, at})=>{
+    let whenHtml;
+    if(typeof at === 'string' && !isNaN(Date.parse(at))){
+      const d = new Date(at);
+      const dateStr = d.toLocaleDateString('fa-IR', {day:'numeric', month:'long', year:'numeric'});
+      const timeStr = d.toLocaleTimeString('fa-IR', {hour:'2-digit', minute:'2-digit'});
+      whenHtml = `<span class="ach-date">${dateStr}</span><span class="ach-time">${timeStr}</span>`;
+    } else {
+      whenHtml = `<span class="ach-date">زمانِ دقیق ثبت نشده</span>`;
+    }
+    return `<div class="ach-row">`
+      + `<span class="ach-emoji-wrap"><span class="ach-emoji">${badge.emoji}</span></span>`
+      + `<span class="ach-title">${escapeHtml(badge.title)}</span>`
+      + `<span class="ach-when">${whenHtml}</span>`
+      + `</div>`;
+  }).join('');
 }
 // Single fixed-size header icon (see .header-badges-btn) showing how many badges are earned
 // so far, capped at "۹+" like the notification bell counter next to it — this way the count
@@ -10653,6 +12940,25 @@ function getLN(){
   const isNative = window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform();
   return isNative && Capacitor.Plugins ? Capacitor.Plugins.LocalNotifications : null;
 }
+// آی‌دیِ ثابت به ازای هر بازیِ نوبتی — چون هر «نوبتِ تو» فوراً جایگزینِ نوبتِ قبلیِ همون بازی
+// می‌شه (کاربر یا الان می‌بینتش یا از دستش رفته)، نیازی به تجمعِ چند نوتیفِ همزمان نیست.
+const GAME_TURN_NOTIF_IDS = { esmfamil: 9801, hokm: 9802 };
+// نوتیفِ فوریِ «نوبتِ توئه» برای بازی‌های چندنفره — فقط وقتی برنامه بک‌گراند/بدونِ فوکوسه صدا زده
+// می‌شه (چون وقتی روی صفحه‌ی بازی باز و دیده‌ست، خودِ UI کافیه)؛ دقیقاً همون محدودیتِ سایرِ
+// نوتیف‌های محلی رو داره: تا وقتی برنامه کاملاً کشته نشده (فقط بک‌گراند) کار می‌کنه، نه بعدِ Force-close.
+async function fireGameTurnNotification(gameKey, title, body){
+  const plugin = getLN();
+  if(!plugin) return;
+  const id = GAME_TURN_NOTIF_IDS[gameKey];
+  if(!id) return;
+  try{
+    const perm = await plugin.requestPermissions();
+    if(perm.display !== 'granted') return;
+    await plugin.cancel({ notifications:[{id}] });
+    await plugin.schedule({ notifications:[{ id, title, body, schedule:{ at:new Date(Date.now()+1200) } }] });
+  }catch(err){ console.error('fireGameTurnNotification failed for '+gameKey, err); }
+}
+
 // Suggestion pools, matched to the HALT tags already logged from the SOS flow.
 const SMART_ALT_SUGGESTIONS = {
   hungry:  ['یه لیوان آب یا یه میان‌وعده‌ی سبک بخور', 'یه میوه دم دست بذار و همونو بخور'],
@@ -11014,12 +13320,32 @@ function libHashStr(s){
   for(let i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) >>> 0; }
   return h;
 }
+let libQuoteCurrentIdx = -1;
 function renderLibQuote(){
   const el = document.getElementById('libQuoteText');
   if(!el) return;
   const idx = libHashStr(today) % LIB_QUOTES.length;
+  libQuoteCurrentIdx = idx;
   el.textContent = LIB_QUOTES[idx];
 }
+// با هر کلیک/لمسِ کارت، یه جمله‌ی دیگه (تصادفی، غیرتکراری با جمله‌ی فعلی) رو نشون می‌ده.
+function libQuoteShowNext(){
+  const el = document.getElementById('libQuoteText');
+  if(!el || LIB_QUOTES.length < 2) return;
+  let idx;
+  do{ idx = Math.floor(Math.random()*LIB_QUOTES.length); }while(idx === libQuoteCurrentIdx);
+  libQuoteCurrentIdx = idx;
+  el.style.opacity = '0';
+  setTimeout(()=>{
+    el.textContent = LIB_QUOTES[idx];
+    el.style.opacity = '1';
+  }, 160);
+  try{ sfxPop(); }catch(e){}
+}
+(function wireLibQuoteClick(){
+  const card = document.getElementById('libQuoteCard');
+  if(card) card.addEventListener('click', libQuoteShowNext);
+})();
 
 /* ---- Library: short step-by-step courses ---- */
 function getCourseProgress(id){
@@ -11383,6 +13709,60 @@ function medPlayChime(){
   osc.connect(gain); gain.connect(medAudioCtx.destination);
   osc.start(now); osc.stop(now+0.5);
 }
+/* صدای دم/بازدم: به‌جای یه زنگ یکسان برای هر فاز، دو صدای کوتاه و متفاوت که خودِ
+   جهتِ نفس رو حس می‌کنن — نه صرفاً یه علامتِ «فاز عوض شد». هر کدوم دو لایه داره:
+   ۱) یه نتِ سینوسیِ نرم که برای دم rise می‌کنه (حسِ پرشدن) و برای بازدم fall می‌کنه
+      (حسِ خالی‌شدن)، ۲) یه لایه‌ی نویزِ فیلترشده (همون تکنیکِ noise+bandpass که تو
+      ترکِ 'ocean' هست) که یه هایسِ نرمِ شبیهِ جریانِ واقعیِ هوا اضافه می‌کنه. بازدم
+      کمی طولانی‌تر و melancholic‌تره چون خودِ عمل بازدم هم معمولاً کشیده‌تره. */
+function medPlayBreathTone(direction){
+  if(!medAudioCtx) return;
+  const ctx = medAudioCtx;
+  const now = ctx.currentTime;
+  const dur = direction==='in' ? 0.55 : 0.75;
+  const noteStart = direction==='in' ? 392.00 : 587.33; // دم: سُل۴ → می۵ (بالارونده) / بازدم: رِ۵ → سُل۴ (پایین‌رونده)
+  const noteEnd   = direction==='in' ? 587.33 : 392.00;
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(noteStart, now);
+  osc.frequency.linearRampToValueAtTime(noteEnd, now+dur);
+  const oscGain = ctx.createGain();
+  oscGain.gain.setValueAtTime(0.0001, now);
+  oscGain.gain.linearRampToValueAtTime(0.05, now+dur*0.35);
+  oscGain.gain.exponentialRampToValueAtTime(0.0001, now+dur);
+  osc.connect(oscGain); oscGain.connect(ctx.destination);
+  osc.start(now); osc.stop(now+dur+0.05);
+
+  const noise = ctx.createBufferSource();
+  noise.buffer = medCreateNoiseBuffer(ctx);
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass'; filter.Q.value = 0.9;
+  const fStart = direction==='in' ? 500 : 1400;
+  const fEnd   = direction==='in' ? 1400 : 500;
+  filter.frequency.setValueAtTime(fStart, now);
+  filter.frequency.linearRampToValueAtTime(fEnd, now+dur);
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(0.0001, now);
+  noiseGain.gain.linearRampToValueAtTime(0.035, now+dur*0.4);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, now+dur);
+  noise.connect(filter); filter.connect(noiseGain); noiseGain.connect(ctx.destination);
+  noise.start(now); noise.stop(now+dur+0.05);
+}
+// تیکِ خنثی و خیلی آرومِ فازِ «نگه‌دار» — عمداً بدون شیب (نه بالارونده نه پایین‌رونده)
+// و ساکت‌تر از صدای دم/بازدم، چون نگه‌داشتن نفس نه دمه نه بازدم، فقط یه مکثه.
+function medPlayHoldTone(){
+  if(!medAudioCtx) return;
+  const ctx = medAudioCtx;
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = 'sine'; osc.frequency.value = 493.88; // سیِ۴ — بینِ نتِ شروعِ دم و بازدم
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(0.03, now+0.04);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now+0.28);
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.start(now); osc.stop(now+0.3);
+}
 function medVibrate(pattern){
   if(navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(err){} }
 }
@@ -11390,7 +13770,9 @@ function runMedPhase(){
   if(!medRunning) return;
   const pattern = BREATH_PATTERNS[medPattern];
   const phase = pattern[medPhaseIdx % pattern.length];
-  medPlayChime();
+  if(phase.type==='in') medPlayBreathTone('in');
+  else if(phase.type==='out') medPlayBreathTone('out');
+  else medPlayHoldTone();
   medVibrate(phase.type==='in' ? 70 : (phase.type==='out' ? [40,40,40] : 50));
   const circle = document.getElementById('medCircle');
   const text = document.getElementById('medCircleText');
@@ -11841,6 +14223,11 @@ document.getElementById('voidStopBtn').addEventListener('click', stopVoidMind);
 const SUPABASE_URL = "https://elrctpacwmsplxkbhlur.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_W0gxlYFD1uWfn3LGn4MvAA_qJUlJ5xs";
 let sb = null, publicChatUser = null, publicChatUsername = null, publicChatChannel = null, myProfileCache = null;
+// فیلترِ جنسیتِ چت — همون مقداریه که هم رویِ خروجی (کدوم پیام‌ها بهم نشون داده بشه) هم
+// رویِ ورودی (پیام‌های خودم به کدوم دسته می‌رن، از طریقِ تریگرِ سمتِ سرور) اثر می‌ذاره؛
+// برایِ همین یه ستونِ profiles.chat_gender_filter (نه یه تنظیمِ محلیِ صرف) است. مقدارها:
+// 'female' (فقط دختر) / 'male' (فقط پسر) / 'both' (هردو — پیش‌فرض، یعنی رفتارِ فعلیِ چت).
+let chatGenderFilter = 'both';
 // true فقط درست قبل از صدا زدن خودمون به sb.auth.signOut() (دکمه‌ی خروج، حذف حساب،
 // خروج اجباری موقع تعلیق) ست می‌شه. برای تشخیص خروج واقعی/عمدی از یه SIGNED_OUT
 // گذرا/کاذب که خودِ supabase-js گاهی می‌فرسته — ببین توضیح کامل بالای initChatAuth.
@@ -11976,6 +14363,32 @@ document.getElementById('updDownloadBtn').addEventListener('click', (e)=>{
   const url = e.currentTarget.dataset.url;
   if(url) window.open(url, '_blank');
 });
+/* آیا اصلاً یه سشن Supabase رو این دستگاه ذخیره شده؟ (کلید پیش‌فرض supabase-js چیزی
+   شبیه sb-<project-ref>-auth-token هست). اگه هیچی ذخیره نشده، یعنی کاربر واقعاً هیچ‌وقت
+   لاگین نکرده یا قبلاً واقعاً خارج شده — لازم نیست بابتش با شبکه ور بریم و منتظر بمونیم.
+   ولی اگه یه چیزی ذخیره شده و فقط نتونستیم تاییدش کنیم، باید قبل از نتیجه‌گیریِ «خارج
+   شدی» با احتیاط شبکه رو چک کنیم (رجوع کن به confirmRealSignOut). */
+function _hasStoredSupabaseSession(){
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(k && k.indexOf('sb-')===0 && k.indexOf('-auth-token')!==-1) return true;
+    }
+  }catch(e){}
+  return false;
+}
+function showChatConnectingState(){
+  const outBox = document.getElementById('chatLoggedOutBox');
+  const inBox = document.getElementById('chatLoggedInBox');
+  const connBox = document.getElementById('chatConnectingBox');
+  if(outBox) outBox.style.display = 'none';
+  if(inBox) inBox.style.display = 'none';
+  if(connBox) connBox.style.display = 'block';
+}
+function hideChatConnectingState(){
+  const connBox = document.getElementById('chatConnectingBox');
+  if(connBox) connBox.style.display = 'none';
+}
 function initChatAuth(){
   if(!chatConfigured()){
     const box = document.getElementById('chatUnconfiguredBox');
@@ -11986,7 +14399,30 @@ function initChatAuth(){
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     applyRememberedAuthToLoginForms();
     watchLifetimeCapacity();
-    sb.auth.getSession().then(({data})=> handlePublicChatSession(data.session)).catch(()=>{});
+    // قبل از هرگونه درخواستِ شبکه‌ای، هم‌زمان و فوری چک می‌کنیم: اگه یه سشنِ ذخیره‌شده رو
+    // دستگاه هست، یعنی کاربر قبلاً لاگین بوده. تا وقتی این سشن تایید/رد نشده، به‌جای
+    // باکسِ ورود/ثبت‌نامِ پیش‌فرض، همون حالتِ «در حال اتصال» رو نشون می‌دیم — حتی یه لحظه
+    // هم نباید فرمِ ثبت‌نام رو ببینه، چون یعنی انگار خارج شده در صورتی که نشده.
+    if(_hasStoredSupabaseSession() && !intentionalSignOut){
+      sessionPending = true;
+      showChatConnectingState();
+    }
+    // ================= بارگذاری اولیه‌ی سشن (باز شدن اپ/کولد استارت) =================
+    // این همون مسیریه که صبح‌ها بعد از بسته موندن اپ توی شب اجرا می‌شه — یعنی درست همون
+    // لحظه‌ای که شبکه‌ی گوشی ممکنه هنوز کامل وصل نشده باشه. قبلاً هر نتیجه‌ای (حتی null
+    // به‌خاطر شکست شبکه) رو مستقیم به handlePublicChatSession می‌داد و کاربر رو می‌نداخت
+    // رو باکس ورود با اینکه هنوز واقعاً لاگین بود. حالا اگه یه سشن ذخیره‌شده رو دستگاه
+    // هست ولی نتونستیم تاییدش کنیم، از همون منطق retry+network-aware که برای resume هم
+    // استفاده می‌شه (confirmRealSignOut) رد می‌شیم؛ فقط وقتی از اول هیچ سشنی ذخیره نشده
+    // (کاربر واقعاً هیچ‌وقت لاگین نکرده)، مستقیم باکس ورود رو نشون می‌دیم.
+    sb.auth.getSession().then(({data, error})=>{
+      if(data && data.session){ handlePublicChatSession(data.session); return; }
+      if(_hasStoredSupabaseSession() && !intentionalSignOut) confirmRealSignOut();
+      else handlePublicChatSession(null);
+    }).catch(()=>{
+      if(_hasStoredSupabaseSession() && !intentionalSignOut) confirmRealSignOut();
+      else handlePublicChatSession(null);
+    });
     sb.auth.onAuthStateChange((event, session)=>{
       if(event === 'PASSWORD_RECOVERY'){
         // Only relevant if this ever runs as a plain website and someone clicks
@@ -12015,24 +14451,59 @@ function initChatAuth(){
   }catch(err){ console.error('Supabase init error', err); }
 }
 let signOutRecheckInProgress = false;
+/* یه خطای getSession رو "واقعاً خارج شدی" حساب نمی‌کنیم اگه صرفاً ناشی از قطعی/کندیِ
+   شبکه باشه (AuthRetryableFetchError، یا status صفر/نامشخص یعنی اصلاً درخواست به سرور
+   نرسیده). فقط خطاهای واقعیِ auth (مثلاً «invalid/expired refresh token» که status
+   400/401 برمی‌گردونه) رو نشونه‌ی خروج واقعی می‌گیریم. */
+function _isNetworkyAuthError(error){
+  if(!error) return false;
+  return error.name === 'AuthRetryableFetchError' || error.status === 0 || error.status == null;
+}
 async function confirmRealSignOut(){
   if(signOutRecheckInProgress) return;
   signOutRecheckInProgress = true;
+  let onlyNetworkIssues = true;
   try{
-    for(let attempt=0; attempt<3; attempt++){
-      await new Promise(r=> setTimeout(r, 900 + attempt*900));
-      let freshSession = null;
-      try{ const {data} = await sb.auth.getSession(); freshSession = data && data.session; }catch(e){}
-      if(freshSession){
-        // false alarm بود؛ سشن واقعاً هنوز معتبره — کاربر رو بیرون نمی‌ندازیم
-        signOutRecheckInProgress = false;
-        handlePublicChatSession(freshSession);
-        return;
+    // ۵ تلاش با فاصله‌ی رو به افزایش (تا ~۳۷ ثانیه جمعاً) — کافیه که گوشی بعد از
+    // بیدار شدن از خواب/داز، وایفای یا دیتاش دوباره وصل بشه، قبل از اینکه نتیجه‌گیری
+    // کنیم کاربر واقعاً خارج شده.
+    for(let attempt=0; attempt<5; attempt++){
+      await new Promise(r=> setTimeout(r, 1500 + attempt*1500));
+      if(typeof navigator!=='undefined' && navigator.onLine===false) continue; // هنوز نتی وصل نیست
+      try{
+        const {data, error} = await sb.auth.getSession();
+        if(data && data.session){
+          // false alarm بود؛ سشن واقعاً هنوز معتبره — کاربر رو بیرون نمی‌ندازیم
+          signOutRecheckInProgress = false;
+          handlePublicChatSession(data.session);
+          return;
+        }
+        if(error && !_isNetworkyAuthError(error)){
+          onlyNetworkIssues = false; // این دیگه خطای واقعی auth هست، نه قطعی شبکه
+          break;
+        }
+      }catch(e){
+        // fetch اصلاً انجام نشد (آفلاین/بی‌کیفیت) — همچنان network issue حساب می‌شه
       }
     }
   }catch(e){}
   signOutRecheckInProgress = false;
-  // بعد از چند تلاش هم واقعاً هیچ سشنی برنگشت؛ این دیگه خروج واقعیه
+  if(onlyNetworkIssues){
+    // مهم: اینجا فقط navigator.onLine===false رو "مشکل شبکه" حساب نمی‌کنیم. navigator.onLine
+    // فقط یعنی «یه کارت شبکه/وای‌فای وصله»، نه اینکه واقعاً به اینترنت/سرور دسترسی هست —
+    // خیلی وقتا true می‌مونه درحالیکه وای‌فای بدون اینترنته، دیتا ضعیفه، یا سرور موقتاً کنده.
+    // قبلاً اگه navigator.onLine===true بود ولی همه‌ی تلاش‌ها بازم فقط با خطای شبکه‌ای
+    // (نه یه خطای واقعیِ auth) شکست می‌خوردن، کد از این if رد می‌شد و مستقیم کاربر رو
+    // خارج می‌کرد — دقیقاً همون چیزی که باعث «خود به خود ساین‌اوت شدن» می‌شد.
+    // حالا: تا وقتی از سرور یه خطای واقعیِ auth (توکن نامعتبر/منقضی) نگرفتیم، به هیچ
+    // عنوان کاربر رو خارج نمی‌کنیم؛ فقط صبر می‌کنیم — هم به رویداد 'online' گوش می‌دیم، هم
+    // (برای حالتی که onLine اشتباهاً true نشون می‌ده) هر ۳۰ ثانیه دوباره از اول تلاش می‌کنیم.
+    window.addEventListener('online', ()=> confirmRealSignOut(), { once:true });
+    setTimeout(()=>{ if(!signOutRecheckInProgress) confirmRealSignOut(); }, 30000);
+    return;
+  }
+  // فقط وقتی سرور صریحاً یه خطای واقعیِ auth (نه شبکه‌ای) برگردونده باشه به اینجا می‌رسیم؛
+  // این دیگه خروج واقعیه.
   handlePublicChatSession(null);
 }
 /* Toggle which of the 4 account-tab forms (login / signup / forgot / resetCode) is visible */
@@ -12051,8 +14522,40 @@ function showAuthForm(which){
   }
   if(which === 'login') applyRememberedAuthToLoginForms();
 }
+/* ================= AuthBridge: کپیِ توکنِ سشن روی native (برای ریپلای مستقیم از نوتیف) =================
+   وقتی اپ کاملاً بسته‌ست، هیچ WebView‌ای زنده نیست که بشه از localStorage/supabase-js
+   توکن خوند — بنابراین هر بار سشن عوض می‌شه (لاگین/رفرش/لاگ‌اوت)، یه کپی از
+   access_token/refresh_token رو تو SharedPreferences سمت native هم می‌نویسیم
+   (پلاگین AuthBridge، تو build.yml تزریق می‌شه). ChatReplyReceiver همون‌جا، وقتی
+   کاربر از تو نوتیف ریپلای می‌زنه، این توکن رو می‌خونه (و لازم شد رفرش می‌کنه) تا
+   بتونه بدون باز کردن اپ مستقیم به Supabase پیام بفرسته. اگه پلاگین تو این نسخه از
+   بیلد وجود نداشته باشه (وب یا بیلد قدیمی)، بی‌خطر no-op می‌مونه. */
+function authBridgePlugin(){
+  return (isNativeApp() && window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.AuthBridge) || null;
+}
+function pushAuthSessionToNative(session){
+  const plugin = authBridgePlugin();
+  if(!plugin || !session || !session.access_token) return;
+  try{
+    plugin.saveSession({
+      accessToken: session.access_token,
+      refreshToken: session.refresh_token || '',
+      expiresAt: String(session.expires_at || 0),
+      userId: (session.user && session.user.id) || '',
+      username: publicChatUsername || ''
+    }).catch(()=>{});
+  }catch(e){}
+}
+function clearAuthSessionNative(){
+  const plugin = authBridgePlugin();
+  if(!plugin) return;
+  try{ plugin.clearSession().catch(()=>{}); }catch(e){}
+}
 async function handlePublicChatSession(session){
+  sessionPending = false;
+  hideChatConnectingState();
   publicChatUser = session ? session.user : null;
+  if(!publicChatUser) clearAuthSessionNative();
   if(publicChatUser){
     // Fired first, in parallel with everything below — the message list doesn't
     // actually depend on the profile fetch (own/other bubble styling only needs
@@ -12063,7 +14566,13 @@ async function handlePublicChatSession(session){
     let profile = null;
     let profileFetchOk = false;
     try{
-      const res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url').eq('id', publicChatUser.id).single();
+      let res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url, chat_gender_filter').eq('id', publicChatUser.id).single();
+      if(res.error && /chat_gender_filter/i.test(res.error.message || '')){
+        // chat-gender-filter-supabase-schema.sql هنوز رو این پروژه اجرا نشده — برگرد به
+        // ستون‌هایِ قدیمی تا لاگین/پروفایل مثلِ قبل کار کنه؛ فیلترِ جنسیت فقط پیش‌فرضِ
+        // «هردو» می‌مونه تا migration اجرا بشه.
+        res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url').eq('id', publicChatUser.id).single();
+      }
       if(!res.error){ profile = res.data; profileFetchOk = true; }
     }catch(err){}
     // اگه fetch شکست بخوره (مثلاً گوشی آفلاینه)، myProfileCache قبلی (آخرین باری که
@@ -12071,6 +14580,8 @@ async function handlePublicChatSession(session){
     // myProfileCache.premium_until پرمیوم رو چک می‌کنن (مثلاً بج تب پروفایل) موقع
     // آفلاین‌شدن غلط «عضو رایگان» نشون می‌دادن.
     if(profileFetchOk) myProfileCache = profile;
+    chatGenderFilter = (profile && profile.chat_gender_filter) || 'both';
+    renderChatGenderFilterBtn();
     // ==================== پیام تشویقی «کسی با کد تو ثبت‌نام کرد» ====================
     // هر بار پروفایل واقعی از سرور میاد (باز شدن اپ، لاگین، رفرش سشن بعد از resume)،
     // referral_count واقعی رو با آخرین عددی که قبلاً رو همین گوشی دیده بودیم مقایسه
@@ -12096,6 +14607,10 @@ async function handlePublicChatSession(session){
       saveData();
     }
     publicChatUsername = profile ? displayName(profile.username) : displayName(publicChatUser.email);
+    // یوزرنیم تازه معلوم شد؛ حالا کاملِ سشن (شاملِ همین یوزرنیم، برای ساختنِ پیامِ
+    // ریپلای‌شده سمتِ native) رو کپی می‌کنیم — نه زودتر، وگرنه AuthBridge با یوزرنیمِ
+    // خالی/قدیمی ذخیره می‌شد.
+    pushAuthSessionToNative(session);
     isAppOwner = !!(publicChatUser.email && publicChatUser.email.toLowerCase() === OWNER_EMAIL);
     // Chat-admin: granted by the owner (see set_chat_admin_by_email RPC / chatAdminManageBtn).
     // Only the real owner sees the button that grants/revokes this to others.
@@ -12985,7 +15500,7 @@ async function loadLeaderboard(force){
   const errEl = document.getElementById('lbErrorBox');
   const emptyEl = document.getElementById('lbEmptyBox');
   const yourRankEl = document.getElementById('lbYourRank');
-  loadingEl.style.display = 'flex';
+  loadingEl.style.display = 'block';
   contentEl.style.display = 'none';
   unconfEl.style.display = 'none';
   errEl.style.display = 'none';
@@ -13845,7 +16360,12 @@ function publicChatMsgHtml(m, grouped){
   const extraClass = (isGroupStreak ? ' group-msg' : (isGroupWeekly ? ' group-msg group-weekly-msg' : (isReport ? ' report-msg' : ''))) + (isMediaOnly ? ' cm-media-only' : '');
   // data-raw keeps the exact, unparsed DB content (including any reply/report marker prefix)
   // so the edit/copy actions can work from the source text rather than the rendered HTML.
-  return `<div class="chat-msg${own?' own':''}${(grouped&&!isBot)?' grouped':''}${isOwnerMsg?' owner-msg':(isAdminMsg?' admin-msg':'')}${extraClass}${reactionTierClass(m.id)}" data-msg-id="${m.id}" data-user-id="${m.user_id}" data-username="${escapeHtml(displayName(m.username))}" data-raw="${escapeHtml(typeof m.content==='string'?m.content:'')}"${isBot?' data-bot="1"':''}${isReport?' data-report="1"':''}>
+  // data-gender/data-audience از sender_gender/sender_audienceِ خودِ ردیف میان — این دو رو
+  // تریگرِ سمتِ سرور (chat-gender-filter-supabase-schema.sql) موقعِ insert از رویِ
+  // profiles.gender/profiles.chat_gender_filterِ فرستنده مهر می‌زنه (عیناً هم‌مدلِ
+  // is_owner/is_admin/admin_title بالاتر)، نه چیزی که کلاینت خودش بفرسته؛ برایِ همین
+  // applyChatGenderFilter پایین‌تر می‌تونه بهش اعتماد کنه.
+  return `<div class="chat-msg${own?' own':''}${(grouped&&!isBot)?' grouped':''}${isOwnerMsg?' owner-msg':(isAdminMsg?' admin-msg':'')}${extraClass}${reactionTierClass(m.id)}" data-msg-id="${m.id}" data-user-id="${m.user_id}" data-username="${escapeHtml(displayName(m.username))}" data-raw="${escapeHtml(typeof m.content==='string'?m.content:'')}" data-gender="${escapeHtml(m.sender_gender||'')}" data-audience="${escapeHtml(m.sender_audience||'both')}"${isBot?' data-bot="1"':''}${isReport?' data-report="1"':''}>
     ${head}
     ${reportTag}
     ${replyQuoteHtml}
@@ -13860,10 +16380,320 @@ function publicChatMsgHtml(m, grouped){
 function chatMsgHasAvatar(m){
   return m.user_id !== GROUP_BOT_USER_ID;
 }
+/* ---- Avatar flame ring: turns a sender's day-streak into an actual ring of real-
+   looking fire wrapped around their small public-chat avatar, plus a tiny day-count
+   badge on its rim. Gated exactly like chatStreakChipHtml above (m.streak>0 &&
+   m.premium, both denormalized onto the message row at send time) — same reasoning:
+   free-user day counts stay hidden in chat, this just gives the number a second, more
+   visual home right on the avatar instead of (or alongside) the name-row chip.
+
+   v2 rewrite: the original ring was built out of discrete teardrop "petals" spaced
+   evenly around the circle — readable, but it read as a flower/sun icon, not fire.
+   A second attempt used one continuous SVG-turbulence-distorted band, which fixed the
+   "petals" look but still visually read as a soft glowing outline rather than actual
+   fire once shipped (see conversation history) and never made it to production intact.
+
+   v3 — "fire fern" rendering (current): reverse-engineered from the actual reference
+   art rather than guessed. Structure is one bright, slightly organic "spine" (a wobbly
+   circular arc built from smoothed random radius offsets, drawn in avatarFlameRingSvg)
+   with small flame leaflets (avatarFlameLeafletPath) flicking off it on alternating
+   sides — like a fern frond — each pair layered front+back for density so there are no
+   gaps down to the avatar's rim, plus a soft blurred glow halo and fine ember
+   particles. No shared page-level SVG defs anymore — each ring carries its own small
+   uid-scoped <defs>, so there's no ensureAvatarFireDefs equivalent to call before
+   rendering.
+
+   Two-phase day law (see "قانون اصلی شعله"): growth, then color-only.
+   Phase 1, day 0→40 (AVATAR_FLAME_GROWTH): the ring is not yet complete. `arc`
+     climbs from 0% to 100% of the circumference through the exact day→percent
+     checkpoints product gave us (1%@1, 5%@3, 10%@7, 20%@14, 30%@21, 60%@30, 85%@35,
+     95%@39, 100%@40), linearly interpolated day-to-day between checkpoints so it
+     visibly grows every day, not just on the named ones. Color during this phase
+     warms up from a dim ember toward day 40's orange — nothing else, since no other
+     hue exists before the ring first closes. Day 0 itself is a special "unlit" case:
+     no flame at all, just a faint, cold, un-textured placeholder stroke (see the
+     `unlit` branch in avatarFlameRingSvg) so progress has a visible starting point.
+   Phase 2, day 40→365 (AVATAR_FLAME_COLORS): `arc` is permanently pinned at 360°
+     and never again shrinks — only color moves, gradually, through the 9 milestones
+     in order (orange → red → purple → blue → yellow → green → gold → dark/smoky →
+     royal gold), interpolated day-to-day the same way so the shift feels alive
+     instead of snapping only on the milestone day. Day 365+ holds forever at the
+     final royal-gold stage and additionally turns on `epic` mode — a soft radial
+     halo behind the ring plus a few twinkling gold spark particles riding its outer
+     edge — the "قوی‌ترین و زیباترین حالت ممکن" state. Day 320's dark/smoky stage
+     (rendered pale and ash-like, not literally black — a true black flame would just
+     vanish against the app's dark background) carries a boosted `glow` value and a
+     few warm ember flecks mixed into its embers so it still visibly reads as lit
+     rather than looking like an extinguished ring.
+   The flicker itself is animated two ways: each leaflet layer and the spine's opacity
+   pulse via SMIL <animate> (an actual organic flicker, which CSS alone can't do), while
+   a light CSS scale "breathe" on the whole ring (@keyframes cmFireBreathe, in the html
+   file) adds a slow ambient pulse. Both are skipped when the visitor has
+   prefers-reduced-motion on.
+   light CSS scale "breathe" on the whole ring (@keyframes cmFireBreathe) adds a slow
+   ambient pulse. Both are skipped when the visitor has prefers-reduced-motion on. */
+// Phase 1 (day 0–40): how much of the ring's circumference is lit, in percent —
+// exactly the checkpoints from the spec, interpolated between them day-to-day.
+const AVATAR_FLAME_GROWTH = [
+  {d:0,  pct:0},
+  {d:1,  pct:1},
+  {d:3,  pct:5},
+  {d:7,  pct:10},
+  {d:14, pct:20},
+  {d:21, pct:30},
+  {d:30, pct:60},
+  {d:35, pct:85},
+  {d:39, pct:95},
+  {d:40, pct:100}
+];
+// Phase 2 (day 40–365): ring is always 100% full; only this color/gloss data moves,
+// in this exact order (نارنجی → قرمز → بنفش → آبی → زرد → سبز → طلایی → مشکی → طلایی
+// سلطنتی). `glow` scales the outer blur-bloom layer's opacity — boosted for day 320's
+// dark stage so it doesn't read as "off"; `epic` (day 365 only) adds the halo+sparks.
+const AVATAR_FLAME_COLORS = [
+  {d:40,  c1:'#7a2410', c2:'#e0620c', c3:'#ffb347', glow:0.30},                // نارنجی
+  {d:80,  c1:'#5c0f0f', c2:'#e0281f', c3:'#ff7a52', glow:0.32},                // قرمز
+  {d:120, c1:'#3a0d5c', c2:'#8b2fd1', c3:'#dcaaff', glow:0.34},                // بنفش
+  {d:160, c1:'#0d2d5c', c2:'#1f8ce6', c3:'#8fe3ff', glow:0.34},                // آبی
+  {d:200, c1:'#7a5a0a', c2:'#f2c40c', c3:'#fff6b0', glow:0.30},                // زرد
+  {d:240, c1:'#0d3a1a', c2:'#22c25c', c3:'#aaffc8', glow:0.34},                // سبز
+  {d:280, c1:'#6b4a0a', c2:'#e6ac16', c3:'#fff2b0', glow:0.32},                // طلایی
+  {d:320, c1:'#3a3a40', c2:'#8f8fa0', c3:'#f5f5fa', glow:0.40, smoky:true},   // مشکی/خاکستری تیره — pale ash/smoke, pixel-sampled off the reference art (a literal black flame would just vanish against the app's dark background); `smoky` also thins the leaflets and mixes in a few warm ember flecks so it still reads as lit
+  {d:365, c1:'#8a5a00', c2:'#ffb400', c3:'#fffbe6', glow:0.42, epic:true}      // طلایی سلطنتی
+];
+// Dim ember tone the growth phase (day 0–40) warms up FROM, landing exactly on
+// AVATAR_FLAME_COLORS[0] (day 40's orange) the moment the ring first closes.
+const AVATAR_FLAME_EMBER = { c1:'#4a1f0d', c2:'#7a3410', c3:'#a8480f' };
+// Purely visual — safe to no-op if matchMedia isn't available for any reason.
+const AVATAR_FIRE_REDUCE_MOTION = (function(){
+  try{ return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+  catch(e){ return false; }
+})();
+function avatarFlameHexLerp(hx, hy, t){
+  const ph = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+  const [r1,g1,b1] = ph(hx), [r2,g2,b2] = ph(hy);
+  const r = Math.round(r1+(r2-r1)*t), g = Math.round(g1+(g2-g1)*t), b = Math.round(b1+(b2-b1)*t);
+  return `rgb(${r},${g},${b})`;
+}
+function avatarFlameDataFor(streak){
+  const s = Number(streak)||0;
+  // Day 0: no flame yet — just the faint, unlit placeholder ring from the spec.
+  if(s<=0) return { arc:0, unlit:true, c1:'#6e6e6e', c2:'#6e6e6e', c3:'#6e6e6e', glow:0, epic:false };
+  // Phase 1 — day 1 to 39: ring still filling in, warming from ember toward orange.
+  if(s < 40){
+    const st = AVATAR_FLAME_GROWTH;
+    let a = st[0], b = st[st.length-1];
+    for(let k=0;k<st.length-1;k++){
+      if(s>=st[k].d && s<=st[k+1].d){ a=st[k]; b=st[k+1]; break; }
+    }
+    const t = (s-a.d)/Math.max(1,(b.d-a.d));
+    const pct = a.pct + (b.pct-a.pct)*t;
+    const warm = Math.min(1, pct/100);
+    const c40 = AVATAR_FLAME_COLORS[0], em = AVATAR_FLAME_EMBER;
+    return {
+      arc: pct/100*360,
+      c1: avatarFlameHexLerp(em.c1, c40.c1, warm),
+      c2: avatarFlameHexLerp(em.c2, c40.c2, warm),
+      c3: avatarFlameHexLerp(em.c3, c40.c3, warm),
+      glow: 0.20 + 0.10*warm, unlit:false, epic:false
+    };
+  }
+  // Phase 2 — day 40 to 365+: ring permanently full; only color still moves.
+  const cs = AVATAR_FLAME_COLORS, last = cs[cs.length-1];
+  if(s >= last.d) return { arc:360, c1:last.c1, c2:last.c2, c3:last.c3, glow:last.glow, unlit:false, epic:true };
+  for(let k=0;k<cs.length-1;k++){
+    const a=cs[k], b=cs[k+1];
+    if(s>=a.d && s<=b.d){
+      const t = (s-a.d)/Math.max(1,(b.d-a.d));
+      return {
+        arc:360,
+        c1: avatarFlameHexLerp(a.c1, b.c1, t),
+        c2: avatarFlameHexLerp(a.c2, b.c2, t),
+        c3: avatarFlameHexLerp(a.c3, b.c3, t),
+        glow: a.glow + (b.glow-a.glow)*t, unlit:false, epic:false, smoky: t<0.5 ? !!a.smoky : !!b.smoky
+      };
+    }
+  }
+  return { arc:360, c1:last.c1, c2:last.c2, c3:last.c3, glow:last.glow, unlit:false, epic:true };
+}
+// ---- Avatar flame ring v3 rendering: "fire fern" ----------------------------------
+// Replaces the old turbulence-filter petal ring (which read as a flower/starburst, not
+// fire — see prior comment history) with a structure reverse-engineered from the actual
+// reference art: one bright, slightly organic "spine" (a wobbly circular arc) with small
+// flame leaflets flicking off it on alternating sides — like a fern frond — plus a soft
+// blurred glow halo and fine ember particles. No shared page-level SVG defs needed
+// anymore (each ring carries its own small, uid-scoped <defs>), so ensureAvatarFireDefs
+// and the old cmFireTurb/cmFireBlur/cmFireTurbSpiky filters are gone entirely.
+// R=16 and the 56x56 viewBox are chosen so the ring's own inner radius lands exactly on
+// the real 30px avatar's edge once the CSS box (30px avatar + 13px inset on each side =
+// 56px, see #tab-chat .cm-avatar-flame-ring) scales this SVG to fit — no CSS changes
+// needed. Tall outlier flame licks are allowed to render past the nominal 56x56 box
+// (the CSS already sets overflow:visible on this svg for exactly that reason).
+function avatarFlameLeafletPath(rnd, h, w){
+  const lean = (rnd()-0.5)*0.35, curl = (rnd()-0.5)*0.5;
+  return `M 0,0
+    C ${(-0.66+lean)*w},${-0.18*h} ${(-0.7+lean)*w},${-0.48*h} ${(-0.4+lean)*w},${-0.78*h}
+    C ${(-0.52+lean+curl)*w},${-0.98*h} ${(-0.3+lean+curl)*w},${-1.08*h} ${(-0.34+lean+curl)*w},${-1.28*h}
+    C ${(-0.36+lean+curl)*w},${-1.44*h} ${(-0.16+lean+curl*1.3)*w},${-1.5*h} ${(0.0+lean+curl*1.4)*w},${-1.34*h}
+    C ${(0.06+lean)*w},${-1.5*h} ${(0.1+lean)*w},${-1.66*h} ${(0.02+lean)*w},${-1.78*h}
+    C ${(0.18+lean)*w},${-1.55*h} ${(0.34+lean)*w},${-1.2*h} ${(0.27+lean)*w},${-0.86*h}
+    C ${(0.5+lean)*w},${-0.56*h} ${(0.5+lean)*w},${-0.22*h} ${0.24*w},0
+    Z`;
+}
+function avatarFlameMulberry32(seed){
+  return function(){
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+let avatarFlameGradSeq = 0;
+function avatarFlameRingSvg(fd, seed){
+  const R = 16, CX = 28, CY = 28, size = 56;
+  // Day 0: nothing lit yet — a single faint, cold, un-textured ring outline marking
+  // where the flame will eventually fill in, without reading as fire at all.
+  if(fd.unlit){
+    return `<svg viewBox="0 0 ${size} ${size}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="#7a7a86" stroke-width="1.4" opacity="0.24"/>
+    </svg>`;
+  }
+  const uid = 'avfr'+(avatarFlameGradSeq++);
+  const rnd = avatarFlameMulberry32((seed>>>0)*10007+13);
+  const arcPct = Math.max(0, Math.min(100, fd.arc/3.6));
+  const full = arcPct>=99.95;
+  const arcDeg = 360*Math.min(1,arcPct/100);
+  const startDeg = 180-arcDeg/2, endDeg = 180+arcDeg/2;
+  const smoky = !!fd.smoky, epic = !!fd.epic;
+  const bs = R/24;
+
+  const nCtrl = 18;
+  const ctrlOffsets = Array.from({length:nCtrl}, ()=> (rnd()-0.5)*R*0.05);
+  function spineR(ang){
+    const f = ((ang%360+360)%360/360)*nCtrl;
+    const i0=Math.floor(f)%nCtrl, i1=(i0+1)%nCtrl, t=f-Math.floor(f), sm=t*t*(3-2*t);
+    return R + ctrlOffsets[i0]*(1-sm)+ctrlOffsets[i1]*sm;
+  }
+  function polar(ang, r){ const a=ang*Math.PI/180; return [CX+r*Math.sin(a), CY-r*Math.cos(a)]; }
+  function spinePt(a){ return polar(a, spineR(a)); }
+  function spinePathD(a0,a1,closeCircle){
+    const N = closeCircle?90:Math.max(8,Math.round((a1-a0)/2.5));
+    let d='';
+    for(let i=0;i<=N;i++){ const ang=a0+(a1-a0)*i/N; const [x,y]=spinePt(ang); d+=(i===0?'M ':'L ')+x.toFixed(2)+','+y.toFixed(2)+' '; }
+    return d;
+  }
+  function taper(ang){
+    if(full) return 1;
+    const edge = Math.min(ang-startDeg, endDeg-ang);
+    return Math.max(0, Math.min(1, edge/14));
+  }
+  const globalFade = full ? 1 : Math.max(0.35, Math.min(1, arcDeg/26));
+
+  const gradId = uid+'g';
+  let defs = `<linearGradient id="${gradId}" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="${fd.c1}"/><stop offset="55%" stop-color="${fd.c2}"/><stop offset="100%" stop-color="${fd.c3}"/>
+    </linearGradient>
+    <radialGradient id="${uid}halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="${fd.c3}" stop-opacity="0"/>
+      <stop offset="48%" stop-color="${fd.c2}" stop-opacity="${((fd.glow!=null?fd.glow:0.3)*globalFade).toFixed(3)}"/>
+      <stop offset="100%" stop-color="${fd.c2}" stop-opacity="0"/>
+    </radialGradient>`;
+  if(epic) defs += `<radialGradient id="${uid}halo2" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${fd.c3}" stop-opacity="0.5"/><stop offset="100%" stop-color="${fd.c3}" stop-opacity="0"/></radialGradient>`;
+
+  let leaflets='', leafletsBack='', embers='';
+  {
+    let a = full?0:startDeg;
+    const limit = full?360:endDeg;
+    let side = rnd()<0.5?-1:1;
+    const density = smoky?1.35:1;
+    while(a<limit){
+      const [x,y] = spinePt(a);
+      side=-side;
+      const t = taper(a);
+      const r1 = rnd();
+      const hMul = (r1<0.55?(0.55+r1*0.7):(1.05+(r1-0.55)*2.6)) * (smoky?0.72:1);
+      const tilt = side*(9+rnd()*16);
+      const h = 32*bs*hMul*Math.max(0.32,t), w = 17*bs*(0.95+rnd()*0.45)*Math.sqrt(Math.max(0.3,t))*(smoky?0.75:1);
+      const op = (0.85+rnd()*0.15)*Math.max(0.4,t)*globalFade;
+      leaflets += `<path d="${avatarFlameLeafletPath(rnd,h,w)}" fill="url(#${gradId})" opacity="${op.toFixed(2)}" transform="translate(${x.toFixed(2)},${y.toFixed(2)}) rotate(${(a+tilt).toFixed(1)})"/>`;
+      if(rnd()<0.85){
+        const a2=a+(rnd()-0.5)*3.2, [x2,y2]=spinePt(a2);
+        const h2=h*(0.6+rnd()*0.3), w2=w*(0.8+rnd()*0.3);
+        leafletsBack += `<path d="${avatarFlameLeafletPath(rnd,h2,w2)}" fill="url(#${gradId})" opacity="${(op*0.85).toFixed(2)}" transform="translate(${x2.toFixed(2)},${y2.toFixed(2)}) rotate(${(a2+tilt*0.8+side*8).toFixed(1)})"/>`;
+      }
+      if(rnd()<(smoky?0.3:0.4)){
+        const er = R+(8+rnd()*22)*bs*Math.max(0.3,t);
+        const [ex,ey]=polar(a+(rnd()-0.5)*10, er);
+        const emberCol = smoky && rnd()<0.32 ? '#ff9a4d' : (rnd()<0.5?fd.c3:fd.c2);
+        embers += `<circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="${((0.5+rnd()*1.0)*bs).toFixed(2)}" fill="${emberCol}" opacity="${(0.3+rnd()*0.5*t*globalFade).toFixed(2)}"/>`;
+      }
+      a += (4.2+rnd()*3.4)/density;
+    }
+  }
+
+  const spineD = spinePathD(full?0:startDeg, full?360:endDeg, full);
+  const SPW = 4.4*bs*(smoky?0.8:1);
+  const spineOp = 0.98*globalFade;
+  const flicker = AVATAR_FIRE_REDUCE_MOTION ? '' : `<animate attributeName="opacity" values="1;0.88;1;0.93;1" dur="${(2.2+rnd()*0.8).toFixed(2)}s" repeatCount="indefinite"/>`;
+  const spineFlicker = AVATAR_FIRE_REDUCE_MOTION ? '' : `<animate attributeName="opacity" values="${spineOp};${(spineOp*0.82).toFixed(2)};${spineOp}" dur="${(1.5+rnd()*0.6).toFixed(2)}s" repeatCount="indefinite"/>`;
+
+  return `<svg viewBox="0 0 ${size} ${size}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <defs>
+      ${defs}
+      <filter id="${uid}bxs" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="${0.5*bs}"/></filter>
+      <filter id="${uid}bm" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="${2.4*bs}"/></filter>
+      <filter id="${uid}bl" x="-150%" y="-150%" width="400%" height="400%"><feGaussianBlur stdDeviation="${8.5*bs}"/></filter>
+    </defs>
+    <circle cx="${CX}" cy="${CY}" r="${R*1.75}" fill="url(#${uid}halo)"/>
+    ${epic?`<circle cx="${CX}" cy="${CY}" r="${R*1.35}" fill="url(#${uid}halo2)"/>`:''}
+    <g filter="url(#${uid}bl)" opacity="${(0.5*globalFade).toFixed(2)}">
+      <path d="${spineD}" fill="none" stroke="${fd.c2}" stroke-width="${SPW*3.6}" stroke-linecap="round"/>
+      ${leaflets}${leafletsBack}
+    </g>
+    <path d="${spineD}" fill="none" stroke="url(#${gradId})" stroke-width="${SPW*1.9}" stroke-linecap="round" opacity="${(0.98*globalFade).toFixed(2)}" filter="url(#${uid}bxs)"/>
+    <g filter="url(#${uid}bxs)">${flicker}
+      ${leafletsBack}
+      ${leaflets}
+    </g>
+    <g filter="url(#${uid}bm)" opacity="0.98">
+      <path d="${spineD}" fill="none" stroke="${fd.c3}" stroke-width="${SPW*1.3}" stroke-linecap="round"/>
+    </g>
+    <path d="${spineD}" fill="none" stroke="${fd.c3}" stroke-width="${SPW*0.62}" stroke-linecap="round" opacity="${spineOp.toFixed(2)}">${spineFlicker}</path>
+    <path d="${spineD}" fill="none" stroke="#fff8e8" stroke-width="${SPW*0.22}" stroke-linecap="round" opacity="${(0.85*globalFade).toFixed(2)}"/>
+    <g>${embers}</g>
+  </svg>`;
+}
+// Builds the flame-ring + day-count badge markup for one avatar wrapper. `seedStr`
+// (the sender's user_id) picks a deterministic rotation so different people's fire
+// doesn't all ignite at the exact same point on the circle — same idea as the
+// hash-based hue picked for initials-avatars in chatAvatarHtml, just reused here for
+// rotation instead of color. Returns hasFlame:false (no markup, no inline style) for
+// anyone with no eligible streak, so their avatar renders exactly as it did before
+// this feature existed.
+function avatarFlameOverlayHtml(streak, seedStr){
+  const s = Number(streak)||0;
+  const fd = avatarFlameDataFor(s);
+  if(!fd) return { flameHtml:'', badgeHtml:'', styleAttr:'', hasFlame:false };
+  const styleAttr = `--flame-c1:${fd.c1};--flame-c2:${fd.c2};`;
+  let hash = 0;
+  const seed = String(seedStr||'');
+  for(let i=0;i<seed.length;i++) hash = (hash*31 + seed.charCodeAt(i)) >>> 0;
+  const flameHtml = `<span class="cm-avatar-flame-ring" aria-hidden="true">${avatarFlameRingSvg(fd, hash)}</span>`;
+  const badgeHtml = `<span class="cm-avatar-daycount" title="${toFa(s)} روز پشت‌سرهم">${toFa(s)}</span>`;
+  return { flameHtml, badgeHtml, styleAttr, hasFlame:true };
+}
 // One avatar per consecutive run of messages from the same sender — wraps around the
 // whole run so it lines up with the bottom of the last bubble (see #tab-chat .cm-avatar).
+// The avatar itself is now nested inside .cm-avatar-wrap along with the flame ring +
+// day-count badge (see avatarFlameOverlayHtml) — .cm-group-avatar just positions that
+// wrapper within the group column, unchanged from before.
 function chatGroupAvatarHtml(m){
-  return `<div class="cm-group-avatar">${chatAvatarHtml(m.username, m.user_id)}</div>`;
+  const streak = Number(m.streak);
+  // Was gated to streak>0 && premium — now shows for every sender: premium or not,
+  // and even a 0-day streak gets the faint "unlit" placeholder ring (see the `unlit`
+  // branch in avatarFlameDataFor/avatarFlameRingSvg) instead of nothing at all.
+  const ov = avatarFlameOverlayHtml(streak, m.user_id);
+  return `<div class="cm-group-avatar"><div class="cm-avatar-wrap${ov.hasFlame?' has-flame':''}"${ov.hasFlame?` style="${ov.styleAttr}"`:''}>${ov.flameHtml}${chatAvatarHtml(m.username, m.user_id)}${ov.badgeHtml}</div></div>`;
 }
 // Wraps a run of same-sender bubble HTML (already built via publicChatMsgHtml) in the
 // avatar+messages group shell. Own runs get the .own modifier so the CSS mirrors the
@@ -14700,6 +17530,126 @@ function scrollChatToBottom(smooth){
   if(btn) btn.addEventListener('click', ()=> scrollChatToBottom(true));
 })();
 
+/* ---------------- Chat header "more options" menu (⋮) ----------------
+   Small dropdown anchored under the three-dot button, opened next to the other header
+   pill-buttons (lock/rules/gender-filter) so it doesn't overlap anything. Only one entry
+   for now — in-chat search — but built as a menu so future actions can join it. */
+(function(){
+  const moreBtn = document.getElementById('chatMoreBtn');
+  const moreMenu = document.getElementById('chatMoreMenu');
+  const moreBackdrop = document.getElementById('chatMoreMenuBackdrop');
+  const searchOpenBtn = document.getElementById('chatSearchOpenBtn');
+  function closeMoreMenu(){
+    if(moreMenu) moreMenu.classList.remove('show');
+    if(moreBackdrop) moreBackdrop.classList.remove('show');
+  }
+  if(moreBtn) moreBtn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    if(!moreMenu) return;
+    const isShown = moreMenu.classList.contains('show');
+    closeMoreMenu();
+    if(!isShown){ moreMenu.classList.add('show'); if(moreBackdrop) moreBackdrop.classList.add('show'); }
+  });
+  if(moreBackdrop) moreBackdrop.addEventListener('click', closeMoreMenu);
+  if(searchOpenBtn) searchOpenBtn.addEventListener('click', ()=>{ closeMoreMenu(); openChatSearchBar(); });
+})();
+
+/* ---------------- In-chat keyword search ----------------
+   Client-side search over whatever messages are currently rendered in #chatMessages —
+   each bubble's data-raw (set in publicChatMsgHtml) already holds its exact source text,
+   so no extra API call is needed. Matches get a highlighted ring; the active one gets a
+   stronger ring and a smooth scroll-into-view. Basic Arabic/Persian letter-variant
+   normalization (ي/ك → ی/ک) so typing either form still finds the same messages. */
+let chatSearchMatches = [];
+let chatSearchActiveIdx = -1;
+function chatSearchNormalize(s){
+  return (s || '')
+    .replace(/[\u200c\u200f\u200e]/g, '')
+    .replace(/[يئ]/g, 'ی').replace(/ك/g, 'ک')
+    .toLowerCase();
+}
+function chatSearchClearHighlights(){
+  document.querySelectorAll('#chatMessages .csb-hit, #chatMessages .csb-hit-active').forEach(el=>{
+    el.classList.remove('csb-hit', 'csb-hit-active');
+  });
+}
+function chatSearchUpdateCount(){
+  const countEl = document.getElementById('chatSearchCount');
+  const prevBtn = document.getElementById('chatSearchPrevBtn');
+  const nextBtn = document.getElementById('chatSearchNextBtn');
+  const input = document.getElementById('chatSearchInput');
+  if(countEl){
+    if(chatSearchMatches.length === 0){
+      countEl.textContent = (input && input.value.trim()) ? 'نتیجه‌ای پیدا نشد' : '';
+    } else {
+      countEl.textContent = `${toFa(chatSearchActiveIdx + 1)} از ${toFa(chatSearchMatches.length)}`;
+    }
+  }
+  if(prevBtn) prevBtn.disabled = chatSearchMatches.length === 0;
+  if(nextBtn) nextBtn.disabled = chatSearchMatches.length === 0;
+}
+function chatSearchGoTo(idx){
+  if(chatSearchMatches.length === 0) return;
+  document.querySelectorAll('#chatMessages .csb-hit-active').forEach(el=> el.classList.remove('csb-hit-active'));
+  chatSearchActiveIdx = (idx + chatSearchMatches.length) % chatSearchMatches.length;
+  const el = chatSearchMatches[chatSearchActiveIdx];
+  el.classList.add('csb-hit-active');
+  el.scrollIntoView({behavior:'smooth', block:'center'});
+  chatSearchUpdateCount();
+}
+function chatSearchRun(){
+  chatSearchClearHighlights();
+  const input = document.getElementById('chatSearchInput');
+  const q = chatSearchNormalize(input ? input.value.trim() : '');
+  chatSearchMatches = [];
+  chatSearchActiveIdx = -1;
+  if(!q){ chatSearchUpdateCount(); return; }
+  document.querySelectorAll('#chatMessages .chat-msg').forEach(el=>{
+    const textEl = el.querySelector('.cm-text');
+    const raw = el.dataset.raw || (textEl ? textEl.textContent : '') || '';
+    if(chatSearchNormalize(raw).includes(q)){
+      el.classList.add('csb-hit');
+      chatSearchMatches.push(el);
+    }
+  });
+  chatSearchUpdateCount();
+  if(chatSearchMatches.length) chatSearchGoTo(0);
+}
+function openChatSearchBar(){
+  const bar = document.getElementById('chatSearchBar');
+  if(!bar) return;
+  bar.classList.add('show');
+  const input = document.getElementById('chatSearchInput');
+  chatSearchMatches = [];
+  chatSearchActiveIdx = -1;
+  chatSearchClearHighlights();
+  if(input){ input.value = ''; setTimeout(()=> input.focus(), 50); }
+  chatSearchUpdateCount();
+}
+function closeChatSearchBar(){
+  const bar = document.getElementById('chatSearchBar');
+  if(bar) bar.classList.remove('show');
+  chatSearchClearHighlights();
+  chatSearchMatches = [];
+  chatSearchActiveIdx = -1;
+  const input = document.getElementById('chatSearchInput');
+  if(input) input.value = '';
+}
+(function(){
+  const input = document.getElementById('chatSearchInput');
+  const closeBtn = document.getElementById('chatSearchCloseBtn');
+  const prevBtn = document.getElementById('chatSearchPrevBtn');
+  const nextBtn = document.getElementById('chatSearchNextBtn');
+  if(input) input.addEventListener('input', chatSearchRun);
+  if(input) input.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){ e.preventDefault(); chatSearchGoTo(chatSearchActiveIdx + (e.shiftKey ? -1 : 1)); }
+    else if(e.key === 'Escape'){ closeChatSearchBar(); }
+  });
+  if(closeBtn) closeBtn.addEventListener('click', closeChatSearchBar);
+  if(prevBtn) prevBtn.addEventListener('click', ()=> chatSearchGoTo(chatSearchActiveIdx - 1));
+  if(nextBtn) nextBtn.addEventListener('click', ()=> chatSearchGoTo(chatSearchActiveIdx + 1));
+})();
+
 function renderPublicChatMessages(rows){
   const wrap = document.getElementById('chatMessages');
   const blockedIds = new Set(getBlockedChatUsers().map(u=>u.id));
@@ -14734,6 +17684,12 @@ function renderPublicChatMessages(rows){
   wrap.innerHTML = html;
   lastChatMsgUserId = prevUserId;
   applyChatUserFilter();
+  applyChatGenderFilter();
+  // اگه نوارِ جستجو بازه، چون کل #chatMessages بازسازی شد (innerHTML) رفرنس‌های قبلیِ
+  // chatSearchMatches دیگه به گره‌هایِ زنده اشاره نمی‌کنن — دوباره اجراش می‌کنیم که
+  // های‌لایت‌ها با پیام‌هایِ تازه‌رندرشده هماهنگ بمونن.
+  const chatSearchBarEl = document.getElementById('chatSearchBar');
+  if(chatSearchBarEl && chatSearchBarEl.classList.contains('show')) chatSearchRun();
   wrap.scrollTop = wrap.scrollHeight;
   chatUnseenCount = 0;
   updateChatScrollDownBadge();
@@ -14979,8 +17935,16 @@ async function loadPublicChatMessages(){
     // Only the columns the chat UI actually renders — select('*') was pulling every
     // column on the table over the wire for up to 150 rows on every session load.
     let { data, error } = await sb.from('messages')
-      .select('id,user_id,username,content,created_at,is_owner,is_admin,admin_title,streak,premium,media_path,media_type')
+      .select('id,user_id,username,content,created_at,is_owner,is_admin,admin_title,streak,premium,media_path,media_type,sender_gender,sender_audience')
       .order('created_at', {ascending:true}).limit(150);
+    if(error && /sender_gender|sender_audience/i.test(error.message || '')){
+      // chat-gender-filter-supabase-schema.sql هنوز رو این پروژه اجرا نشده — بدونِ این دو
+      // ستون بخون تا خودِ چت لود بشه؛ فیلترِ جنسیت فقط تا اجرایِ migration غیرفعال می‌مونه
+      // (همه‌چی مثلِ قبل، تویِ دسته‌ی «هردو» دیده می‌شه).
+      ({ data, error } = await sb.from('messages')
+        .select('id,user_id,username,content,created_at,is_owner,is_admin,admin_title,streak,premium,media_path,media_type')
+        .order('created_at', {ascending:true}).limit(150));
+    }
     if(error && /media_path|media_type/i.test(error.message || '')){
       // media_path/media_type haven't been added on this Supabase project yet
       // (chat-media-supabase-schema.sql not run) — fall back so the rest of the
@@ -15034,6 +17998,7 @@ async function loadPublicChatMessages(){
           if(wrap.querySelector('.chat-empty-msg')) wrap.innerHTML = '';
           appendPublicChatMessage(payload.new);
           applyChatUserFilter();
+          applyChatGenderFilter();
           if(isOwnMsg || wasNearBottom){
             // Already at the bottom (or it's our own message going out): keep the classic
             // auto-scroll feel, exactly like before.
@@ -15320,6 +18285,89 @@ function clearChatUserFilter(){
 const chatUserFilterClearBtn = document.getElementById('chatUserFilterClearBtn');
 if(chatUserFilterClearBtn) chatUserFilterClearBtn.addEventListener('click', clearChatUserFilter);
 
+/* ---------------- فیلترِ جنسیتِ چت (فقط دختر / فقط پسر / هردو) ----------------
+   قاعده: کسی که فیلترش رو «هردو» گذاشته، پیامش هم تو دسته‌ی «هردو» دیده می‌شه هم تو
+   دسته‌ی هم‌جنسِ خودش (چون هنوز خودش رو محدود نکرده)؛ ولی کسی که فیلترش رو رویِ «فقط
+   دختر»/«فقط پسر» گذاشته، پیامش دیگه اصلاً تو دسته‌ی «هردو» دیده نمی‌شه — فقط برایِ
+   بیننده‌هایِ هم‌جنسِ خودش. یعنی:
+     • بیننده‌یِ «فقط دختر»/«فقط پسر»: پیامِ هر فرستنده‌ای با همون جنسیت رو می‌بینه، فرقی
+       نداره خودِ فرستنده فیلترش «هردو» بوده یا هم‌جنسِ محدود.
+     • بیننده‌یِ «هردو»: فقط پیامِ فرستنده‌هایی که خودشون هنوز رویِ «هردو» موندن رو می‌بینه —
+       نه فرستنده‌ای که خودش رو به یه جنسیتِ خاص محدود کرده.
+   sender_gender/sender_audience رویِ خودِ ردیفِ پیام (data-gender/data-audience، بالاتر
+   تویِ publicChatMsgHtml) از تریگرِ سمتِ سرور میان (chat-gender-filter-supabase-schema.sql)،
+   نه از کلاینت — پس اینجا فقط مقایسه‌ست، نه تصمیم‌گیریِ اعتمادی.
+   لیدربورد و بازی‌ها (حکم/اسم‌فامیل/دابل) عمداً به این فیلتر کاری ندارن — فقط خودِ چت. */
+function chatMsgMatchesGenderFilter(msgGender, msgAudience){
+  if(chatGenderFilter === 'both') return msgAudience === 'both';
+  return msgGender === chatGenderFilter;
+}
+function applyChatGenderFilter(){
+  const wrap = document.getElementById('chatMessages');
+  if(!wrap) return;
+  wrap.querySelectorAll('.chat-msg').forEach(el=>{
+    const match = chatMsgMatchesGenderFilter(el.dataset.gender || '', el.dataset.audience || 'both');
+    el.classList.toggle('cm-gender-filtered-out', !match);
+  });
+  // عیناً هم‌الگو با applyChatUserFilter: هر .cm-group یه فرستنده‌ی ثابت داره، پس یا کامل
+  // دیده می‌شه یا کامل مخفی — هیچ‌وقت نصفه‌نیمه.
+  wrap.querySelectorAll('.cm-group').forEach(g=>{
+    g.classList.toggle('cm-gender-filtered-out', !g.querySelector('.chat-msg:not(.cm-gender-filtered-out)'));
+  });
+}
+// برچسبِ دکمه‌ی هدرِ چت رو با مقدارِ فعلیِ chatGenderFilter هماهنگ نگه می‌داره — هم موقعِ
+// لاگین (بعدِ خوندنِ profile.chat_gender_filter)، هم بعدِ هر تغییرِ دستیِ کاربر.
+function renderChatGenderFilterBtn(){
+  const btn = document.getElementById('chatGenderFilterBtn');
+  if(!btn) return;
+  const label = chatGenderFilter === 'female' ? 'فقط دختر' : chatGenderFilter === 'male' ? 'فقط پسر' : 'هردو';
+  const labelEl = btn.querySelector('.cpb-label');
+  if(labelEl) labelEl.textContent = label;
+  btn.classList.toggle('chat-gender-filter-active', chatGenderFilter !== 'both');
+  document.querySelectorAll('#chatGenderFilterMenu .cgf-option').forEach(opt=>{
+    opt.classList.toggle('active', opt.dataset.value === chatGenderFilter);
+  });
+}
+// انتخابِ کاربر رو هم رویِ profiles.chat_gender_filter ذخیره می‌کنه (چون همین یه ستون هم
+// رویِ خودِ من (چی می‌بینم) هم رویِ پیام‌هایِ آینده‌ی من (کدوم دسته می‌رن، از طریقِ تریگر)
+// اثر می‌ذاره) و هم بلافاصله رویِ پیام‌هایِ همین صفحه اعمالش می‌کنه — نیازی به رفچِ دوباره‌ی
+// پیام‌ها نیست چون sender_gender/sender_audienceِ همه‌شون از قبل رویِ DOM هست.
+async function setChatGenderFilter(value){
+  try{
+    if(!['female','male','both'].includes(value) || !sb || !publicChatUser) return;
+    if(chatGenderFilter === value){ closeChatGenderFilterMenu(); return; }
+    chatGenderFilter = value; // optimistic — اگه ذخیره‌ی سرور شکست بخوره، لاگینِ بعدی خودش درستش می‌کنه
+    renderChatGenderFilterBtn();
+    applyChatGenderFilter();
+    closeChatGenderFilterMenu();
+    const { error } = await sb.from('profiles').update({ chat_gender_filter: value }).eq('id', publicChatUser.id);
+    if(error) console.warn('setChatGenderFilter save failed', error);
+  }catch(e){ console.warn('setChatGenderFilter failed', e); }
+}
+function openChatGenderFilterMenu(){
+  const menu = document.getElementById('chatGenderFilterMenu');
+  const backdrop = document.getElementById('chatGenderFilterBackdrop');
+  if(menu) menu.classList.add('show');
+  if(backdrop) backdrop.classList.add('show');
+}
+function closeChatGenderFilterMenu(){
+  const menu = document.getElementById('chatGenderFilterMenu');
+  const backdrop = document.getElementById('chatGenderFilterBackdrop');
+  if(menu) menu.classList.remove('show');
+  if(backdrop) backdrop.classList.remove('show');
+}
+(function(){
+  const btn = document.getElementById('chatGenderFilterBtn');
+  const backdrop = document.getElementById('chatGenderFilterBackdrop');
+  const menu = document.getElementById('chatGenderFilterMenu');
+  if(btn) btn.addEventListener('click', openChatGenderFilterMenu);
+  if(backdrop) backdrop.addEventListener('click', closeChatGenderFilterMenu);
+  if(menu) menu.addEventListener('click', e=>{
+    const opt = e.target.closest('.cgf-option');
+    if(opt) setChatGenderFilter(opt.dataset.value);
+  });
+})();
+
 /* ---- floating action menu shown after a long-press ---- */
 let cmActionMenuTargetEl = null;
 function closeChatMsgMenu(){
@@ -15341,7 +18389,7 @@ function openChatMsgMenu(el){
   // Editing is only offered for the sender's own plain messages — not daily-report cards,
   // which are structured/generated content rather than free text.
   const canEdit = own && el.dataset.report !== '1';
-  let html = `<button type="button" data-act="copy">${ci('copy')} کپی متن پیام${(storeData.premium || isInTrial()) ? '' : ' '+ci('lock')}</button>`;
+  let html = `<button type="button" data-act="copy">${ci('copy')} کپی متن پیام</button>`;
   html += `<button type="button" data-act="filter">${ci('search')} فقط پیام‌های ${escapeHtml(username)}</button>`;
   if(canEdit) html += `<button type="button" data-act="edit">${ci('edit')} ویرایش پیام</button>`;
   if(isChatAdmin){
@@ -15393,7 +18441,7 @@ if(cmActionMenu) cmActionMenu.addEventListener('click', e=>{
   const msgId = el.dataset.msgId;
   const userId = el.dataset.userId;
   const username = el.dataset.username;
-  if(btn.dataset.act === 'copy'){ if(requirePremium()) copyChatMessageText(el); }
+  if(btn.dataset.act === 'copy'){ copyChatMessageText(el); }
   else if(btn.dataset.act === 'edit') startEditChatMessage(el);
   else if(btn.dataset.act === 'filter') setChatUserFilter(userId, username);
   else if(btn.dataset.act === 'pin') pinChatMessage(el);
@@ -16037,7 +19085,7 @@ function chatMediaPublicUrl(path){
   if(!path || !sb) return '';
   try{ return sb.storage.from(CHAT_MEDIA_BUCKET).getPublicUrl(path).data.publicUrl; }catch(err){ return ''; }
 }
-const FREE_CHAT_DAILY_LIMIT = 10;
+const FREE_CHAT_DAILY_LIMIT = 30;
 function getFreeChatMsgCountToday(){
   const rec = storeData.chatDailyCount;
   if(!rec || rec.date !== todayKeyLocal()) return 0;
@@ -16599,9 +19647,9 @@ function updateReportBtnState(){
     if(hint) hint.textContent = 'ارسال گزارش کار فقط از ساعت ۲۰ تا ۲۴ فعاله';
     return;
   }
-  if(!(storeData.premium || isInTrial()) && storeData.taskReportSentOnce){
+  if(!(storeData.premium || isInTrial() || isInFirstReportWeek()) && storeData.taskReportSentOnce){
     btn.disabled = true;
-    if(hint) hint.textContent = 'ارسال گزارش کار تو نسخه‌ی رایگان فقط یک‌بار امکان‌پذیره — برای ارسال نامحدود، پرمیوم شو';
+    if(hint) hint.textContent = 'هفته‌ی اولِ رایگانت برای گزارش کار تموم شده — برای ارسال نامحدود، پرمیوم شو';
     return;
   }
   const { doneCount, total } = getTaskReportData();
@@ -16616,8 +19664,8 @@ async function sendTaskReport(){
   if(isCurrentlyMuted()){ showToast('فعلاً ساکتت کرده‌ن — نمی‌تونی گزارش کار بفرستی', 'error'); return; }
   if(isChatLockedForMe()){ showToast('چت عمومی فعلاً توسط مالک بسته شده', 'error'); return; }
   if(!isReportModeActive() && !isAppOwner){ showToast('ارسال گزارش کار فقط از ساعت ۲۰ تا ۲۴ فعاله', 'error'); return; }
-  if(!(storeData.premium || isInTrial()) && storeData.taskReportSentOnce){
-    showToast('ارسال گزارش کار تو نسخه‌ی رایگان فقط یک‌بار امکان‌پذیره', 'error');
+  if(!(storeData.premium || isInTrial() || isInFirstReportWeek()) && storeData.taskReportSentOnce){
+    showToast('هفته‌ی اولِ رایگانت برای گزارش کار تموم شده', 'error');
     openPremiumOverlay();
     return;
   }
@@ -16998,11 +20046,11 @@ const MUSCLE_LABELS = {chest:'سینه', back:'پشت', shoulders:'شانه', bi
 const FOCUS_TO_MUSCLES = {chest:['chest'], back:['back'], shoulders:['shoulders'], arms:['biceps','triceps'], legs:['legs'], glutes:['glutes'], abs:['abs']};
 const MUSCLE_EXERCISES = {
   chest: {
-    gym:[{name:'پرس سینه با هالتر', sets:'۴×۸-۱۰', type:'push'},{name:'پرس بالاسینه با دمبل', sets:'۳×۱۰-۱۲', type:'push'},{name:'قفسه سینه با کراس‌اور', sets:'۳×۱۲-۱۵', type:'push'},{name:'شنا سوئدی (فینیشر)', sets:'۲×حداکثر', type:'push'},{name:'قفسه سینه با دمبل', sets:'۳×۱۲-۱۵', type:'push'},{name:'پرس بالاسینه با هالتر', sets:'۴×۸-۱۰', type:'push'},{name:'پرس سینه با دستگاه', sets:'۳×۱۰-۱۲', type:'push'},{name:'پک دک (دستگاه قفسه سینه)', sets:'۳×۱۲-۱۵', type:'push'},{name:'پرس سینه با دستگاه اسمیت', sets:'۴×۸-۱۰', type:'push'},{name:'کراس‌اور پایین به بالا', sets:'۳×۱۲-۱۵', type:'push'},{name:'پرس سینه با دمبل تخت', sets:'۴×۸-۱۰', type:'push'},{name:'پرس سینه شیب معکوس با هالتر', sets:'۴×۸-۱۰', type:'push'},{name:'پرس سینه با کتل‌بل (فلور پرس)', sets:'۳×۱۰-۱۲', type:'push'},{name:'دیپ سینه (متمایل به جلو)', sets:'۳×۸-۱۲', type:'push'},{name:'پرس سینه با دستگاه هامر', sets:'۳×۱۰-۱۲', type:'push'}],
+    gym:[{name:'پرس سینه با هالتر', sets:'۴×۸-۱۰', type:'push'},{name:'پرس بالاسینه با دمبل', sets:'۳×۱۰-۱۲', type:'push'},{name:'قفسه سینه با کراس‌اور', sets:'۳×۱۲-۱۵', type:'push'},{name:'شنا سوئدی (فینیشر)', sets:'۲×حداکثر', type:'push'},{name:'قفسه سینه با دمبل', sets:'۳×۱۲-۱۵', type:'push'},{name:'پرس بالاسینه با هالتر', sets:'۴×۸-۱۰', type:'push'},{name:'پرس سینه با دستگاه', sets:'۳×۱۰-۱۲', type:'push'},{name:'پک دک (دستگاه قفسه سینه)', sets:'۳×۱۲-۱۵', type:'push'},{name:'پرس سینه با دستگاه اسمیت', sets:'۴×۸-۱۰', type:'push'},{name:'کراس‌اور پایین به بالا', sets:'۳×۱۲-۱۵', type:'push'},{name:'پرس سینه با دمبل تخت', sets:'۴×۸-۱۰', type:'push'},{name:'پرس سینه شیب معکوس با هالتر', sets:'۴×۸-۱۰', type:'push'},{name:'پرس سینه با کتل‌بل (فلور پرس)', sets:'۳×۱۰-۱۲', type:'push'},{name:'دیپ سینه (متمایل به جلو)', sets:'۳×۸-۱۲', type:'push'},{name:'پرس سینه با دستگاه پرس چست', sets:'۳×۱۰-۱۲', type:'push'}],
     home:[{name:'شنا سوئدی', sets:'۴×۱۰-۱۵', type:'push'},{name:'شنا سوئدی شیب‌دار (پا بالا)', sets:'۳×۱۰-۱۲', type:'push'},{name:'شنا سوئدی دست باز', sets:'۳×۱۰-۱۵', type:'push'},{name:'شنا سوئدی آهسته (۴ ثانیه پایین)', sets:'۲×۸-۱۰', type:'push'}]
   },
   back: {
-    gym:[{name:'زیربغل هالتر خم', sets:'۴×۸-۱۰', type:'pull'},{name:'لت پول‌داون یا بارفیکس', sets:'۳×۸-۱۰', type:'pull'},{name:'زیربغل سیم‌کش نشسته', sets:'۳×۱۰-۱۲', type:'pull'},{name:'فیس‌پول (زیربغل بالا)', sets:'۳×۱۲-۱۵', type:'pull'},{name:'روئینگ تی‌بار', sets:'۴×۸-۱۰', type:'pull'},{name:'روئینگ دمبل تک‌دست', sets:'۳×۱۰-۱۲ هر دست', type:'pull'},{name:'پول‌اور با دمبل', sets:'۳×۱۲-۱۵', type:'pull'},{name:'لت پول‌داون دست باز', sets:'۳×۱۰-۱۲', type:'pull'},{name:'روئینگ سیم‌کش تک‌دست', sets:'۳×۱۰-۱۲ هر دست', type:'pull'},{name:'لت پول‌داون دست معکوس', sets:'۳×۱۰-۱۲', type:'pull'},{name:'میگ رو (Meadows Row) با هالتر', sets:'۳×۱۰-۱۲ هر طرف', type:'pull'},{name:'روئینگ کتل‌بل تک‌دست', sets:'۳×۱۰-۱۲ هر دست', type:'pull'},{name:'زیربغل سیم‌کش با میله راست', sets:'۳×۱۰-۱۲', type:'pull'},{name:'روئینگ با دستگاه هامر', sets:'۳×۱۰-۱۲', type:'pull'},{name:'زیربغل با دستگاه پولاور', sets:'۳×۱۲-۱۵', type:'pull'}],
+    gym:[{name:'زیربغل هالتر خم', sets:'۴×۸-۱۰', type:'pull'},{name:'لت پول‌داون یا بارفیکس', sets:'۳×۸-۱۰', type:'pull'},{name:'زیربغل سیم‌کش نشسته', sets:'۳×۱۰-۱۲', type:'pull'},{name:'فیس‌پول (زیربغل بالا)', sets:'۳×۱۲-۱۵', type:'pull'},{name:'روئینگ تی‌بار', sets:'۴×۸-۱۰', type:'pull'},{name:'روئینگ دمبل تک‌دست', sets:'۳×۱۰-۱۲ هر دست', type:'pull'},{name:'پول‌اور با دمبل', sets:'۳×۱۲-۱۵', type:'pull'},{name:'لت پول‌داون دست باز', sets:'۳×۱۰-۱۲', type:'pull'},{name:'روئینگ سیم‌کش تک‌دست', sets:'۳×۱۰-۱۲ هر دست', type:'pull'},{name:'لت پول‌داون دست معکوس', sets:'۳×۱۰-۱۲', type:'pull'},{name:'روئینگ تک‌طرفه با هالتر (نبش دیوار)', sets:'۳×۱۰-۱۲ هر طرف', type:'pull'},{name:'روئینگ کتل‌بل تک‌دست', sets:'۳×۱۰-۱۲ هر دست', type:'pull'},{name:'زیربغل سیم‌کش با میله راست', sets:'۳×۱۰-۱۲', type:'pull'},{name:'روئینگ با دستگاه پارویی نشسته', sets:'۳×۱۰-۱۲', type:'pull'},{name:'زیربغل با دستگاه پولاور', sets:'۳×۱۲-۱۵', type:'pull'}],
     home:[{name:'سوپرمن', sets:'۳×۱۲-۱۵', type:'hinge'},{name:'زیربغل با کش مقاومتی', sets:'۴×۱۲-۱۵', type:'pull'},{name:'بارفیکس (اگه میله در دسترسه)', sets:'۳×حداکثر', type:'pull'},{name:'زیربغل تک‌دست با وسیله‌ی سنگین خونگی', sets:'۳×۱۰-۱۲', type:'pull'}]
   },
   shoulders: {
@@ -17018,15 +20066,15 @@ const MUSCLE_EXERCISES = {
     home:[{name:'دیپ روی صندلی', sets:'۴×۱۰-۱۵', type:'extend'},{name:'شنا سوئدی الماسی', sets:'۳×۸-۱۲', type:'push'},{name:'پشت‌بازو با کش مقاومتی', sets:'۳×۱۲-۱۵', type:'extend'}]
   },
   legs: {
-    gym:[{name:'اسکات با هالتر', sets:'۴×۸-۱۰', type:'squat'},{name:'پرس پا', sets:'۳×۱۰-۱۲', type:'squat'},{name:'ددلیفت رومانیایی', sets:'۳×۸-۱۰', type:'hinge'},{name:'جلو پا و پشت پا دستگاه', sets:'۳×۱۲', type:'squat'},{name:'ساق پا ایستاده', sets:'۳×۱۵-۲۰', type:'calf'},{name:'جلو پا دستگاه', sets:'۳×۱۲-۱۵', type:'squat'},{name:'هاگ اسکات دستگاه', sets:'۴×۸-۱۰', type:'squat'},{name:'لانج راه‌رفتنی با دمبل', sets:'۳×۱۲ هر پا', type:'squat'},{name:'پرس پا تک‌پا', sets:'۳×۱۰-۱۲ هر پا', type:'squat'},{name:'اسکات با دستگاه اسمیت', sets:'۴×۸-۱۰', type:'squat'},{name:'پشت پا دستگاه نشسته', sets:'۳×۱۰-۱۲', type:'curl'},{name:'ساق پا نشسته', sets:'۴×۱۵-۲۰', type:'calf'},{name:'ددلیفت با هالتر (کلاسیک)', sets:'۴×۵-۸', type:'hinge'},{name:'اسکات جلو با هالتر', sets:'۴×۶-۸', type:'squat'},{name:'اسکات گابلت با کتل‌بل', sets:'۴×۱۰-۱۲', type:'squat'},{name:'لانج با کتل‌بل', sets:'۳×۱۰ هر پا', type:'squat'},{name:'ددلیفت با میله تراپ‌بار', sets:'۴×۶-۸', type:'hinge'},{name:'لانج پشت‌سر با دمبل', sets:'۳×۱۰ هر پا', type:'squat'},{name:'پرس ساق پا با دستگاه پرس پا', sets:'۴×۱۵-۲۰', type:'calf'}],
+    gym:[{name:'اسکات با هالتر', sets:'۴×۸-۱۰', type:'squat'},{name:'پرس پا', sets:'۳×۱۰-۱۲', type:'squat'},{name:'ددلیفت رومانیایی', sets:'۳×۸-۱۰', type:'hinge'},{name:'جلو پا و پشت پا دستگاه', sets:'۳×۱۲', type:'squat'},{name:'ساق پا ایستاده', sets:'۳×۱۵-۲۰', type:'calf'},{name:'جلو پا دستگاه', sets:'۳×۱۲-۱۵', type:'squat'},{name:'هاگ اسکات دستگاه', sets:'۴×۸-۱۰', type:'squat'},{name:'لانج راه‌رفتنی با دمبل', sets:'۳×۱۲ هر پا', type:'squat'},{name:'پرس پا تک‌پا', sets:'۳×۱۰-۱۲ هر پا', type:'squat'},{name:'اسکات با دستگاه اسمیت', sets:'۴×۸-۱۰', type:'squat'},{name:'پشت پا دستگاه نشسته', sets:'۳×۱۰-۱۲', type:'curl'},{name:'ساق پا نشسته', sets:'۴×۱۵-۲۰', type:'calf'},{name:'ددلیفت با هالتر (کلاسیک)', sets:'۴×۵-۸', type:'hinge'},{name:'اسکات جلو با هالتر', sets:'۴×۶-۸', type:'squat'},{name:'اسکات گابلت با کتل‌بل', sets:'۴×۱۰-۱۲', type:'squat'},{name:'لانج با کتل‌بل', sets:'۳×۱۰ هر پا', type:'squat'},{name:'پول-ت-رو با سیم‌کش', sets:'۳×۱۲-۱۵', type:'hinge'},{name:'لانج پشت‌سر با دمبل', sets:'۳×۱۰ هر پا', type:'squat'},{name:'پرس ساق پا با دستگاه پرس پا', sets:'۴×۱۵-۲۰', type:'calf'}],
     home:[{name:'اسکات بدون وزنه', sets:'۴×۱۵-۲۰', type:'squat'},{name:'لانج', sets:'۳×۱۲ هر پا', type:'squat'},{name:'اسکات بلغاری با صندلی', sets:'۳×۱۰ هر پا', type:'squat'},{name:'ساق پا ایستاده', sets:'۴×۲۰', type:'calf'},{name:'لانج معکوس بدون وزنه', sets:'۳×۱۲ هر پا', type:'squat'}]
   },
   glutes: {
-    gym:[{name:'هیپ تراست با هالتر', sets:'۴×۱۰-۱۲', type:'hinge'},{name:'ددلیفت رومانیایی', sets:'۳×۸-۱۰', type:'hinge'},{name:'کیک‌بک با سیم‌کش', sets:'۳×۱۲ هر پا', type:'hinge'},{name:'پابداکتور دستگاه', sets:'۳×۱۵-۲۰', type:'hinge'},{name:'ددلیفت سومو', sets:'۴×۶-۸', type:'hinge'},{name:'استپ‌آپ با دمبل', sets:'۳×۱۰ هر پا', type:'hinge'},{name:'هیپ تراست با دستگاه', sets:'۴×۱۰-۱۲', type:'hinge'},{name:'بک اکستنشن روی نیمکت رومی', sets:'۳×۱۲-۱۵', type:'hinge'},{name:'کتل‌بل سوئینگ', sets:'۴×۱۵-۲۰', type:'hinge'},{name:'اکستنشن کمر با دستگاه فیله کمر', sets:'۳×۱۲-۱۵', type:'hinge'},{name:'پل باسن با هالتر تک‌پا', sets:'۳×۱۰-۱۲ هر پا', type:'hinge'},{name:'استپ‌آپ روی جعبه با کتل‌بل', sets:'۳×۱۰ هر پا', type:'hinge'},{name:'کیک‌بک با دستگاه گلوت', sets:'۳×۱۲-۱۵ هر پا', type:'hinge'}],
+    gym:[{name:'هیپ تراست با هالتر', sets:'۴×۱۰-۱۲', type:'hinge'},{name:'ددلیفت رومانیایی', sets:'۳×۸-۱۰', type:'hinge'},{name:'کیک‌بک با سیم‌کش', sets:'۳×۱۲ هر پا', type:'hinge'},{name:'پابداکتور دستگاه', sets:'۳×۱۵-۲۰', type:'hinge'},{name:'ددلیفت سومو', sets:'۴×۶-۸', type:'hinge'},{name:'استپ‌آپ با دمبل', sets:'۳×۱۰ هر پا', type:'hinge'},{name:'هیپ تراست با دستگاه', sets:'۴×۱۰-۱۲', type:'hinge'},{name:'بک اکستنشن روی نیمکت رومی', sets:'۳×۱۲-۱۵', type:'hinge'},{name:'کتل‌بل سوئینگ', sets:'۴×۱۵-۲۰', type:'hinge'},{name:'اکستنشن کمر با دستگاه فیله کمر', sets:'۳×۱۲-۱۵', type:'hinge'},{name:'پل باسن با هالتر تک‌پا', sets:'۳×۱۰-۱۲ هر پا', type:'hinge'},{name:'استپ‌آپ روی جعبه با کتل‌بل', sets:'۳×۱۰ هر پا', type:'hinge'},{name:'کیک‌بک زانو زده با کش', sets:'۳×۱۵ هر پا', type:'hinge'}],
     home:[{name:'پل باسن (Glute Bridge)', sets:'۴×۱۵-۲۰', type:'hinge'},{name:'لانج بلغاری با صندلی', sets:'۳×۱۲ هر پا', type:'squat'},{name:'پل باسن تک‌پا', sets:'۳×۱۲ هر پا', type:'hinge'},{name:'ددلیفت تک‌پا بدون وزنه', sets:'۳×۱۰-۱۲ هر پا', type:'hinge'},{name:'ددلیفت رومانیایی با وزنه‌ی خانگی', sets:'۳×۱۲-۱۵', type:'hinge'}]
   },
   abs: {
-    gym:[{name:'کرانچ با کابل', sets:'۳×۱۵', type:'core'},{name:'پلانک', sets:'۳×۴۵ ثانیه', type:'core'},{name:'بالا آوردن پا آویزان', sets:'۳×۱۲', type:'core'},{name:'چرخش تنه با سیم‌کش (وودچاپر)', sets:'۳×۱۲ هر طرف', type:'core'},{name:'چرخ شکم (اب ویل)', sets:'۳×۸-۱۲', type:'core'},{name:'زیر شکم دستگاه', sets:'۳×۱۲-۱۵', type:'core'},{name:'کرانچ معکوس', sets:'۳×۱۵', type:'core'},{name:'پلانک جانبی', sets:'۳×۳۰-۴۵ ثانیه هر طرف', type:'core'},{name:'کرانچ دستگاه (Ab Crunch Machine)', sets:'۳×۱۵', type:'core'},{name:'چرخش روسی با دیسک وزنه', sets:'۳×۲۰ هر طرف', type:'core'},{name:'لمبرینگ (خم جانبی) با دمبل', sets:'۳×۱۵ هر طرف', type:'core'},{name:'بالا آوردن زانو روی دستگاه خلبانی', sets:'۳×۱۲-۱۵', type:'core'},{name:'بالا آوردن پا روی صندلی رومی', sets:'۳×۱۲-۱۵', type:'core'},{name:'پلانک با وزنه اضافه', sets:'۳×۳۰-۴۵ ثانیه', type:'core'},{name:'چرخش تنه با دستگاه توری تویست', sets:'۳×۱۵ هر طرف', type:'core'}],
+    gym:[{name:'کرانچ با کابل', sets:'۳×۱۵', type:'core'},{name:'پلانک', sets:'۳×۴۵ ثانیه', type:'core'},{name:'بالا آوردن پا آویزان', sets:'۳×۱۲', type:'core'},{name:'چرخش تنه با سیم‌کش (وودچاپر)', sets:'۳×۱۲ هر طرف', type:'core'},{name:'چرخ شکم (اب ویل)', sets:'۳×۸-۱۲', type:'core'},{name:'زیر شکم دستگاه', sets:'۳×۱۲-۱۵', type:'core'},{name:'کرانچ معکوس', sets:'۳×۱۵', type:'core'},{name:'پلانک جانبی', sets:'۳×۳۰-۴۵ ثانیه هر طرف', type:'core'},{name:'کرانچ دستگاه (Ab Crunch Machine)', sets:'۳×۱۵', type:'core'},{name:'چرخش روسی با دیسک وزنه', sets:'۳×۲۰ هر طرف', type:'core'},{name:'لمبرینگ (خم جانبی) با دمبل', sets:'۳×۱۵ هر طرف', type:'core'},{name:'بالا آوردن زانو روی دستگاه خلبانی', sets:'۳×۱۲-۱۵', type:'core'},{name:'بالا آوردن پا روی صندلی رومی', sets:'۳×۱۲-۱۵', type:'core'},{name:'پلانک با وزنه اضافه', sets:'۳×۳۰-۴۵ ثانیه', type:'core'},{name:'کرانچ دوچرخه', sets:'۳×۲۰ هر طرف', type:'core'}],
     home:[{name:'پلانک', sets:'۳×۳۰-۶۰ ثانیه', type:'core'},{name:'کرانچ', sets:'۳×۱۵-۲۰', type:'core'},{name:'بالا آوردن پا (Leg Raise)', sets:'۳×۱۲-۱۵', type:'core'},{name:'کوهنورد (Mountain Climber)', sets:'۳×۳۰-۴۰ ثانیه', type:'core'}]
   }
 };
@@ -17163,7 +20211,7 @@ const EXERCISE_MUSCLE_MAP = {
   "کراس‌اور پایین به بالا": [{m:"pec",s:95},{m:"delt_front",s:30}],
   "روئینگ سیم‌کش تک‌دست": [{m:"lats",s:85},{m:"rhomboids",s:55},{m:"biceps_br",s:35},{m:"teres_major",s:30},{m:"traps",s:20}],
   "لت پول‌داون دست معکوس": [{m:"lats",s:95},{m:"biceps_br",s:60},{m:"teres_major",s:40},{m:"rhomboids",s:25}],
-  "میگ رو (Meadows Row) با هالتر": [{m:"lats",s:85},{m:"rhomboids",s:55},{m:"traps",s:35},{m:"biceps_br",s:30},{m:"erectors",s:20}],
+  "روئینگ تک‌طرفه با هالتر (نبش دیوار)": [{m:"lats",s:85},{m:"rhomboids",s:55},{m:"traps",s:35},{m:"biceps_br",s:30},{m:"erectors",s:20}],
   "نشر جانب دستگاه": [{m:"delt_mid",s:100},{m:"delt_front",s:15}],
   "پرس سرشانه اسمیت": [{m:"delt_front",s:90},{m:"delt_mid",s:55},{m:"triceps",s:45},{m:"traps",s:25}],
   "جلوبازو دمبل روی نیمکت شیب‌دار": [{m:"biceps_br",s:100},{m:"brachialis",s:30},{m:"forearm_flex",s:20}],
@@ -17201,13 +20249,13 @@ const EXERCISE_MUSCLE_MAP = {
   "پشت‌بازو سیم‌کش معکوس تک‌دست": [{m:"triceps",s:95},{m:"forearm_ext",s:20}],
   "اسکات گابلت با کتل‌بل": [{m:"quad_rf",s:85},{m:"quad_vl",s:80},{m:"quad_vm",s:80},{m:"glute_max",s:55},{m:"abs_mid",s:15}],
   "لانج با کتل‌بل": [{m:"quad_rf",s:80},{m:"quad_vl",s:75},{m:"quad_vm",s:75},{m:"glute_max",s:60},{m:"ham_st",s:20}],
-  "ددلیفت با میله تراپ‌بار": [{m:"glute_max",s:80},{m:"ham_bf",s:70},{m:"ham_st",s:70},{m:"ham_sm",s:70},{m:"quad_rf",s:50},{m:"erectors",s:50},{m:"traps",s:20}],
+  "پول-ت-رو با سیم‌کش": [{m:"glute_max",s:75},{m:"ham_bf",s:65},{m:"ham_st",s:65},{m:"ham_sm",s:65},{m:"erectors",s:40}],
   "کتل‌بل سوئینگ": [{m:"glute_max",s:100},{m:"ham_bf",s:60},{m:"ham_st",s:60},{m:"ham_sm",s:60},{m:"erectors",s:35},{m:"delt_mid",s:15}],
   "اکستنشن کمر با دستگاه فیله کمر": [{m:"erectors",s:100},{m:"glute_max",s:40},{m:"ham_bf",s:20},{m:"ham_st",s:20}],
   "بالا آوردن زانو روی دستگاه خلبانی": [{m:"abs_lower",s:100},{m:"hip_flexors",s:60},{m:"abs_mid",s:30},{m:"forearm_flex",s:15}],
   "دیپ سینه (متمایل به جلو)": [{m:"pec",s:90},{m:"triceps",s:50},{m:"delt_front",s:30}],
-  "پرس سینه با دستگاه هامر": [{m:"pec",s:95},{m:"triceps",s:55},{m:"delt_front",s:40}],
-  "روئینگ با دستگاه هامر": [{m:"lats",s:90},{m:"rhomboids",s:55},{m:"traps",s:45},{m:"teres_major",s:35},{m:"biceps_br",s:30}],
+  "پرس سینه با دستگاه پرس چست": [{m:"pec",s:95},{m:"triceps",s:55},{m:"delt_front",s:40}],
+  "روئینگ با دستگاه پارویی نشسته": [{m:"lats",s:90},{m:"rhomboids",s:55},{m:"traps",s:45},{m:"teres_major",s:35},{m:"biceps_br",s:30}],
   "زیربغل با دستگاه پولاور": [{m:"lats",s:90},{m:"teres_major",s:40},{m:"serratus",s:25}],
   "نشر جلو با دمبل": [{m:"delt_front",s:100},{m:"pec",s:15}],
   "چرخش خارجی شانه با سیم‌کش": [{m:"infraspinatus",s:90},{m:"teres_minor",s:60},{m:"delt_rear",s:20}],
@@ -17221,10 +20269,10 @@ const EXERCISE_MUSCLE_MAP = {
   "پرس ساق پا با دستگاه پرس پا": [{m:"gastroc_med",s:90},{m:"gastroc_lat",s:85},{m:"soleus",s:60}],
   "پل باسن با هالتر تک‌پا": [{m:"glute_max",s:100},{m:"ham_bf",s:30},{m:"ham_st",s:30}],
   "استپ‌آپ روی جعبه با کتل‌بل": [{m:"glute_max",s:85},{m:"quad_rf",s:60},{m:"quad_vl",s:55}],
-  "کیک‌بک با دستگاه گلوت": [{m:"glute_max",s:100},{m:"ham_bf",s:20}],
+  "کیک‌بک زانو زده با کش": [{m:"glute_max",s:100},{m:"ham_bf",s:20}],
   "بالا آوردن پا روی صندلی رومی": [{m:"abs_lower",s:100},{m:"hip_flexors",s:40}],
   "پلانک با وزنه اضافه": [{m:"abs_mid",s:90},{m:"obliq_ext",s:30},{m:"erectors",s:20}],
-  "چرخش تنه با دستگاه توری تویست": [{m:"obliq_ext",s:80},{m:"obliq_int",s:80},{m:"abs_mid",s:30}],
+  "کرانچ دوچرخه": [{m:"obliq_ext",s:55},{m:"obliq_int",s:55},{m:"abs_mid",s:75}],
 };
 
 // ---- Detection helpers: given exercise name(s), return which muscles were engaged and how much ----
@@ -17236,7 +20284,7 @@ function getExerciseMuscleEngagement(exerciseName){
 }
 // entries: array of {name, phase} (e.g. from the session queue). Only 'main' phase entries
 // count toward muscle engagement — warm-up/cool-down mobility work isn't heavy enough to
-// need 72h recovery. When multiple exercises hit the same muscle, we keep the *highest*
+// factor into that muscle's recovery window. When multiple exercises hit the same muscle, we keep the *highest*
 // score for that muscle rather than summing — extra sets/exercises don't push a muscle past
 // "fully worked", they just make that "fully worked" state more certain.
 function computeSessionMuscleEngagement(entries){
@@ -17307,10 +20355,11 @@ const WO_DURATION_REST = {30:25, 45:35, 60:40, 90:55};
 
 /* ==================== سوپرست / تری‌ست ====================
    بعد از اینکه حرکتِ اولِ هر عضله (سنگین‌ترین/فرم‌محورترین حرکت اون عضله تو استخر
-   چرخشی) به‌صورت مجزا انجام شد، حرکت‌های فرعیِ باقی‌موندهٔ عضله‌های مختلفِ همون روز
-   می‌تونن به‌صورت زوجی (سوپرست، ۲ عضله) یا سه‌تایی (تری‌ست، ۳ عضله) پشتِ سرهم و
-   بدون استراحتِ واقعی ترکیب بشن — دقیقاً همون کاری که یه مربی برای فشرده‌کردنِ جلسه
-   و بالابردنِ فشارِ متابولیک انجام می‌ده. دو قاعده‌ی اصلی:
+   چرخشی) به‌صورت مجزا انجام شد، حرکت‌های فرعیِ باقی‌موندهٔ همون یه عضله (نه عضله‌های
+   مختلف) می‌تونن به‌صورت زوجی (سوپرست) یا سه‌تایی (تری‌ست) پشتِ سرهم و بدون استراحتِ
+   واقعی ترکیب بشن — یعنی مثلاً «پرس بالاسینه» + «پرس سینه دمبل» پشتِ سرهم، نه سینه
+   با پشت‌بازو. دقیقاً همون کاری که یه مربی برای فشرده‌کردنِ یه عضله‌ی خاص و بالابردنِ
+   فشارِ متابولیکِ همون عضله انجام می‌ده. سه قاعده‌ی اصلی:
 
    ۱) کِی فعال بشه: این آپشن روی برنامه‌ی اولِ کاربرِ مبتدی/متوسط خاموشه — چون قدمِ
       اول یادگیریِ فرمِ درستِ هر حرکت با تمرکز کامله، نه فشردهسازی. از دوره‌ای که طبقِ
@@ -17318,13 +20367,19 @@ const WO_DURATION_REST = {30:25, 45:35, 60:40, 90:55};
       تکنیک آشناست، از همون برنامه‌ی اول (دوره‌ی ۰) فعاله.
    ۲) چقدر تهاجمی گروه‌بندی بشه: هدفِ کاتینگ/چربی‌سوزی و جلسه‌ی کوتاه (۳۰-۴۵ دقیقه)
       از تری‌ست (گروه‌های ۳تایی) سود می‌برن چون فشارِ متابولیکِ بیشتر + فشرده‌سازیِ زمان
-      دقیقاً هدفشونه؛ عضله‌سازیِ خالص (بالک) با سوپرستِ سبک‌ترِ ۲تایی بهتر جواب می‌ده
-      چون تمرکز و ریکاوریِ نسبی بینِ حرکت‌های مختلف برای حجمِ تمرینیِ باکیفیت مهم‌تره.
-      اندازه‌ی گروه فقط یه سقفه؛ الگوریتمِ چیدمان (buildWoSupersetGroups) خودش بر
-      اساسِ تعداد عضله‌های واقعیِ همون روز محدودش می‌کنه. ==================== */
+      دقیقاً هدفشونه؛ عضله‌سازیِ خالص (بالک) با سوپرستِ سبک‌ترِ ۲تایی بهتر جواب می‌ده.
+      اندازه‌ی گروه فقط یه سقفه؛ اگه عضله‌ای کمتر از این تعداد حرکتِ فرعی داشته باشه،
+      همون تعدادِ موجود گروه می‌شه.
+   ۳) چند تا گروه در کل جلسه: حداکثر WO_SUPERSET_MAX_GROUPS_PER_DAY تا — فارغ از
+      اینکه روز چند عضله داره، بیشتر از این جلسه رو به‌جای فشرده و باکیفیت، شلوغ و
+      خسته‌کننده می‌کنه. کدوم عضله‌ها این سهمیه رو می‌گیرن، هر دوره (woCycleIndex)
+      می‌چرخه تا در طول زمان همه‌ی عضله‌ها به نوبت این تکنیک رو تجربه کنن، نه همیشه
+      همون یکی‌دوتای اول. ==================== */
 const WO_SUPERSET_INTRO_CYCLE = {beginner:2, intermediate:1, advanced:0};
 const WO_SUPERSET_TRANSITION_SEC = 12; // نه استراحتِ واقعی، فقط وقتِ جابه‌جاییِ بینِ حرکت‌های همون گروه
 const WO_GROUP_LABELS = {2:'سوپرست', 3:'تری‌ست'};
+// حداکثر تعداد گروهِ سوپرست/تری‌ست در کلِ یه جلسه.
+const WO_SUPERSET_MAX_GROUPS_PER_DAY = 2;
 function woSupersetsEnabled(){
   const introAt = WO_SUPERSET_INTRO_CYCLE[woLevel];
   return woCycleIndex >= (typeof introAt === 'number' ? introAt : 1);
@@ -17333,27 +20388,6 @@ function woSupersetGroupSize(){
   if(woDuration <= 45) return 3;      // جلسه‌ی کوتاه: باید حجم رو تو زمانِ کم جا داد
   if(woGoal === 'cut') return 3;      // چربی‌سوزی: فشارِ متابولیکِ بیشتر با تری‌ست
   return 2;                            // بالک/فیت: سوپرستِ سبک‌تر، تمرکز روی کیفیتِ هر حرکت
-}
-/* perMuscleLists: به ترتیبِ day.muscles، هرکدوم آرایه‌ای از حرکت‌های فرعیِ همون عضله.
-   هر دور، از میانِ عضله‌هایی که هنوز حرکتِ فرعی دارن (با چرخشِ نقطه‌ی شروع برای توزیعِ
-   عادلانه‌ی زوج‌ها)، حداکثر maxSize تا رو برمی‌داره؛ اگه فقط ۱ عضله باقی مونده باشه
-   (یعنی جفت/سه‌تاییِ واقعی ممکن نیست)، بقیه‌ی حرکت‌هاش به‌صورت تکی (leftover) برمی‌گردن. */
-function buildWoSupersetGroups(perMuscleLists, maxSize){
-  const n = perMuscleLists.length;
-  const queues = perMuscleLists.map(l=> l.slice());
-  const groups = [];
-  let start = 0;
-  while(true){
-    const order = []; for(let k=0;k<n;k++) order.push((start+k)%n);
-    const available = order.filter(i=> queues[i].length>0);
-    if(available.length < 2) break;
-    const chosen = available.slice(0, maxSize);
-    groups.push(chosen.map(i=> queues[i].shift()));
-    start = (start+1)%n;
-  }
-  const leftovers = [];
-  queues.forEach(q=> leftovers.push(...q));
-  return { groups, leftovers };
 }
 
 /* ==================== دراپ‌ست ====================
@@ -17570,12 +20604,19 @@ function renderWoExercises(){
   // فرعیِ بعدی (idx>=1) کاندیدِ ترکیب‌شدن تو سوپرست/تری‌ست، یا تبدیل‌شدن به دراپ‌ستِ
   // فینیشرِ همون عضله هستن (هر عضله حداکثر یکی، و این دو تکنیک هیچ‌وقت رو یه حرکتِ
   // واحد قاطی نمی‌شن).
-  const primaries = [];
-  const accessoryByMuscle = [];
-  const dropCandidates = [];
+  //
+  // قاعده‌ی چیدمان: خروجیِ نهایی باید عضله‌به‌عضله باشه — همه‌ی حرکت‌های یه عضله
+  // (اصلی + سوپرست/تری‌ستِ همون عضله + فرعیِ تکی‌های همون عضله + دراپ‌ستِ همون عضله،
+  // اگه بود) پشتِ سرِ هم میان و فقط وقتی یه عضله کاملاً تموم شد، سوییچِ (یه‌بارِ) بعدی
+  // به عضله‌ی بعدی اتفاق می‌افته — نه چندبار جابجایی بینِ عضله‌ها وسطِ برنامه. برای
+  // همین به‌جای سه پاسِ جداگانه (اول همه‌ی primaryها، بعد همه‌ی groupها، بعد همه‌ی
+  // leftoverها) که ترتیبِ عضله‌ها رو چندبار می‌شکست، هر عضله این‌جا یه بلوکِ کاملاً
+  // یک‌پارچه می‌سازه. چرخشِ اینکه «کدوم عضله‌ها این دوره سهمیه‌ی سوپرست/تری‌ست رو
+  // می‌گیرن» (woCycleIndex) هنوز هست، فقط رویِ محاسبه‌ی سهمیه اثر می‌ذاره، نه رویِ
+  // ترتیبِ نمایش که همیشه دقیقاً طبقِ day.muscles می‌مونه.
   const dropSetsAllowed = woDropSetsEnabled();
   let dropCount = 0;
-  day.muscles.forEach(muscle=>{
+  const muscleBlocks = day.muscles.map(muscle=>{
     const isBoost = focusMuscles.has(muscle) || weakMuscles.has(muscle);
     const isReduced = !isBoost && strongMuscles.has(muscle);
     const pool = (MUSCLE_EXERCISES[muscle] && MUSCLE_EXERCISES[muscle][woAccess]) || [];
@@ -17586,44 +20627,69 @@ function renderWoExercises(){
     } else if(isReduced){
       badge = '✅ نقطه‌قوت · حجم استاندارد';
     }
+    let primary = null;
     const accList = [];
     rotatedPoolSlice(pool, count, woCycleIndex).forEach((ex, idx)=>{
       const extra = isBoost && idx >= conf.base;
       const item = { ex, muscle, badge, isBoost, extra };
-      if(idx === 0) primaries.push(item); else accList.push(item);
+      if(idx === 0) primary = item; else accList.push(item);
     });
     // از انتهای لیستِ فرعیِ همون عضله (جایگاهِ طبیعیِ «فینیشر») دنبالِ اولین حرکتِ
     // دراپ‌ست-پسند می‌گردیم؛ اگه پیدا شد، از استخرِ سوپرست/تری‌ست بیرونش می‌کشیم.
+    let dropItem = null;
     if(dropSetsAllowed && dropCount < WO_DROPSET_MAX_PER_DAY){
       for(let i=accList.length-1; i>=0; i--){
         if(woIsDropSetFriendly(accList[i].ex)){
-          dropCandidates.push(accList.splice(i,1)[0]);
+          dropItem = accList.splice(i,1)[0];
           dropCount++;
           break;
         }
       }
     }
-    accessoryByMuscle.push(accList);
+    return { muscle, primary, accList, dropItem, groups:[], leftover:[] };
   });
 
   // سوپرست/تری‌ست فقط وقتی معنا داره که روز حداقل ۲ عضله داشته باشه (نمی‌شه یه عضله رو
-  // با خودش ترکیب کرد) و طبق سطح/دوره‌ی برنامه‌ی کاربر واقعاً وقتش رسیده باشه.
-  let groups = [], leftovers = [];
-  if(day.muscles.length >= 2 && woSupersetsEnabled()){
-    const built = buildWoSupersetGroups(accessoryByMuscle, woSupersetGroupSize());
-    groups = built.groups;
-    leftovers = built.leftovers;
-  } else {
-    accessoryByMuscle.forEach(list=> leftovers.push(...list));
-  }
+  // با خودش ترکیب کرد) و طبق سطح/دوره‌ی برنامه‌ی کاربر واقعاً وقتش رسیده باشه. سقفِ
+  // WO_SUPERSET_MAX_GROUPS_PER_DAY رویِ کلِ روز مشترکه؛ کدوم عضله زودتر از این سهمیه
+  // استفاده کنه با یه چرخشِ تعیین‌شونده (seed=woCycleIndex) مشخص می‌شه تا همیشه همون
+  // عضله‌ی اولِ روز سهمیه رو نگیره — این چرخش فقط رویِ تخصیصِ سهمیه اثر داره، نه رویِ
+  // ترتیبِ رندرِ نهایی.
+  let groupsBudget = (day.muscles.length >= 2 && woSupersetsEnabled()) ? WO_SUPERSET_MAX_GROUPS_PER_DAY : 0;
+  const groupSize = woSupersetGroupSize();
+  const n = muscleBlocks.length;
+  const seed = woCycleIndex;
+  const priority = []; for(let k=0;k<n;k++) priority.push((((seed % n) + n) + k) % n);
+  priority.forEach(idx=>{
+    const block = muscleBlocks[idx];
+    const list = block.accList;
+    let i = 0;
+    while(i < list.length){
+      const remaining = list.length - i;
+      if(remaining >= 2 && groupsBudget > 0){
+        const size = Math.min(groupSize, remaining);
+        block.groups.push(list.slice(i, i+size));
+        i += size;
+        groupsBudget--;
+      } else {
+        block.leftover.push(list[i]);
+        i += 1;
+      }
+    }
+  });
 
-  let html = primaries.map(it=> woExerciseCardHtml(it)).join('');
-  groups.forEach((items, gi)=>{ html += woGroupBlockHtml(items, gi+1); });
-  html += leftovers.map(it=> woExerciseCardHtml(it)).join('');
-  if(dropCandidates.length){
-    html += `<div class="wo-dropset-section-label"><span class="wsl-badge">فینیشر</span><span>ست آخرِ این حرکت‌ها رو با وزنه‌ی سبک‌تر و بدون استراحت ادامه بده</span></div>`;
-    dropCandidates.forEach((it, i)=>{ html += woDropSetCardHtml(it, i+1); });
-  }
+  // رندرِ نهایی: عضله‌به‌عضله، دقیقاً طبقِ ترتیبِ day.muscles.
+  let html = '';
+  let groupCounter = 0, dropCounter = 0;
+  muscleBlocks.forEach(block=>{
+    html += woExerciseCardHtml(block.primary);
+    block.groups.forEach(items=>{ groupCounter++; html += woGroupBlockHtml(items, groupCounter); });
+    html += block.leftover.map(it=> woExerciseCardHtml(it)).join('');
+    if(block.dropItem){
+      dropCounter++;
+      html += woDropSetCardHtml(block.dropItem, dropCounter);
+    }
+  });
 
   document.getElementById('woExerciseList').innerHTML = html;
   renderWoCycleStatus();
@@ -17684,10 +20750,49 @@ function woFormatSessionTime(totalSec){
 function woStartSession(){
   const queue = buildWoSessionQueue();
   if(!queue.length){ showToast('حرکتی برای امروز پیدا نشد', 'error'); return; }
-  woSession = { queue, idx:0, mode:'work', secondsElapsed:0, secondsLeft:0, total:0, awaitingConfirm:false, interval:null, startedAt:Date.now() };
+  woSession = { queue, idx:0, mode:'work', secondsElapsed:0, secondsLeft:0, total:0, awaitingConfirm:false, interval:null, startedAt:Date.now(), doneList:[] };
   document.getElementById('woSessionOverlay').classList.add('show');
   woRenderSessionStep();
+  woRenderDoneList();
   woTickSession();
+}
+// لیستِ کوچیکِ حرکت‌های انجام‌شده وسطِ پاپ‌آپ: تا خالیه اصلاً نمایش داده نمی‌شه؛ هر
+// آیتمِ جدید که اضافه می‌شه، لیست خودش رو تا پایین اسکرول می‌کنه تا تازه‌ترین حرکت
+// همیشه دیده بشه (نه اولی که رفته بالای لیست).
+function woRenderDoneList(){
+  const s = woSession; if(!s) return;
+  const wrap = document.getElementById('woSessionDoneWrap');
+  const list = document.getElementById('woSessionDoneList');
+  const countEl = document.getElementById('woSessionDoneCount');
+  if(!wrap || !list) return;
+  const done = s.doneList || [];
+  if(!done.length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  if(countEl) countEl.textContent = toFa(done.length);
+  // هر آیتم علاوه بر اسم، مدت‌زمانِ صرف‌شده رو هم نشون می‌ده و خودش قابل‌تپه: با
+  // زدنش یه کارتِ کوچیکِ جزئیات (ست/تکرارِ همون حرکت + زمان) باز می‌شه، تا کاربر
+  // بتونه حرکت‌های قبلی رو مرور/چک کنه بدونِ این‌که به وضعیتِ حرکتِ جاری دست بخوره.
+  list.innerHTML = done.map((d,i) =>
+    `<button type="button" class="wo-session-done-item" data-idx="${i}">
+      <span class="di-check">✅</span>
+      <span class="di-name">${d.name}</span>
+      <span class="di-time">${woFormatSessionTime(d.seconds)}</span>
+    </button>`
+  ).join('');
+  list.scrollTop = list.scrollHeight;
+}
+function woOpenDoneDetail(idx){
+  const s = woSession; if(!s) return;
+  const d = (s.doneList||[])[idx];
+  if(!d) return;
+  document.getElementById('woDoneDetailIdx').textContent = toFa(idx+1);
+  document.getElementById('woDoneDetailName').textContent = d.name;
+  document.getElementById('woDoneDetailMeta').textContent = d.meta || '';
+  document.getElementById('woDoneDetailTime').textContent = woFormatSessionTime(d.seconds);
+  document.getElementById('woDoneDetailModal').classList.add('visible');
+}
+function woCloseDoneDetail(){
+  document.getElementById('woDoneDetailModal').classList.remove('visible');
 }
 function woRenderSessionStep(){
   const s = woSession; if(!s) return;
@@ -17779,6 +20884,10 @@ function woFinishWorkStep(){
   clearInterval(s.interval);
   if(navigator.vibrate){ try{ navigator.vibrate([80,50,80]); }catch(e){} }
   const item = s.queue[s.idx];
+  // زمانِ صرف‌شده رو هم همین‌جا با خودِ اسم/متا ذخیره می‌کنیم — همون کرنومترِ این
+  // حرکت (secondsElapsed) که الان متوقف شد، نه زمانِ کلِ جلسه.
+  (s.doneList = s.doneList || []).push({ name: item.name, meta: item.meta || '', seconds: Math.max(0, s.secondsElapsed||0) });
+  woRenderDoneList();
   const restSec = woRestSecondsFor(item);
   const isLast = s.idx === s.queue.length - 1;
   if(isLast || restSec<=0){ woEndSessionCore(true); return; }
@@ -17853,10 +20962,12 @@ function woFinalizeSession(quality){
   wh.totalMinutes = (wh.totalMinutes||0) + pending.minutes;
   if(quality){ wh.qualitySum = (wh.qualitySum||0) + quality; wh.qualityCount = (wh.qualityCount||0) + 1; }
   if(!wh.history) wh.history = [];
-  wh.history.push({ ts:Date.now(), minutes:pending.minutes, quality:quality||null, dayLabel:pending.dayLabel,
+  const sessionTs = Date.now();
+  wh.history.push({ ts:sessionTs, minutes:pending.minutes, quality:quality||null, dayLabel:pending.dayLabel,
     exercisesDone:pending.exercisesDone, exercisesTotal:pending.exercisesTotal, muscleEngagement:pending.muscleEngagement||[] });
   if(wh.history.length > 60) wh.history = wh.history.slice(-60);
   try{ logDailyFeatureUse('workout'); }catch(e){}
+  try{ scheduleMuscleReadyNotifs(pending.muscleEngagement||[], sessionTs); }catch(e){ console.error('scheduleMuscleReadyNotifs call failed', e); }
   saveData();
   showToast('تمرین امروز ثبت شد! آفرین 💪', 'success');
   renderWoHistory();
@@ -17979,6 +21090,16 @@ document.getElementById('woSwapCloseBtn').addEventListener('click', woCloseSwapM
 document.getElementById('woSwapModal').addEventListener('click', (e)=>{
   if(e.target.id === 'woSwapModal') woCloseSwapModal();
 });
+// تپ‌کردنِ هرکدوم از حرکت‌های قبلیِ لیستِ کوچیکِ وسطِ پاپ‌آپِ جلسه → کارتِ جزئیاتش باز می‌شه.
+document.getElementById('woSessionDoneList').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.wo-session-done-item');
+  if(!btn) return;
+  woOpenDoneDetail(+btn.dataset.idx);
+});
+document.getElementById('woDoneDetailCloseBtn').addEventListener('click', woCloseDoneDetail);
+document.getElementById('woDoneDetailModal').addEventListener('click', (e)=>{
+  if(e.target.id === 'woDoneDetailModal') woCloseDoneDetail();
+});
 document.getElementById('programHistoryList').addEventListener('click', (e)=>{
   const row = e.target.closest('.hist-day-row');
   if(row) openDayDetail(row.dataset.key);
@@ -18099,19 +21220,103 @@ const MUSCLE_ZONE_MAP = {
   gastroc_lat:['calf_L','calf_R'],
   soleus:['calf_L','calf_R'],
 };
-const RECOVERY_WINDOW_HOURS = 72;
+// ساعتِ ریکاوریِ هر عضله — به‌جای یه عددِ ثابتِ ۷۲ساعته برای همه، بر اساسِ منابعِ علمِ ورزش
+// (تحقیقاتِ فرکانسِ تمرین/ریکاوریِ Schoenfeld و همکاران، و جمع‌بندیِ رایجِ کتاب‌های فیزیولوژیِ
+// ورزشی) عضله‌های کوچیک/تک‌مفصلی سریع‌تر ریکاور می‌شن و عضله‌های بزرگ/چندمفصلی کندتر:
+//  • عضله‌های کوچیک (جلوبازو، پشت‌بازو، ساعد، شکم/مورب): ~۳۶ ساعت
+//  • سرشانه و سینه: ~۴۸ ساعت
+//  • ساق پا: ~۴۰ ساعت (فیبرِ کند-انقباض بیشتر داره، سریع‌تر از رون ریکاور می‌شه)
+//  • عضله‌های بزرگِ چندمفصلیِ پا و باسن (چهارسر، همسترینگ، سرینی): ~۷۲ ساعت
+//  • پشت (لت، ذوزنقه، لوزی، گرد بزرگ/کوچک، زیرخاری، زیرکتف): ~۶۰ ساعت
+//  • راست‌کننده‌های ستون فقرات (کمر): ~۷۲ ساعت، چون تقریباً تویِ هر حرکتِ ترکیبی درگیر می‌شن
+//    و ریسکِ آسیب‌شون در صورتِ ریکاوریِ ناقص بالاتره.
+const MUSCLE_RECOVERY_HOURS = {
+  delt_front:48, delt_mid:48, delt_rear:48,
+  pec:48, serratus:40, intercostals:40,
+  biceps_br:36, brachialis:36, forearm_flex:36, forearm_ext:36,
+  abs_upper:36, abs_mid:36, abs_lower:36, obliq_ext:36, obliq_int:36,
+  hip_flexors:40, sartorius:40, tib_ant:40,
+  quad_rf:72, quad_vl:72, quad_vm:72,
+  traps:60, rhomboids:60, lats:60, teres_major:60, teres_minor:60, infraspinatus:60, subscap:60,
+  erectors:72,
+  triceps:36,
+  glute_max:72, glute_med:72, glute_min:72,
+  ham_bf:72, ham_st:72, ham_sm:72,
+  gastroc_med:40, gastroc_lat:40, soleus:40,
+};
+const RECOVERY_WINDOW_HOURS_DEFAULT = 48; // فقط fallback برای عضله‌ای که تصادفاً تویِ نقشه‌ی بالا نبود
+
+// نقشه‌ی هر عضله‌ی ریزدانه به یکی از ۸ «گروه بزرگ عضلانی» — برای نوتیف «آماده‌باش عضله» به‌جای
+// اینکه به ازای هر عضله‌ی جزئی (مثلاً quad_rf/vl/vm که هر سه با هم کار می‌کنن) سه تا نوتیف جدا
+// بفرستیم، فقط یه نوتیف واحد به ازای هر گروه بزرگ (پا، سینه، پشت...) می‌فرستیم.
+const MUSCLE_MAJOR_GROUP = {
+  delt_front:'shoulders', delt_mid:'shoulders', delt_rear:'shoulders',
+  pec:'chest', serratus:'chest', intercostals:'chest',
+  biceps_br:'arms', brachialis:'arms', forearm_flex:'arms', forearm_ext:'arms', triceps:'arms',
+  abs_upper:'abs', abs_mid:'abs', abs_lower:'abs', obliq_ext:'abs', obliq_int:'abs',
+  hip_flexors:'legs_front', sartorius:'legs_front', quad_rf:'legs_front', quad_vl:'legs_front', quad_vm:'legs_front', tib_ant:'legs_front',
+  traps:'back', rhomboids:'back', lats:'back', teres_major:'back', teres_minor:'back', infraspinatus:'back', subscap:'back', erectors:'back',
+  glute_max:'legs_back', glute_med:'legs_back', glute_min:'legs_back', ham_bf:'legs_back', ham_st:'legs_back', ham_sm:'legs_back',
+  gastroc_med:'calves', gastroc_lat:'calves', soleus:'calves',
+};
+const MUSCLE_GROUP_LABELS = {
+  chest:'سینه', back:'پشت', shoulders:'شونه', arms:'بازو', abs:'شکم',
+  legs_front:'جلو ران', legs_back:'پشت ران و سرین', calves:'ساق پا',
+};
+const MUSCLE_GROUP_NOTIF_IDS = {
+  chest:9701, back:9702, shoulders:9703, arms:9704, abs:9705, legs_front:9706, legs_back:9707, calves:9708,
+};
+// بعد از هر جلسه‌ی تمرین، برای هر گروهِ بزرگِ عضلانی که واقعاً درگیر شده (score>=30)، دقیقاً
+// همون لحظه‌ای که ریکاوریِ *کندترین* عضله‌ی اون گروه تموم می‌شه یه نوتیف واقعیِ سیستمی زمان‌بندی
+// می‌کنه — نوتیفِ قبلیِ همون گروه (اگه از جلسه‌ی قبل هنوز فعال بود) کنسل و جایگزین می‌شه.
+function scheduleMuscleReadyNotifs(muscleEngagement, sessionTs){
+  const plugin = getLN();
+  if(!plugin || !storeData.reminder.enabled) return;
+  if(!muscleEngagement || !muscleEngagement.length) return;
+  const bestPerGroup = {};
+  muscleEngagement.forEach(m=>{
+    const group = MUSCLE_MAJOR_GROUP[m.muscle];
+    if(!group || m.score < 30) return;
+    const hours = MUSCLE_RECOVERY_HOURS[m.muscle] || RECOVERY_WINDOW_HOURS_DEFAULT;
+    if(!bestPerGroup[group] || hours > bestPerGroup[group].hours) bestPerGroup[group] = { muscle:m.muscle, hours };
+  });
+  const groups = Object.keys(bestPerGroup);
+  if(!groups.length) return;
+  (async ()=>{
+    try{
+      const perm = await plugin.requestPermissions();
+      if(perm.display !== 'granted') return;
+    }catch(err){ return; }
+    for(const group of groups){
+      const id = MUSCLE_GROUP_NOTIF_IDS[group];
+      if(!id) continue;
+      try{ await plugin.cancel({ notifications:[{id}] }); }catch(err){}
+      const at = new Date(sessionTs + bestPerGroup[group].hours*3600000);
+      if(at.getTime() <= Date.now()) continue; // احتیاطاً — نباید پیش بیاد چون همیشه در آینده‌ست
+      try{
+        await plugin.schedule({ notifications:[{
+          id,
+          title: '💪 ' + MUSCLE_GROUP_LABELS[group] + ' آماده‌ست',
+          body: 'عضله‌های ' + MUSCLE_GROUP_LABELS[group] + 'ت کامل ریکاوری شدن — وقتشه دوباره تمرینشون بدی.',
+          schedule: { at }
+        }] });
+      }catch(err){ console.error('scheduleMuscleReadyNotifs failed for '+group, err); }
+    }
+  })();
+}
 // برای هر عضله‌ای که اخیراً کار کرده، میزان «خستگی فعلی» رو حساب می‌کنه (۱۰۰=تازه تمرین‌شده، ۰=کامل ریکاوری).
-// افت خطیه: هر چی به ۷۲ ساعت نزدیک‌تر بشیم، عدد به سمت صفر می‌ره. اگه چند جلسه به یه عضله خورده
-// باشن، بیشترین خستگیِ فعلی (نه جمع‌شون) ملاک محاسبه‌ست.
+// افت خطیه: هر چی به ساعتِ ریکاوریِ *همون عضله* (نه یه عددِ ثابت برای همه) نزدیک‌تر بشیم، عدد به
+// سمت صفر می‌ره. اگه چند جلسه به یه عضله خورده باشن، بیشترین خستگیِ فعلی (نه جمع‌شون) ملاک محاسبه‌ست.
 function computeMuscleRecoveryNow(){
   const wh = storeData.woHistory;
   const now = Date.now();
   const fatigue = {};
   ((wh && wh.history) || []).forEach(h=>{
-    const hoursAgo = (now - h.ts) / 3600000;
-    if(hoursAgo >= RECOVERY_WINDOW_HOURS || hoursAgo < 0) return;
-    const remain = 1 - (hoursAgo / RECOVERY_WINDOW_HOURS);
     (h.muscleEngagement || []).forEach(m=>{
+      const windowHours = MUSCLE_RECOVERY_HOURS[m.muscle] || RECOVERY_WINDOW_HOURS_DEFAULT;
+      const hoursAgo = (now - h.ts) / 3600000;
+      if(hoursAgo >= windowHours || hoursAgo < 0) return;
+      const remain = 1 - (hoursAgo / windowHours);
       const val = m.score * remain;
       if(!fatigue[m.muscle] || fatigue[m.muscle] < val) fatigue[m.muscle] = val;
     });
@@ -18226,7 +21431,7 @@ function recoveryStartAutoRefresh(){
   if(_recoveryAutoRefreshStarted) return;
   _recoveryAutoRefreshStarted = true;
   setInterval(()=>{
-    const panel = document.querySelector('.sub-panel[data-sub="recovery"]');
+    const panel = document.querySelector('#tab-workout .sub-panel[data-sub="recovery"]');
     if(panel && panel.classList.contains('active')) renderRecoveryTab();
   }, 5*60*1000); // هر ۵ دقیقه، فقط وقتی این زیرتب باز باشه، رنگ‌ها رو با گذشت زمان به‌روز می‌کنه
 }
@@ -18269,6 +21474,996 @@ function renderRecoveryTab(){
     if(imgWrap) imgWrap.style.display = 'none';
   }
 }
+
+/* ===================== تبِ «زاویه فک» — ریکاوریِ عضله‌های صورت/فک =====================
+   همون تکنیکِ رنگ‌آمیزیِ نقشه‌ی بدنسازی (recoveryLoadImg/recoveryGetMaskData + ترکیبِ multiply
+   رویِ کانواس): عکسِ خط‌کشی‌شده رو عادی می‌کشیم، بعد یه لایه‌ی قرمزِ نیمه‌شفاف رو فقط رویِ پیکسل‌های
+   همون ناحیه (طبقِ فایلِ ماسک، که کانالِ قرمزِ هر پیکسلش = شناسه‌ی عددیِ ناحیه‌ست) روش می‌کشیم.
+   فایلِ ماسک (assets/recovery-mask-front-jaw.png) پیکسل‌به‌پیکسل رویِ عکسِ recovery-jaw-front.png
+   ساخته شده: هر ۱۴ ناحیه‌ی زیر جدا مشخص شدن (چپ/راست به‌صورتِ آینه‌ای و متقارن)، هر جایی که مسلماً
+   عضله نیست (مو، گوش، داخلِ چشم/سوراخِ بینی، پیشونیِ میانی که تو این ۱۴تا نیست) رنگ نمی‌گیره. */
+const JAW_RECOVERY_ASSETS = {
+  front: { img:'assets/recovery-jaw-front.png', mask:'assets/recovery-mask-front-jaw.png' },
+};
+// id عددی هر عضله توی فایلِ ماسک (کانالِ قرمزِ پیکسل = این عدد) — دقیقاً هم‌الگو با ZONE_IDS بدن
+const JAW_ZONE_IDS = {
+  temporalis_L:1, temporalis_R:2,
+  orbicularis_oculi_L:3, orbicularis_oculi_R:4,
+  zygomaticus_L:5, zygomaticus_R:6,
+  nasalis:7, orbicularis_oris:8, mentalis:9,
+  masseter_L:10, masseter_R:11, // عضله‌ی اصلیِ زاویه‌ی فک
+  platysma_L:12, platysma_R:13,
+  neck_center:14,
+};
+const JAW_ZONE_ID_TO_NAME = Object.fromEntries(Object.entries(JAW_ZONE_IDS).map(([k,v])=>[v,k]));
+const JAW_ZONE_DISPLAY_LABEL = {
+  temporalis_L:'گیجگاهی (تمپورالیس)', temporalis_R:'گیجگاهی (تمپورالیس)',
+  orbicularis_oculi_L:'حلقوی چشم', orbicularis_oculi_R:'حلقوی چشم',
+  zygomaticus_L:'گونه‌ای (زایگوماتیکوس)', zygomaticus_R:'گونه‌ای (زایگوماتیکوس)',
+  nasalis:'بینی (نازالیس)', orbicularis_oris:'حلقوی دهان', mentalis:'چانه‌ای (منتالیس)',
+  masseter_L:'جونده (ماسِتر) — عضله‌ی اصلیِ زاویه‌ی فک', masseter_R:'جونده (ماسِتر) — عضله‌ی اصلیِ زاویه‌ی فک',
+  platysma_L:'پلاتیسما (گردن)', platysma_R:'پلاتیسما (گردن)',
+  neck_center:'ناحیه‌ی میانیِ گردن',
+};
+// هر کلیدِ JAW_MUSCLE_GROUPS (که حرکت‌ها زیرش دسته‌بندی شدن) به کدوم ناحیه‌ی(های) قابل‌رنگِ
+// JAW_ZONE_IDS مپ می‌شه — چپ/راست با هم رنگ می‌گیرن چون حرکت‌های فک همیشه دوطرفه‌ان.
+const JAW_MUSCLE_ZONE_MAP = {
+  temporalis:['temporalis_L','temporalis_R'],
+  orbicularis_oculi:['orbicularis_oculi_L','orbicularis_oculi_R'],
+  zygomaticus:['zygomaticus_L','zygomaticus_R'],
+  nasalis:['nasalis'],
+  orbicularis_oris:['orbicularis_oris'],
+  mentalis:['mentalis'],
+  masseter:['masseter_L','masseter_R'],
+  platysma:['platysma_L','platysma_R'],
+  neck_center:['neck_center'],
+};
+// ساعتِ ریکاوریِ هر عضله‌ی فک — با صداقتِ کامل: برخلافِ عضله‌های بدنسازی (که پژوهش‌های
+// فرکانسِ تمرین مثلِ Schoenfeld و هم‌کاراش عددِ ساعتی مشخص دارن)، هیچ پژوهشِ معتبری «ساعتِ دقیقِ
+// ریکاوریِ» عضله‌های صورت رو اندازه نگرفته. این عددها یه تخمینِ منطقی‌ان، نه یه رقمِ علمیِ قطعی،
+// که رویِ دو یافته‌ی واقعی سوارن:
+//  ۱) تقریباً همه‌ی برنامه‌های شناخته‌شده‌ی face-yoga (از جمله مطالعه‌ی دانشگاهِ Northwestern که
+//     تویِ JAMA Dermatology چاپ شد) تمرینِ روزانه — گاهی ۲بار در روز — رو توصیه می‌کنن، نه
+//     استراحتِ چندروزه‌ی سبکِ بدنسازی؛ پس هیچ‌کدومِ این عددها نباید نزدیکِ ۲۴ ساعت به بالا باشه.
+//  ۲) فیبرهای عضله‌ی جونده (ماستر/تمپورالیس) برای استقامت طراحی شدن، نه قدرتِ لحظه‌ای — تمامِ روز
+//     دارن تویِ حرفزدن/جویدن کار می‌کنن — پس حتی این دوتا هم عضله‌ی «کندریکاوری» نیستن؛ فقط چون
+//     حرکت‌هاشون (نگه‌داشتنِ فکِ جلوآورده، بازوبسته‌کردن دربرابرِ مقاومتِ دست) واقعاً بارِ مکانیکی
+//     وارد می‌کنن، یه‌کمی بیشتر از عضله‌های صرفاً حالت‌گیرِ صورت (که تویِ این حرکت‌ها هیچ مقاومتی
+//     تحمل نمی‌کنن) نگه داشته شدن. اگه بعداً منبعِ دقیق‌تری پیدا شد، فقط کافیه همین عددها عوض بشن.
+const JAW_MUSCLE_RECOVERY_HOURS = {
+  temporalis:14, masseter:18,
+  orbicularis_oculi:8, zygomaticus:10, nasalis:8, orbicularis_oris:10, mentalis:10,
+  platysma:12, neck_center:12,
+};
+const JAW_RECOVERY_WINDOW_HOURS_DEFAULT = 12; // فقط fallback
+// برای هر عضله‌ی فکی که اخیراً کار کرده، «خستگیِ فعلی» رو حساب می‌کنه (۱۰۰=تازه‌کارشده،
+// ۰=کامل ریکاوری) — دقیقاً همون منطقِ خطیِ computeMuscleRecoveryNow بدنسازی.
+function computeJawRecoveryNow(){
+  const jh = storeData.jawHistory;
+  const now = Date.now();
+  const fatigue = {};
+  ((jh && jh.history) || []).forEach(h=>{
+    (h.muscleEngagement || []).forEach(m=>{
+      const windowHours = JAW_MUSCLE_RECOVERY_HOURS[m.muscle] || JAW_RECOVERY_WINDOW_HOURS_DEFAULT;
+      const hoursAgo = (now - h.ts) / 3600000;
+      if(hoursAgo >= windowHours || hoursAgo < 0) return;
+      const remain = 1 - (hoursAgo / windowHours);
+      const val = m.score * remain;
+      if(!fatigue[m.muscle] || fatigue[m.muscle] < val) fatigue[m.muscle] = val;
+    });
+  });
+  return fatigue;
+}
+function computeJawZoneScores(fatigue){
+  const zoneScore = {};
+  Object.keys(fatigue).forEach(muscle=>{
+    const targets = JAW_MUSCLE_ZONE_MAP[muscle];
+    if(!targets) return;
+    targets.forEach(zone=>{
+      if(!zoneScore[zone] || zoneScore[zone] < fatigue[muscle]) zoneScore[zone] = fatigue[muscle];
+    });
+  });
+  return zoneScore;
+}
+// رنگ‌آمیزیِ واقعی — عیناً همون بلوکِ multiply-compositeِ renderRecoveryCanvasِ بدنسازی،
+// فقط با منابع/محاسبه‌ی مخصوصِ فک.
+async function renderJawRecoveryCanvas(){
+  const canvas = document.getElementById('jawRecoveryCanvas');
+  if(!canvas) return;
+  const assets = JAW_RECOVERY_ASSETS.front;
+  let baseImg, maskInfo;
+  try{
+    [baseImg, maskInfo] = await Promise.all([recoveryLoadImg(assets.img), recoveryGetMaskData(assets.mask)]);
+  }catch(e){ return; }
+  const w = baseImg.naturalWidth, h = baseImg.naturalHeight;
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(baseImg, 0, 0, w, h);
+
+  const fatigue = computeJawRecoveryNow();
+  const zoneScore = computeJawZoneScores(fatigue);
+  const activeZones = Object.keys(zoneScore);
+  if(activeZones.length && maskInfo.w === w && maskInfo.h === h){
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    const octx = off.getContext('2d');
+    const odata = octx.createImageData(w, h);
+    const md = maskInfo.data;
+    const od = odata.data;
+    const total = w * h;
+    for(let i = 0; i < total; i++){
+      const zid = md[i*4];
+      if(zid === 0) continue;
+      const zoneName = JAW_ZONE_ID_TO_NAME[zid];
+      const score = zoneScore[zoneName];
+      if(!score) continue;
+      const alpha = Math.max(0, Math.min(1, score/100)) * 0.9;
+      const p = i*4;
+      od[p] = 214; od[p+1] = 40; od[p+2] = 40;
+      od[p+3] = Math.round(alpha*255);
+    }
+    octx.putImageData(odata, 0, 0);
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.drawImage(off, 0, 0, w, h);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+function renderJawRecoverySummaryList(){
+  const wrap = document.getElementById('jawRecoverySummaryList');
+  if(!wrap) return;
+  const fatigue = computeJawRecoveryNow();
+  const rows = Object.entries(fatigue)
+    .filter(([,v]) => v > 2)
+    .sort((a,b) => b[1]-a[1])
+    .map(([muscle, v])=>{
+      const pctRecovered = Math.max(0, Math.min(100, Math.round(100 - v)));
+      const label = JAW_MUSCLE_GROUPS[muscle] || muscle;
+      return `<div class="fsc-row"><span>${label}</span><span>${toFa(pctRecovered)}٪ ریکاوری</span></div>`;
+    }).join('');
+  wrap.innerHTML = rows || '<div class="wo-hist-empty" style="margin:0;">همه‌ی عضله‌های فک کامل ریکاوری شدن ✅</div>';
+}
+let _jawRecoveryAutoRefreshStarted = false;
+function jawRecoveryStartAutoRefresh(){
+  if(_jawRecoveryAutoRefreshStarted) return;
+  _jawRecoveryAutoRefreshStarted = true;
+  setInterval(()=>{
+    const panel = document.querySelector('#tab-jawline .sub-panel[data-sub="jawrecovery"]');
+    if(panel && panel.classList.contains('active')) renderJawRecoveryTab();
+  }, 5*60*1000);
+}
+function renderJawRecoveryTab(){
+  jawRecoveryStartAutoRefresh();
+  renderJawRecoveryCanvas();
+  renderJawRecoverySummaryList();
+}
+
+/* ===================== دیتابیسِ حرکت‌های تمرینِ فک =====================
+   فقط اسمِ حرکت‌ها — بدونِ توضیحِ اجرا (طبقِ خواسته‌ی فعلی، چون سنگین می‌شه). دسته‌بندی
+   دقیقاً بر اساسِ همون ۱۴ ناحیه‌ی JAW_ZONE_IDS هست (چپ/راست یه گروه حساب شدن چون حرکت‌ها
+   دوطرفه‌ان). حرکت‌ها از رویِ چند برنامه‌ی شناخته‌شده‌ی face-yoga/جاولاین جمع شدن (Face Yoga
+   Method، تمرین‌های رایجِ کاهشِ چانه‌ی دوتایی مثلِ Jaw Jut/Chin Tuck/Swan Neck/Jowl Buster،
+   و حرکت‌های استانداردِ اپ‌های جاولاین) — چیزِ عجیب یا وابسته به وسیله‌ی خاص (مثلِ توپ‌های
+   فک‌ورزی) عمداً کنار گذاشته شده. */
+const JAW_MUSCLE_GROUPS = {
+  temporalis:'گیجگاهی (تمپورالیس)',
+  orbicularis_oculi:'دورِ چشم',
+  zygomaticus:'گونه‌ای (زایگوماتیکوس)',
+  nasalis:'بینی (نازالیس)',
+  orbicularis_oris:'دورِ دهان',
+  mentalis:'چانه‌ای (منتالیس)',
+  masseter:'جونده / خطِ فک (ماسِتر)',
+  platysma:'گردن (پلاتیسما)',
+  neck_center:'میانیِ گردن',
+};
+const JAW_EXERCISES = {
+  temporalis: ['ماساژِ دایره‌ای گیجگاه با نوکِ انگشت', 'فشارِ آرومِ دندان‌ها روی هم',
+    'فشارِ نوکِ انگشت‌ها روی گیجگاه حینِ بازوبسته‌کردنِ آرومِ فک', 'عقب‌کشیدنِ فکِ پایین (بدونِ پایین‌آوردن) و نگه‌داشتن'],
+  orbicularis_oculi: ['تنگ‌کردنِ چشم‌ها بدونِ چروکاندنِ پیشونی', 'باز نگه‌داشتنِ کاملِ چشم‌ها تا حسِ کشش', 'پلک‌زدنِ آهسته و کامل',
+    'نگه‌داشتنِ نوکِ انگشت‌ها کنارِ چشم و تلاش برای تنگ‌کردنِ چشم دربرابرِ فشار', 'چرخشِ آرومِ چشم‌ها به چپ، راست، بالا و پایین', 'چشمک‌زدنِ متناوب با هر چشم'],
+  zygomaticus: ['تو دادنِ لپ‌ها به داخل', 'باد کردنِ لپ‌ها و نگه‌داشتن', 'چرخوندنِ هوا زیرِ لب‌ها (مثلِ دهان‌شویه)', 'ماساژِ دایره‌ای گونه‌ها با نوکِ انگشت',
+    'لبخندِ عریض دربرابرِ فشارِ انگشت‌ها روی گوشه‌های دهان', 'بازکردنِ دهان به شکلِ دایره، پوشوندنِ دندان‌ها با لب و بالاکشیدنِ گونه‌ها', 'بادکردنِ لپ‌ها و جابه‌جاکردنِ هوا از یک طرف به طرفِ دیگر'],
+  nasalis: ['چروکاندنِ بینی', 'بازکردنِ پره‌های بینی و نگه‌داشتن',
+    'چین‌انداختنِ بینی همراه با بالاکشیدنِ لبِ بالا (مثلِ خرگوش)', 'فشارِ ملایمِ دو طرفِ بینی به هم و تلاش برای دمِ نفس از بینی'],
+  orbicularis_oris: ['تلفظِ اغراق‌شده‌ی صداهای آ، او، ای و او', 'غنچه‌کردنِ لب‌ها و نگه‌داشتن', 'دمیدنِ هوا با لب‌های جمع‌شده',
+    'کِشیدنِ متناوبِ لب‌ها به دو طرف و بعد غنچه‌کردنِ لب‌ها', 'جمع‌کردنِ هر دو لب به داخلِ دهان و فشردنِ آروم'],
+  mentalis: ['بالاآوردنِ چانه با لب‌های جمع‌شده', 'فشارِ لبِ پایین به بالا با دهانِ بسته', 'بیرون‌دادنِ زبان به جلو تا حسِ کشش زیرِ چانه',
+    'قلاب‌کردنِ دو انگشت زیرِ چانه و کشیدنِ آرومِ پوست به‌سمتِ گوش‌ها', 'ضربه‌های ریتمیکِ ملایم زیرِ چانه با پشتِ دست'],
+  masseter: ['بردنِ فکِ پایین به جلو و نگه‌داشتن', 'بازکردنِ کاملِ دهان تا حداکثر', 'باز و بسته‌کردنِ آرومِ دهان دربرابرِ مقاومتِ دست', 'جویدنِ روبه‌بالا (بدونِ آدامس)',
+    'چرخشِ آرومِ فک به چپ و راست با دهانِ کمی‌باز', 'نگه‌داشتنِ زبان چسبیده به سقفِ دهان با دندان‌های نزدیک‌به‌هم و لب‌های بسته', 'فشارِ فکِ پایین به بالا دربرابرِ مقاومتِ دست از زیرِ چانه', 'ماساژِ دایره‌ای ماهیچه‌ی فک جلوی گوش با نوکِ انگشت'],
+  platysma: ['خم‌کردنِ سر به چپ و راست', 'کِشیدنِ گردن به‌سمتِ بالا و کنار', 'کشیدنِ زبان به‌سمتِ چانه و نگه‌داشتن', 'فشارِ چانه به انگشت‌های زیرِ چانه', 'کِشیدنِ گوشه‌های دهان به پایین با نمایشِ دندان‌های پایین',
+    'ماساژِ لغزشیِ گردن از زیرِ چانه به‌سمتِ گردن با کفِ دست (زهکشیِ لنفاوی)', 'بوسیدنِ سقف با سرِ روبه‌عقب', 'چرخشِ سر به یک طرف و نگه‌داشتنِ ۵ثانیه‌ای، بعد طرفِ مقابل', 'کِشیدنِ گردن به‌سمتِ بالا مثلِ قو و نگه‌داشتن'],
+  neck_center: ['جمع‌کردنِ چانه به‌سمتِ گردن', 'چرخشِ کاملِ گردن', 'بالاآوردنِ سر از حالتِ درازکش با زبان به سقفِ دهان',
+    'فشاردادنِ پسِ سر به بالشت یا دیوار و نگه‌داشتن', 'خم‌کردنِ آرومِ گردن به جلو و عقب با تمرکز روی کشش'],
+};
+/* ---- چیدمانِ جلسه‌های هفتگیِ تمرینِ فک: کاربر بینِ ۲ تا ۴ جلسه در هفته انتخاب می‌کنه، و ما
+   ۹ ناحیه‌ی JAW_EXERCISES رو بینِ همون تعداد جلسه تقسیم می‌کنیم — عیناً هم‌الگو با چیدمانِ
+   split روزهای تمرینِ بدنسازی (SPLIT_TEMPLATES/woCustomSplit). دیگه هر جلسه کلِ ۹ ناحیه رو
+   با هم نداره؛ هر بار فقط رویِ بخشی از صورت کار می‌شه. کاربر می‌تونه پیشنهادِ پیش‌فرض رو تو
+   مرحله‌ی «چیدمان جلسه‌ها»ی آنبورد دستی تغییر بده (jawCustomSplit). ---- */
+const JAW_SPLIT_ZONE_ORDER = Object.keys(JAW_EXERCISES);
+const JAW_SPLIT_TEMPLATES = {
+  2: [
+    { label:'جلسه ۱', sub:'بالای صورت و گونه', zones:['temporalis','orbicularis_oculi','nasalis','zygomaticus'] },
+    { label:'جلسه ۲', sub:'دورِ دهان، چانه، فک و گردن', zones:['orbicularis_oris','mentalis','masseter','platysma','neck_center'] },
+  ],
+  3: [
+    { label:'جلسه ۱', sub:'گیجگاه، دورِ چشم و بینی', zones:['temporalis','orbicularis_oculi','nasalis'] },
+    { label:'جلسه ۲', sub:'گونه، دورِ دهان و چانه', zones:['zygomaticus','orbicularis_oris','mentalis'] },
+    { label:'جلسه ۳', sub:'خطِ فک و گردن', zones:['masseter','platysma','neck_center'] },
+  ],
+  4: [
+    { label:'جلسه ۱', sub:'گیجگاه و دورِ چشم', zones:['temporalis','orbicularis_oculi'] },
+    { label:'جلسه ۲', sub:'گونه و بینی', zones:['zygomaticus','nasalis'] },
+    { label:'جلسه ۳', sub:'دورِ دهان و چانه', zones:['orbicularis_oris','mentalis'] },
+    { label:'جلسه ۴', sub:'خطِ فک و گردن', zones:['masseter','platysma','neck_center'] },
+  ],
+};
+function jawZoneSplitLabel(zones){ return (zones||[]).map(z=> JAW_MUSCLE_GROUPS[z]||z).join(' و '); }
+function cloneSuggestedJawSplit(n){
+  return (JAW_SPLIT_TEMPLATES[n]||[]).map(d=>({label:d.label, sub:d.sub, zones:d.zones.slice()}));
+}
+/* ---- چیدمانِ دستیِ جلسه‌ها که کاربر تو مرحله‌ی تایید آنبورد ساخته (یا null یعنی همون
+   پیشنهادِ پیش‌فرضِ JAW_SPLIT_TEMPLATES دست‌نخورده مونده)؛ شکلش دقیقاً مثلِ یه ورودیِ
+   JAW_SPLIT_TEMPLATES هست: [{label, sub, zones:[]}, ...]. ---- */
+let jawCustomSplit = null;
+let jawActiveDay = 0; // اندیسِ جلسه‌ی فعال از رویِ چیدمانِ فعال
+let jawSplitAssign = {}; // zone -> اندیسِ جلسه، فقط تویِ مرحله‌ی ویرایشِ چیدمان استفاده می‌شه
+let jawSplitDayLabels = [];
+function getActiveJawSplitTemplate(){
+  const p = storeData.jawPrefs || {};
+  const n = parseInt(p.freq, 10);
+  const validN = [2,3,4].indexOf(n) >= 0 ? n : 3;
+  if(jawCustomSplit && jawCustomSplit.length === validN && jawCustomSplit.every(d=> d.zones && d.zones.length)) return jawCustomSplit;
+  return JAW_SPLIT_TEMPLATES[validN];
+}
+// توضیحِ واضحِ طرزِ اجرا برای تک‌تکِ ۴۹ حرکتِ بالا — کلیدش عیناً همون رشته‌ی اسمِ حرکته که
+// تویِ JAW_EXERCISES استفاده شده، پس با کلیک روی هر کارت (چه تویِ لیستِ ساده، چه وسطِ جلسه‌ی
+// زنده) مستقیم از رویِ همین اسم پیدا می‌شه؛ جای دیگه‌ای برای هماهنگ‌نگه‌داشتن لازم نیست.
+const JAW_EXERCISE_HOWTO = {
+  // ---- گیجگاهی (تمپورالیس) ----
+  'ماساژِ دایره‌ای گیجگاه با نوکِ انگشت': 'نوکِ دو یا سه انگشت رو روی گیجگاه (کنارِ چشم، بالای گونه) بذار و با فشارِ ملایم، ۱۰ تا ۱۵ ثانیه حرکتِ دایره‌ای بده — هم ساعتگرد هم پادساعتگرد.',
+  'فشارِ آرومِ دندان‌ها روی هم': 'دندان‌های بالا و پایین رو به‌آرومی (نه با تمامِ قدرت) روی هم فشار بده و ۵ ثانیه نگه دار؛ باید انقباضِ عضله رو زیرِ انگشت‌هات کنارِ گیجگاه حس کنی. ۱۰ بار تکرار کن.',
+  'فشارِ نوکِ انگشت‌ها روی گیجگاه حینِ بازوبسته‌کردنِ آرومِ فک': 'نوکِ انگشت‌ها رو روی گیجگاه نگه دار و همزمان دهنت رو چندبار آروم باز و بسته کن؛ تمرکزت روی حسِ حرکتِ عضله زیرِ انگشت‌هاته، نه سرعت.',
+  'عقب‌کشیدنِ فکِ پایین (بدونِ پایین‌آوردن) و نگه‌داشتن': 'فکِ پایین رو مستقیم به‌سمتِ عقب بکش (نه پایین، فقط عقب — برعکسِ حرکتِ «جلوآوردنِ فک»)، ۵ ثانیه نگه دار، ۱۰ بار تکرار. حرکتِ ملایمیه و برخلافِ بازکردنِ حداکثریِ دهان، معمولاً برای مفصلِ فک هم امن‌تره.',
+  // ---- دورِ چشم ----
+  'تنگ‌کردنِ چشم‌ها بدونِ چروکاندنِ پیشونی': 'چشم‌هات رو محکم ولی بدونِ بالاآوردنِ ابرو یا چروکاندنِ پیشونی تنگ کن و ۵ ثانیه نگه دار. اگه پیشونیت داره حرکت می‌کنه، فشار رو کمتر کن.',
+  'باز نگه‌داشتنِ کاملِ چشم‌ها تا حسِ کشش': 'چشم‌هات رو تا جایی که می‌تونی بدونِ ناراحتی باز کن (انگار تعجب کردی) و تا حسِ یه کششِ ملایمِ دورِ چشم، حدودِ ۵ ثانیه نگه دار.',
+  'پلک‌زدنِ آهسته و کامل': 'چشم‌ها رو خیلی آروم و کامل ببند، یک لحظه مکث کن، بعد به‌آرومی باز کن. ۱۰ تا ۱۵ بار تکرار کن؛ سرعتش باید خیلی کندتر از پلک‌زدنِ عادی باشه.',
+  'نگه‌داشتنِ نوکِ انگشت‌ها کنارِ چشم و تلاش برای تنگ‌کردنِ چشم دربرابرِ فشار': 'نوکِ انگشت‌ها رو کنارِ گوشه‌ی بیرونیِ چشم بذار و یه فشارِ خیلی ملایم به‌سمتِ داخل بده؛ حالا سعی کن چشمت رو دربرابرِ همین فشار تنگ کنی. ۵ تکرار، هر کدوم ۳ ثانیه.',
+  'چرخشِ آرومِ چشم‌ها به چپ، راست، بالا و پایین': 'سرت ثابت بمونه، فقط چشم‌هات رو به‌آرومی به چپ، راست، بالا و پایین حرکت بده، هر جهت ۲ ثانیه نگه دار. ۳ دور تکرار کن.',
+  'چشمک‌زدنِ متناوب با هر چشم': 'چشمِ راست رو ببند و چپ رو باز نگه دار، بعد برعکس؛ اگه اولش سخته می‌تونی با دستت چشمِ مقابل رو کمی نگه داری تا عضله‌ی سمتِ درست یاد بگیره تنها کار کنه. ۱۰ بار هر طرف.',
+  // ---- گونه‌ای (زایگوماتیکوس) ----
+  'تو دادنِ لپ‌ها به داخل': 'لپ‌ها و لب‌ها رو به داخلِ دهان بمک (انگار می‌خوای لپ‌هات رو بینِ دندون‌ها نگه داری) تا صورت حالتِ لاغر بگیره، و ۵ ثانیه نگه دار.',
+  'باد کردنِ لپ‌ها و نگه‌داشتن': 'هوا رو تو دهانت حبس کن و لپ‌هات رو کامل باد کن، ۱۰ ثانیه نگه دار، بعد آروم هوا رو خالی کن.',
+  'چرخوندنِ هوا زیرِ لب‌ها (مثلِ دهان‌شویه)': 'دهانت رو ببند، هوا رو مثلِ دهان‌شویه‌کردن دورِ لب‌ها و لپ‌ها بچرخون — چند دور یک طرف، چند دور طرفِ مقابل.',
+  'ماساژِ دایره‌ای گونه‌ها با نوکِ انگشت': 'نوکِ انگشت‌ها رو وسطِ گونه‌ها بذار و با فشارِ ملایم، ۱۵ تا ۲۰ ثانیه حرکتِ دایره‌ای رو به بالا بده.',
+  'لبخندِ عریض دربرابرِ فشارِ انگشت‌ها روی گوشه‌های دهان': 'انگشت‌ها رو روی گوشه‌های دهان بذار، یه فشارِ ملایم به پایین بده، و سعی کن دربرابرِ همین فشار لبخندِ عریض بزنی. ۵ ثانیه نگه دار، ۱۰ بار تکرار.',
+  'بازکردنِ دهان به شکلِ دایره، پوشوندنِ دندان‌ها با لب و بالاکشیدنِ گونه‌ها': 'دهانت رو به شکلِ یه دایره باز کن، لب‌ها رو روی دندون‌ها بکش تا دندون‌ها دیده نشن، بعد گونه‌ها رو به‌سمتِ بالا (مثلِ لبخند) بکش و ۵ ثانیه نگه دار.',
+  'بادکردنِ لپ‌ها و جابه‌جاکردنِ هوا از یک طرف به طرفِ دیگر': 'لپ‌ها رو باد کن و هوا رو از لپِ راست به لپِ چپ منتقل کن، چند ثانیه نگه دار، بعد برعکس؛ ۱۰ بار رفت‌وبرگشت.',
+  // ---- بینی (نازالیس) ----
+  'چروکاندنِ بینی': 'بینیت رو مثلِ حسِ بوی بد، به‌سمتِ بالا چروک بده و ۵ ثانیه نگه دار.',
+  'بازکردنِ پره‌های بینی و نگه‌داشتن': 'نفسِ عمیق از بینی بکش و همزمان پره‌های بینی رو تا جایی که می‌تونی باز کن، ۵ ثانیه نگه دار، بعد آروم رها کن.',
+  'چین‌انداختنِ بینی همراه با بالاکشیدنِ لبِ بالا (مثلِ خرگوش)': 'بینی رو چروک بده و همزمان لبِ بالا رو کمی بالا بکش، انگار داری مثلِ خرگوش بو می‌کشی؛ ۵ ثانیه نگه دار، ۱۰ بار تکرار.',
+  'فشارِ ملایمِ دو طرفِ بینی به هم و تلاش برای دمِ نفس از بینی': 'با انگشتِ اشاره‌ی دو دست، دو طرفِ بینی رو به‌آرومی به هم فشار بده و همزمان سعی کن از بینی نفس بکشی؛ این مقاومت رو ۵ ثانیه نگه دار، ۱۰ بار تکرار.',
+  // ---- دورِ دهان ----
+  'تلفظِ اغراق‌شده‌ی صداهای آ، او، ای و او': 'هر کدوم از حروفِ آ، او، ای، او رو با حرکتِ خیلی اغراق‌شده و واضحِ لب‌ها تلفظ کن، انگار داری بی‌صدا با یکی صحبت می‌کنی؛ هر حرف رو ۳ تا ۴ بار تکرار کن.',
+  'غنچه‌کردنِ لب‌ها و نگه‌داشتن': 'لب‌ها رو جمع کن و به‌سمتِ جلو غنچه کن (مثلِ بوسه)، ۵ ثانیه نگه دار، ۱۰ بار تکرار.',
+  'دمیدنِ هوا با لب‌های جمع‌شده': 'لب‌ها رو جمع کن و مثلِ فوت‌کردنِ شمع، هوا رو آروم و ممتد بیرون بده؛ چند نفس تکرار کن.',
+  'کِشیدنِ متناوبِ لب‌ها به دو طرف و بعد غنچه‌کردنِ لب‌ها': 'لب‌ها رو محکم به دو طرف بکش (مثلِ لبخندِ عریضِ کشیده)، بعد فوری جمعشون کن و غنچه کن؛ این رفت‌وبرگشت رو ۱۰ تا ۱۵ بار تکرار کن.',
+  'جمع‌کردنِ هر دو لب به داخلِ دهان و فشردنِ آروم': 'هر دو لب رو به داخلِ دهان بغلتون (روی دندون‌ها) و آروم به هم فشار بده، ۵ ثانیه نگه دار، ۱۰ بار تکرار.',
+  // ---- چانه‌ای (منتالیس) ----
+  'بالاآوردنِ چانه با لب‌های جمع‌شده': 'لبِ پایین رو بالا بیار طوری که چونه چین بخوره و لب‌ها جمع بشن (حالتِ اخم با چونه)، ۵ ثانیه نگه دار، ۱۰ بار تکرار.',
+  'فشارِ لبِ پایین به بالا با دهانِ بسته': 'دهان بسته، لبِ پایین رو با فشار به‌سمتِ لبِ بالا هول بده تا زیرِ چونه و لب سفت بشه، ۵ ثانیه نگه دار.',
+  'بیرون‌دادنِ زبان به جلو تا حسِ کشش زیرِ چانه': 'زبون رو تا جایی که می‌تونی به‌سمتِ جلو و کمی پایین دراز کن تا زیرِ چونه رو حسِ کشش کنی، ۵ ثانیه نگه دار، ۵ بار تکرار.',
+  'قلاب‌کردنِ دو انگشت زیرِ چانه و کشیدنِ آرومِ پوست به‌سمتِ گوش‌ها': 'با انگشتِ اشاره و وسط یه قلاب زیرِ چونه بساز، و پوست رو آروم از وسطِ چونه به‌سمتِ هر گوش بکش؛ هر طرف ۵ بار.',
+  'ضربه‌های ریتمیکِ ملایم زیرِ چانه با پشتِ دست': 'با پشتِ دست، به‌آرومی و با ریتم، ۳۰ ثانیه زیرِ چونه رو ضربه‌ای (مثلِ دف‌زدن) لمس کن؛ فشار نباید دردناک باشه.',
+  // ---- جونده / خطِ فک (ماسِتر) ----
+  'بردنِ فکِ پایین به جلو و نگه‌داشتن': 'فکِ پایین رو جلو بیار طوری که دندون‌های پایین جلوتر از دندون‌های بالا بایسته، ۵ ثانیه نگه دار، ۱۰ بار تکرار.',
+  'بازکردنِ کاملِ دهان تا حداکثر': 'دهانت رو تا جایی که بدونِ درد می‌تونی باز کن، ۳ ثانیه نگه دار، آروم ببند. ۱۰ بار تکرار.',
+  'باز و بسته‌کردنِ آرومِ دهان دربرابرِ مقاومتِ دست': 'با یه دست، از زیرِ چونه، یه مقاومتِ ملایم به بالا بده و سعی کن دهانت رو دربرابرِ همین مقاومت باز کنی؛ ۱۰ بار، هر بار آروم.',
+  'جویدنِ روبه‌بالا (بدونِ آدامس)': 'دهان بسته، حرکتِ جویدن رو بدونِ چیزی تو دهانت، با تمرکز روی فشارِ روبه‌بالا و پشتِ گوش، ۲۰ بار تکرار کن.',
+  'چرخشِ آرومِ فک به چپ و راست با دهانِ کمی‌باز': 'دهان رو کمی باز کن و فکِ پایین رو به‌آرومی به چپ و راست بچرخون، هر طرف ۵ بار، بدونِ فشارِ زیاد روی مفصل.',
+  'نگه‌داشتنِ زبان چسبیده به سقفِ دهان با دندان‌های نزدیک‌به‌هم و لب‌های بسته': 'کلِ سطحِ زبون رو (نه فقط نوکش) به سقفِ دهان بچسبون، دندون‌ها رو نزدیکِ هم و لب‌ها رو بسته نگه دار؛ سعی کن این حالت رو چند دقیقه، بدونِ فشارِ زیاد، حفظ کنی.',
+  'فشارِ فکِ پایین به بالا دربرابرِ مقاومتِ دست از زیرِ چانه': 'یه دست رو زیرِ چونه بذار و یه مقاومتِ ملایم به پایین بده؛ سعی کن فکِ پایین رو دربرابرِ همین مقاومت به بالا (بستنِ دهان) فشار بدی، ۵ ثانیه، ۱۰ بار.',
+  'ماساژِ دایره‌ای ماهیچه‌ی فک جلوی گوش با نوکِ انگشت': 'نوکِ انگشت‌ها رو درست جلوی گوش، بالای زاویه‌ی فک بذار (جایی که وقتی دندون‌هات رو فشار می‌دی برجسته می‌شه) و با فشارِ ملایم، ۱۵ تا ۲۰ ثانیه دایره‌ای ماساژ بده. برخلافِ حرکت‌های مقاومتی، این یکی صرفاً ریلکس‌کننده‌ست و برای شروع یا برای کسی که TMJ داره امن‌تره.',
+  // ---- گردن (پلاتیسما) ----
+  'خم‌کردنِ سر به چپ و راست': 'گوشِ راست رو به‌آرومی به‌سمتِ شونه‌ی راست نزدیک کن تا کششِ گردن رو حس کنی، ۵ ثانیه نگه دار، بعد طرفِ چپ. هر طرف ۵ بار.',
+  'کِشیدنِ گردن به‌سمتِ بالا و کنار': 'چونه رو کمی بالا بگیر و سر رو به یه طرف کج کن تا امتدادِ گردن تا فکت کشیده بشه، ۵ ثانیه نگه دار، طرفِ مقابل تکرار کن.',
+  'کشیدنِ زبان به‌سمتِ چانه و نگه‌داشتن': 'زبون رو تا جایی که می‌تونی به‌سمتِ چونه دراز کن (نه بیرون از دهان، بلکه روبه‌پایین)، ۵ ثانیه نگه دار، ۱۰ بار.',
+  'فشارِ چانه به انگشت‌های زیرِ چانه': 'مشتِ دستت رو زیرِ چونه بذار و چونه رو به‌سمتِ پایین، روی مشت فشار بده، ۵ ثانیه نگه دار، ۱۰ بار.',
+  'کِشیدنِ گوشه‌های دهان به پایین با نمایشِ دندان‌های پایین': 'گوشه‌های دهان رو به‌سمتِ پایین بکش طوری که دندون‌های پایین دیده بشن (حالتِ اخمِ اغراق‌شده)، تا کششِ گردن رو حس کنی؛ ۵ ثانیه نگه دار.',
+  'ماساژِ لغزشیِ گردن از زیرِ چانه به‌سمتِ گردن با کفِ دست (زهکشیِ لنفاوی)': 'کفِ دست رو زیرِ چونه بذار و با فشارِ خیلی ملایم، به‌سمتِ پایین و گردن بکش (نه فشار، فقط لمسِ لغزشی)؛ ۱۰ بار هر طرف.',
+  'بوسیدنِ سقف با سرِ روبه‌عقب': 'سر رو آروم به عقب خم کن (رو به سقف)، لب‌ها رو غنچه کن انگار داری سقف رو می‌بوسی، ۵ ثانیه نگه دار، ۱۰ بار.',
+  'چرخشِ سر به یک طرف و نگه‌داشتنِ ۵ثانیه‌ای، بعد طرفِ مقابل': 'سرت رو تا جایی که راحتی به یک طرف بچرخون، ۵ ثانیه نگه دار، بعد به طرفِ مقابل؛ ۵ بار هر طرف، بدونِ تکونِ ناگهانی.',
+  'کِشیدنِ گردن به‌سمتِ بالا مثلِ قو و نگه‌داشتن': 'گردن رو تا جایی که راحتی بلند کن (انگار می‌خوای قدت بلندتر بشه)، چونه موازیِ زمین، ۵ ثانیه نگه دار، ۱۰ بار.',
+  // ---- میانیِ گردن ----
+  'جمع‌کردنِ چانه به‌سمتِ گردن': 'بدونِ خم‌کردنِ کمر، فقط چونه رو مستقیم به‌سمتِ گردن عقب بکش (حالتِ چانه‌ی دوتایی)، ۵ ثانیه نگه دار، ۱۰ بار.',
+  'چرخشِ کاملِ گردن': 'سر رو آروم یه دورِ کامل بچرخون (جلو، کنار، عقب، کنارِ دیگه)، یه دور در جهتِ ساعتگرد، یه دور در جهتِ عکس، خیلی آروم و بدونِ فشار.',
+  'بالاآوردنِ سر از حالتِ درازکش با زبان به سقفِ دهان': 'به‌پشت دراز بکش، زبون رو به سقفِ دهان بچسبون، و فقط سرت رو کمی از زمین بالا بیار، ۳ ثانیه نگه دار، آروم برگردون؛ ۱۰ بار.',
+  'فشاردادنِ پسِ سر به بالشت یا دیوار و نگه‌داشتن': 'پسِ سرت رو به بالشت یا دیوار تکیه بده و یه فشارِ ملایم و ثابت به عقب وارد کن، ۵ ثانیه نگه دار، ۱۰ بار.',
+  'خم‌کردنِ آرومِ گردن به جلو و عقب با تمرکز روی کشش': 'چونه رو آروم به‌سمتِ سینه پایین بیار تا کششِ پشتِ گردن رو حس کنی، ۵ ثانیه نگه دار، بعد خیلی آروم سر رو به عقب برگردون (نه تا آخر، فقط تا حسِ راحت)، ۵ ثانیه؛ ۵ دور تکرار.',
+};
+function jawOpenHowto(name, meta){
+  const modal = document.getElementById('jawHowtoModal');
+  if(!modal) return;
+  document.getElementById('jawHowtoName').textContent = name;
+  document.getElementById('jawHowtoMeta').textContent = meta || '';
+  document.getElementById('jawHowtoText').textContent = JAW_EXERCISE_HOWTO[name] || 'توضیحی برای این حرکت ثبت نشده.';
+  modal.classList.add('visible');
+}
+function jawCloseHowto(){
+  const modal = document.getElementById('jawHowtoModal');
+  if(modal) modal.classList.remove('visible');
+}
+// آیکنِ SVG کارتِ حرکت‌های فک (چهره‌ی ساده) — مستقل از نوعِ حرکت، چون بر خلافِ بدنسازی
+// اینجا نوع‌بندیِ تجهیزات (دمبل/هالتر/...) وجود نداره.
+const JAW_EX_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 5.5c-.8 2-1.1 4-1.1 6.2 0 5 3 8.8 6.6 9.8.9.2 1.9 0 2.6-.6l1-.9c2.3-2 3.7-4.9 3.9-8 .1-2.4-.3-4.7-1.2-6.9"/><path d="M8.3 9.2c.5-.4 1.1-.6 1.7-.6M15.7 9.2c-.5-.4-1.1-.6-1.7-.6"/></svg>`;
+function jawExerciseCardHtml(zone, name){
+  return `<div class="exercise-card" data-zone="${zone}" data-name="${name}">
+    <div class="ex-icon-box">${JAW_EX_ICON_SVG}</div>
+    <div class="ex-info">
+      <div class="ex-name">${name}</div>
+      <div class="ex-meta">${JAW_MUSCLE_GROUPS[zone]}</div>
+      <div class="ex-info-hint">ℹ️ طرزِ اجرا (کلیک کن)</div>
+    </div>
+    <button type="button" class="ex-swap-btn" data-swap-trigger="1" title="تغییر حرکت">${WO_SWAP_ICON_SVG}</button>
+  </div>`;
+}
+function renderJawDayPills(){
+  const template = getActiveJawSplitTemplate();
+  if(jawActiveDay >= template.length) jawActiveDay = 0;
+  const pillsEl = document.getElementById('jawDayPills');
+  if(!pillsEl) return;
+  pillsEl.innerHTML = template.map((d,i)=>
+    `<div class="wo-day-pill${i===jawActiveDay?' active':''}" data-day="${i}">${d.label}<span class="wp-sub">${d.sub}</span></div>`
+  ).join('');
+  pillsEl.querySelectorAll('.wo-day-pill').forEach(pill=>{
+    pill.addEventListener('click', ()=>{ jawActiveDay = parseInt(pill.dataset.day,10); renderJawDayPills(); renderJawExerciseList(); });
+  });
+}
+// دیگه هر جلسه کلِ ۹ ناحیه رو نداره — فقط ناحیه‌های همون جلسه (طبقِ getActiveJawSplitTemplate)
+// نشون داده می‌شن؛ buildJawSessionQueue خودش از رویِ همینِ کارت‌های رندرشده صف می‌سازه، پس
+// خودکار فقط رویِ ناحیه‌های همون جلسه کار می‌کنه، بدونِ نیاز به تغییرِ جداگانه.
+function renderJawExerciseList(){
+  const wrap = document.getElementById('jawExerciseListWrap');
+  if(!wrap) return;
+  const template = getActiveJawSplitTemplate();
+  const day = template[jawActiveDay] || template[0];
+  const titleEl = document.getElementById('jawDayTitle');
+  if(titleEl) titleEl.textContent = 'ناحیه‌های این جلسه: ' + jawZoneSplitLabel(day.zones);
+  wrap.innerHTML = day.zones.map(zone=>{
+    const cards = (JAW_EXERCISES[zone]||[]).map(name=> jawExerciseCardHtml(zone, name)).join('');
+    return '<div style="margin-bottom:14px;">'+
+      '<div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px;">'+JAW_MUSCLE_GROUPS[zone]+'</div>'+
+      cards+
+    '</div>';
+  }).join('');
+}
+const jawExerciseListEl = document.getElementById('jawExerciseListWrap');
+if(jawExerciseListEl){
+  jawExerciseListEl.addEventListener('click', (e)=>{
+    const swapBtn = e.target.closest('.ex-swap-btn');
+    if(swapBtn){
+      const card = swapBtn.closest('.exercise-card');
+      if(card) jawOpenSwapModal({ mode:'list', card });
+      return;
+    }
+    // کلیک روی هر جای دیگه‌ی کارت (نه دکمه‌ی تعویض) = باز کردنِ توضیحِ طرزِ اجرا.
+    const card = e.target.closest('.exercise-card');
+    if(card) jawOpenHowto(card.dataset.name, JAW_MUSCLE_GROUPS[card.dataset.zone] || '');
+  });
+}
+
+/* ===================== جلسه‌ی هدایت‌شده‌ی تمرینِ فک — عیناً هم‌الگو با موتورِ جلسه‌ی
+   بدنسازی (woSession/woStartSession/...): هر حرکت یه کرنومترِ روبه‌بالاست که خودِ کاربر با
+   دکمه‌ی «پایان حرکت» تمومش می‌کنه، بینِ حرکت‌ها یه استراحتِ کوتاهِ شمارش‌معکوس‌دار هست که
+   به صفر که رسید منتظرِ تأییدِ کاربر می‌مونه، هر حرکتِ در حالِ اجرا قابلِ تغییر با یه حرکتِ
+   مشابه از همون ناحیه‌ست، لیستِ حرکت‌های انجام‌شده وسطِ پاپ‌آپ قابلِ‌مرور و جزئیات‌دیدنه، پایانِ
+   زودهنگام یه دیالوگِ تأییدِ داخلی داره، و آخرِ جلسه یه امتیازِ کیفیتِ ۱ تا ۵ ستاره می‌گیره.
+   مدتِ استراحت ثابت نیست — jawGetRestSec() از رویِ سابقه‌ی تمرینِ ثبت‌شده تویِ آنبوردینگ
+   (تازه‌کار/کمی‌تجربه/حرفه‌ای) حساب می‌شه؛ تعریفش پایینِ همین فایل، تویِ بخشِ آنبوردینگه. */
+let jawSession = null; // {queue, idx, mode:'work'|'rest', secondsElapsed, secondsLeft, total, awaitingConfirm, interval, startedAt, doneList}
+// اولویتِ ناحیه‌ای مؤثر: اگه کاربر خودش چیپ انتخاب کرده همون، وگرنه از رویِ «هدف» حدس زده می‌شه.
+function jawEffectivePriorityZones(p){
+  if(!p) return [];
+  if(p.priority && p.priority.length) return p.priority;
+  return JAW_GOAL_ZONE_MAP[p.goal] || [];
+}
+// صفِ جلسه رو از رویِ کارت‌های فعلاً رندرشده می‌سازه، ولی برخلافِ قبل، دیگه فقط «همه‌چیز به
+// ترتیبِ نمایش» نیست — واقعاً طبقِ جواب‌های آنبوردینگ شخصی‌سازی می‌شه:
+//  ۱) اگه TMJ داری، حرکت‌های پرخطرِ اون سطح از صف حذف می‌شن.
+//  ۲) ناحیه‌های اولویت‌دار (دستی یا از رویِ هدف) اول تویِ صف میان.
+//  ۳) طبقِ زمانِ روزانه‌ای که انتخاب کردی، تعدادِ کلِ حرکت‌ها محدود می‌شه — و چون اولویت‌دارها
+//     اول صف‌ان، حذفِ مازاد همیشه از ناحیه‌های کم‌اهمیت‌تر شروع می‌شه، نه از اولویت‌های خودت.
+function buildJawSessionQueue(){
+  let all = [];
+  document.querySelectorAll('#jawExerciseListWrap .exercise-card').forEach(card=>{
+    const nameEl = card.querySelector('.ex-name');
+    if(!nameEl) return;
+    all.push({ name: nameEl.textContent, zone: card.dataset.zone });
+  });
+  const p = storeData.jawPrefs || {};
+  if(p.tmj === 'yes'){
+    all = all.filter(it=>{
+      if(JAW_TMJ_RISK_HIGH.has(it.name)) return false;
+      if(p.tmjSeverity === 'often' && JAW_TMJ_RISK_MODERATE.has(it.name)) return false;
+      return true;
+    });
+  }
+  const priorityZones = jawEffectivePriorityZones(p);
+  if(priorityZones.length){
+    const inPriority = all.filter(it=> priorityZones.indexOf(it.zone) >= 0);
+    const rest = all.filter(it=> priorityZones.indexOf(it.zone) < 0);
+    all = inPriority.concat(rest);
+  }
+  const budget = JAW_TIME_BUDGET[p.time];
+  if(budget && all.length > budget) all = all.slice(0, budget);
+  return all;
+}
+function jawStartSession(){
+  const queue = buildJawSessionQueue();
+  if(!queue.length){ showToast('حرکتی پیدا نشد', 'error'); return; }
+  jawSession = { queue, idx:0, mode:'work', secondsElapsed:0, secondsLeft:0, total:0, awaitingConfirm:false, interval:null, startedAt:Date.now(), doneList:[] };
+  document.getElementById('jawSessionOverlay').classList.add('show');
+  jawRenderSessionStep();
+  jawRenderDoneList();
+  jawTickSession();
+}
+function jawRenderDoneList(){
+  const s = jawSession; if(!s) return;
+  const wrap = document.getElementById('jawSessionDoneWrap');
+  const list = document.getElementById('jawSessionDoneList');
+  const countEl = document.getElementById('jawSessionDoneCount');
+  if(!wrap || !list) return;
+  const done = s.doneList || [];
+  if(!done.length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  if(countEl) countEl.textContent = toFa(done.length);
+  list.innerHTML = done.map((d,i) =>
+    `<button type="button" class="wo-session-done-item" data-idx="${i}">
+      <span class="di-check">✅</span>
+      <span class="di-name">${d.name}</span>
+      <span class="di-time">${woFormatSessionTime(d.seconds)}</span>
+    </button>`
+  ).join('');
+  list.scrollTop = list.scrollHeight;
+}
+function jawOpenDoneDetail(idx){
+  const s = jawSession; if(!s) return;
+  const d = (s.doneList||[])[idx];
+  if(!d) return;
+  document.getElementById('jawDoneDetailIdx').textContent = toFa(idx+1);
+  document.getElementById('jawDoneDetailName').textContent = d.name;
+  document.getElementById('jawDoneDetailMeta').textContent = d.meta || '';
+  document.getElementById('jawDoneDetailTime').textContent = woFormatSessionTime(d.seconds);
+  document.getElementById('jawDoneDetailModal').classList.add('visible');
+}
+function jawCloseDoneDetail(){
+  document.getElementById('jawDoneDetailModal').classList.remove('visible');
+}
+function jawRenderSessionStep(){
+  const s = jawSession; if(!s) return;
+  const item = s.queue[s.idx];
+  document.getElementById('jawSessionProgress').textContent = toFa(s.idx+1) + ' از ' + toFa(s.queue.length);
+  document.getElementById('jawSessionOverlay').classList.toggle('resting', s.mode==='rest');
+  document.getElementById('jawSessionOverlay').classList.toggle('rest-ready', s.mode==='rest' && s.awaitingConfirm);
+  const swapBtn = document.getElementById('jawSessionSwapBtn');
+  if(swapBtn) swapBtn.style.display = (s.mode==='work' && item && item.zone) ? '' : 'none';
+  const nextItem = s.queue[s.idx+1];
+  if(s.mode === 'work'){
+    document.getElementById('jawSessionPhaseLabel').textContent = '💆 حرکت اصلی';
+    document.getElementById('jawSessionExName').textContent = item.name;
+    document.getElementById('jawSessionExMeta').textContent = JAW_MUSCLE_GROUPS[item.zone] || '';
+    document.getElementById('jawSessionNext').textContent = nextItem ? ('بعدی: ' + nextItem.name) : 'آخرین حرکت 🎉';
+    document.getElementById('jawSessionSkipBtn').textContent = 'پایان حرکت ✅';
+  } else if(s.awaitingConfirm){
+    document.getElementById('jawSessionPhaseLabel').textContent = '✅ استراحت تموم شد';
+    document.getElementById('jawSessionExName').textContent = '';
+    document.getElementById('jawSessionExMeta').textContent = nextItem ? ('بعدی: ' + nextItem.name) : '';
+    document.getElementById('jawSessionNext').textContent = '';
+    document.getElementById('jawSessionSkipBtn').textContent = 'شروع حرکت بعدی ▶';
+  } else {
+    document.getElementById('jawSessionPhaseLabel').textContent = '😌 استراحت کوتاه';
+    document.getElementById('jawSessionExName').textContent = '';
+    document.getElementById('jawSessionExMeta').textContent = nextItem ? ('بعدی: ' + nextItem.name) : '';
+    document.getElementById('jawSessionNext').textContent = '';
+    document.getElementById('jawSessionSkipBtn').textContent = 'رد کردن استراحت ⏭';
+  }
+  jawUpdateSessionTimeDisplay();
+}
+function jawUpdateSessionTimeDisplay(){
+  const s = jawSession; if(!s) return;
+  const fill = document.getElementById('jawSessionBarFill');
+  if(s.mode === 'work'){
+    document.getElementById('jawSessionTime').textContent = woFormatSessionTime(Math.max(0,s.secondsElapsed));
+    if(fill) fill.style.width = '100%';
+  } else {
+    document.getElementById('jawSessionTime').textContent = woFormatSessionTime(Math.max(0,s.secondsLeft));
+    if(fill) fill.style.width = (100*Math.max(0,s.secondsLeft)/Math.max(1,s.total))+'%';
+  }
+}
+function jawTickSession(){
+  clearInterval(jawSession.interval);
+  const s = jawSession;
+  if(s.mode === 'work'){
+    s.interval = setInterval(()=>{
+      if(!jawSession) return;
+      jawSession.secondsElapsed = (jawSession.secondsElapsed||0) + 1;
+      jawUpdateSessionTimeDisplay();
+    }, 1000);
+  } else if(s.mode === 'rest' && !s.awaitingConfirm){
+    s.interval = setInterval(()=>{
+      if(!jawSession) return;
+      jawSession.secondsLeft--;
+      if(jawSession.secondsLeft <= 0){
+        jawSession.secondsLeft = 0;
+        clearInterval(jawSession.interval);
+        jawEnterRestConfirm();
+        return;
+      }
+      jawUpdateSessionTimeDisplay();
+    }, 1000);
+  }
+}
+function jawEnterRestConfirm(){
+  const s = jawSession; if(!s) return;
+  s.awaitingConfirm = true;
+  if(navigator.vibrate){ try{ navigator.vibrate([80,50,80]); }catch(e){} }
+  jawRenderSessionStep();
+}
+function jawFinishWorkStep(){
+  const s = jawSession; if(!s) return;
+  clearInterval(s.interval);
+  if(navigator.vibrate){ try{ navigator.vibrate([80,50,80]); }catch(e){} }
+  const item = s.queue[s.idx];
+  (s.doneList = s.doneList || []).push({ name: item.name, zone: item.zone, meta: JAW_MUSCLE_GROUPS[item.zone] || '', seconds: Math.max(0, s.secondsElapsed||0) });
+  jawRenderDoneList();
+  const isLast = s.idx === s.queue.length - 1;
+  if(isLast){ jawEndSessionCore(true); return; }
+  s.mode = 'rest'; s.secondsLeft = jawGetRestSec(); s.total = s.secondsLeft; s.awaitingConfirm = false;
+  jawRenderSessionStep(); jawTickSession();
+}
+function jawBeginNextExercise(){
+  const s = jawSession; if(!s) return;
+  if(navigator.vibrate){ try{ navigator.vibrate(60); }catch(e){} }
+  s.idx++;
+  if(s.idx >= s.queue.length){ jawEndSessionCore(true); return; }
+  s.mode = 'work'; s.secondsElapsed = 0; s.awaitingConfirm = false;
+  jawRenderSessionStep(); jawTickSession();
+}
+function jawSkipSessionStep(){
+  if(!jawSession) return;
+  const s = jawSession;
+  if(s.mode === 'work'){
+    jawFinishWorkStep();
+  } else if(s.awaitingConfirm){
+    jawBeginNextExercise();
+  } else {
+    clearInterval(s.interval);
+    s.secondsLeft = 0;
+    jawEnterRestConfirm();
+  }
+}
+// امتیازِ درگیریِ هر ناحیه: نسبتِ حرکت‌هایی که از اون ناحیه واقعاً تا آخر انجام شدن به کلِ
+// حرکت‌های اون ناحیه تو دیتابیس — دقیقاً همون منطقِ «هر امتیازی یعنی درگیر بوده» که
+// woMuscleEngagementRowHtml قبلاً برای بدنسازی استفاده می‌کنه.
+function computeJawMuscleEngagement(doneList){
+  const counts = {};
+  (doneList||[]).forEach(d=>{ counts[d.zone] = (counts[d.zone]||0) + 1; });
+  // نکته‌ی مهم: کلیدِ muscle (نه فقط label فارسیِ نمایشی) باید ذخیره بشه، چون
+  // computeJawRecoveryNow/JAW_MUSCLE_RECOVERY_HOURS/JAW_MUSCLE_ZONE_MAP همه بر اساسِ همین
+  // کلیدهای انگلیسی (masseter, temporalis, ...) کار می‌کنن — دقیقاً هم‌الگو با
+  // computeSessionMuscleEngagementِ بدنسازی که muscle+label رو با هم برمی‌گردونه.
+  return Object.keys(counts).map(zone=>({
+    muscle: zone,
+    label: JAW_MUSCLE_GROUPS[zone] || zone,
+    score: Math.min(100, Math.round(100 * counts[zone] / Math.max(1, (JAW_EXERCISES[zone]||[]).length)))
+  })).sort((a,b)=> b.score - a.score);
+}
+let jawPendingEnd = null; // {minutes, exercisesDone, exercisesTotal, muscleEngagement} — منتظرِ امتیازِ کیفیت
+function jawEndSessionCore(completedNaturally){
+  const s = jawSession; if(!s) return;
+  clearInterval(s.interval);
+  document.getElementById('jawSessionOverlay').classList.remove('show');
+  document.getElementById('jawSessionActions').style.display = '';
+  document.getElementById('jawSessionConfirmRow').style.display = 'none';
+  const minutes = Math.max(1, Math.round((Date.now()-s.startedAt)/60000));
+  const doneCount = completedNaturally ? s.queue.length : (s.mode==='rest' ? s.idx+1 : s.idx);
+  const muscleEngagement = computeJawMuscleEngagement(s.doneList);
+  jawSession = null;
+  jawPendingEnd = { minutes, exercisesDone: doneCount, exercisesTotal: s.queue.length, muscleEngagement };
+  document.querySelectorAll('#jawFqStars .fq-star').forEach(b=> b.classList.remove('active'));
+  document.getElementById('jawQualityModal').classList.add('visible');
+}
+function jawRequestFinish(){
+  const s = jawSession; if(!s) return;
+  clearInterval(s.interval);
+  document.getElementById('jawSessionActions').style.display = 'none';
+  document.getElementById('jawSessionConfirmRow').style.display = 'block';
+}
+function jawCancelFinish(){
+  if(!jawSession) return;
+  document.getElementById('jawSessionConfirmRow').style.display = 'none';
+  document.getElementById('jawSessionActions').style.display = '';
+  jawTickSession();
+}
+function jawConfirmFinish(){ jawEndSessionCore(false); }
+function jawFinalizeSession(quality){
+  const pending = jawPendingEnd; jawPendingEnd = null;
+  document.getElementById('jawQualityModal').classList.remove('visible');
+  if(!pending) return;
+  if(!storeData.jawHistory) storeData.jawHistory = {count:0, totalMinutes:0, qualitySum:0, qualityCount:0, history:[]};
+  const jh = storeData.jawHistory;
+  jh.count = (jh.count||0) + 1;
+  jh.totalMinutes = (jh.totalMinutes||0) + pending.minutes;
+  if(quality){ jh.qualitySum = (jh.qualitySum||0) + quality; jh.qualityCount = (jh.qualityCount||0) + 1; }
+  if(!jh.history) jh.history = [];
+  jh.history.push({ ts:Date.now(), minutes:pending.minutes, quality:quality||null,
+    exercisesDone:pending.exercisesDone, exercisesTotal:pending.exercisesTotal, muscleEngagement:pending.muscleEngagement||[] });
+  if(jh.history.length > 60) jh.history = jh.history.slice(-60);
+  saveData();
+  showToast('تمرین فک امروز ثبت شد! آفرین 💪', 'success');
+  renderJawHistory();
+}
+document.querySelectorAll('#jawFqStars .fq-star').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#jawFqStars .fq-star').forEach(b=>{
+      b.classList.toggle('active', Number(b.dataset.q) <= Number(btn.dataset.q));
+    });
+    setTimeout(()=> jawFinalizeSession(Number(btn.dataset.q)), 140);
+  });
+});
+document.getElementById('jawFqSkipBtn').addEventListener('click', ()=> jawFinalizeSession(null));
+document.getElementById('jawStartSessionBtn').addEventListener('click', jawStartSession);
+document.getElementById('jawSessionSkipBtn').addEventListener('click', jawSkipSessionStep);
+document.getElementById('jawSessionFinishBtn').addEventListener('click', jawRequestFinish);
+document.getElementById('jawSessionConfirmYesBtn').addEventListener('click', jawConfirmFinish);
+document.getElementById('jawSessionConfirmNoBtn').addEventListener('click', jawCancelFinish);
+document.getElementById('jawSessionDoneList').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.wo-session-done-item');
+  if(btn) jawOpenDoneDetail(Number(btn.dataset.idx));
+});
+document.getElementById('jawDoneDetailCloseBtn').addEventListener('click', jawCloseDoneDetail);
+document.getElementById('jawHowtoCloseBtn').addEventListener('click', jawCloseHowto);
+document.getElementById('jawSessionInfoBtn').addEventListener('click', ()=>{
+  const s = jawSession; if(!s) return;
+  const item = s.queue[s.idx];
+  if(item) jawOpenHowto(item.name, JAW_MUSCLE_GROUPS[item.zone] || '');
+});
+
+/* ---- تغییرِ حرکت (پیش از شروع، رویِ کارت‌ها، یا وسطِ جلسه) — عیناً هم‌الگو با
+   woOpenSwapModal، فقط استخرش JAW_EXERCISES[zone] هست (آرایه‌ی اسم، نه آبجکت). ---- */
+let jawSwapCtx = null; // {mode:'list'|'session', card, zone, currentName}
+function jawOpenSwapModal(ctx){
+  let zone, currentName;
+  if(ctx.mode === 'list'){
+    zone = ctx.card.dataset.zone;
+    const nameEl = ctx.card.querySelector('.ex-name');
+    currentName = nameEl ? nameEl.textContent : '';
+  } else {
+    const s = jawSession; if(!s) return;
+    const item = s.queue[s.idx];
+    if(!item || !item.zone){ showToast('این حرکت قابل تغییر نیست', 'error'); return; }
+    zone = item.zone;
+    currentName = item.name;
+  }
+  if(!zone || !JAW_EXERCISES[zone]){ showToast('این حرکت قابل تغییر نیست', 'error'); return; }
+  jawSwapCtx = { mode: ctx.mode, card: ctx.card || null, zone, currentName };
+  document.getElementById('jawSwapCurrent').innerHTML =
+    `<div class="wo-swap-current-label">حرکت فعلی</div><div class="wo-swap-current-name">${currentName}</div>`;
+  jawRenderSwapList();
+  document.getElementById('jawSwapModal').classList.add('visible');
+}
+function jawCloseSwapModal(){
+  document.getElementById('jawSwapModal').classList.remove('visible');
+  jawSwapCtx = null;
+}
+function jawRenderSwapList(){
+  const ctx = jawSwapCtx; if(!ctx) return;
+  const listEl = document.getElementById('jawSwapList');
+  const pool = JAW_EXERCISES[ctx.zone] || [];
+  const usedNames = new Set(
+    Array.from(document.querySelectorAll('#jawExerciseListWrap .ex-name')).map(el=> el.textContent)
+  );
+  const candidates = pool.filter(name=> name !== ctx.currentName);
+  if(!candidates.length){
+    listEl.innerHTML = `<div class="wo-swap-empty">حرکت جایگزینی برای این ناحیه پیدا نشد.</div>`;
+    return;
+  }
+  listEl.innerHTML = candidates.map(name=>{
+    const dup = usedNames.has(name);
+    return `<button type="button" class="wo-swap-item${dup?' dup':''}" data-name="${name.replace(/"/g,'&quot;')}">
+      <div class="wo-swap-item-icon">${JAW_EX_ICON_SVG}</div>
+      <div class="wo-swap-item-info">
+        <div class="wo-swap-item-name">${name}</div>
+        <div class="wo-swap-item-sets">${JAW_MUSCLE_GROUPS[ctx.zone]}${dup?' · الان تو برنامه‌ته':''}</div>
+      </div>
+    </button>`;
+  }).join('');
+}
+function jawApplySwap(newName){
+  const ctx = jawSwapCtx; if(!ctx) return;
+  if(!(JAW_EXERCISES[ctx.zone]||[]).includes(newName)) return;
+  if(ctx.mode === 'list' && ctx.card){
+    const nameEl = ctx.card.querySelector('.ex-name');
+    if(nameEl) nameEl.textContent = newName;
+  } else if(ctx.mode === 'session' && jawSession){
+    const item = jawSession.queue[jawSession.idx];
+    if(item){
+      item.name = newName;
+      jawRenderSessionStep();
+    }
+  }
+  jawCloseSwapModal();
+  showToast('حرکت عوض شد 🔄', 'success');
+}
+document.getElementById('jawSwapCloseBtn').addEventListener('click', jawCloseSwapModal);
+document.getElementById('jawSwapList').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.wo-swap-item');
+  if(btn) jawApplySwap(btn.dataset.name);
+});
+
+// ================== ساید‌تب «تاریخچه تمرین» (تب زاویه فک) — عیناً هم‌الگو با renderWoHistory ==================
+function renderJawHistory(){
+  const jh = storeData.jawHistory || {count:0, totalMinutes:0, qualitySum:0, qualityCount:0, history:[]};
+  const totalCard = document.getElementById('jawHistTotalCard');
+  if(totalCard){
+    const avg = jh.qualityCount ? (jh.qualitySum/jh.qualityCount) : 0;
+    totalCard.innerHTML = `
+      <div style="text-align:center;flex:1;"><div class="ftl-num">${toFa(jh.count||0)}</div><div class="ftl-label">مجموع جلسه‌ها</div></div>
+      <div class="ftl-div"></div>
+      <div style="text-align:center;flex:1;"><div class="ftl-num">${woFormatDuration(jh.totalMinutes||0)}</div><div class="ftl-label">مجموع زمان تمرین</div></div>
+      <div class="ftl-div"></div>
+      <div style="text-align:center;flex:1;"><div class="ftl-num" style="font-size:15px;">${jh.qualityCount ? woStarsHtml(avg) : '—'}</div><div class="ftl-label">میانگین کیفیت</div></div>
+    `;
+  }
+  const list = document.getElementById('jawHistList');
+  if(!list) return;
+  const history = (jh.history||[]).slice().reverse();
+  if(!history.length){
+    list.innerHTML = '<div class="wo-hist-empty">هنوز هیچ تمرینِ فکی رو تا آخر نبردی؛ از تبِ «برنامه» با دکمه‌ی «شروع تمرین امروز» اولین جلسه‌ت اینجا ثبت می‌شه.</div>';
+    return;
+  }
+  list.innerHTML = history.map(h=>{
+    const d = new Date(h.ts);
+    const dateStr = d.toLocaleDateString('fa-IR');
+    const timeStr = toFa(String(d.getHours()).padStart(2,'0'))+':'+toFa(String(d.getMinutes()).padStart(2,'0'));
+    return `<div class="focus-stat-card" style="margin:0 14px 8px;">
+      <div class="fsc-top"><span class="fsc-icon">${JAW_EX_ICON_SVG}</span><span class="fsc-title">تمرین فک</span>${h.quality?`<span class="fsc-identity">${woStarsHtml(h.quality)}</span>`:''}</div>
+      <div class="fsc-row"><span>تاریخ</span><span>${dateStr} · ${timeStr}</span></div>
+      <div class="fsc-row"><span>مدت زمان</span><span>${woFormatDuration(h.minutes||0)}</span></div>
+      <div class="fsc-row"><span>حرکت‌های انجام‌شده</span><span>${toFa(h.exercisesDone||0)} از ${toFa(h.exercisesTotal||0)}</span></div>
+      ${woMuscleEngagementRowHtml(h.muscleEngagement)}
+    </div>`;
+  }).join('');
+}
+
+/* ===================== تبِ «زاویه فک» — ساید‌تبِ «برنامه» (شخصی‌سازی) =====================
+   هم‌الگو با ویزارد آنبوردینگِ تبِ بدنسازی (woOB...): ۶ سوال (هدف، اولویتِ ناحیه‌ای، وضعیتِ
+   TMJ برای ایمنی، زمانِ روزانه، تعدادِ روزِ هفته، سابقه). جواب‌ها فقط ذخیره نمی‌شن — واقعاً رویِ
+   ساختِ صفِ جلسه (buildJawSessionQueue) اثر می‌ذارن: اولویت/هدف ترتیب و پوششِ حرکت‌ها رو عوض
+   می‌کنه، زمانِ روزانه تعدادِ کلِ حرکت‌ها رو محدود می‌کنه، TMJ حرکت‌های پرخطر رو حذف می‌کنه، و
+   سابقه مدتِ استراحتِ بینِ حرکت‌ها رو (jawGetRestSec) کم‌وزیاد می‌کنه. منبعِ حقیقت storeData.jawPrefs. */
+let jawObSelected = { goal:'', priority:[], tmj:'', tmjSeverity:'', time:'', freq:'', level:'' };
+
+const JAW_GOAL_LABEL = {
+  doublechin:'کم‌کردنِ چانه‌ی دوتایی', jawdef:'برجسته‌ترشدنِ خطِ فک',
+  neckfirm:'جلوگیری از افتادگیِ گردن', all:'هر سه هدف با هم',
+};
+const JAW_PRIORITY_LABEL = {
+  masseter:'خطِ فک و چونه', platysma:'زیرِ چانه و گردن', zygomaticus:'گونه‌ها', temporalis:'دورِ چشم و گیجگاه',
+};
+const JAW_TMJ_LABEL = { no:'بدونِ مشکلِ TMJ', yes:'با احتیاط به‌خاطرِ TMJ' };
+const JAW_TMJ_SEVERITY_LABEL = { mild:'کم و گاه‌به‌گاه', often:'زیاد یا هرروز' };
+const JAW_TIME_LABEL = { '5':'۵ دقیقه در روز', '10':'۱۰-۱۵ دقیقه در روز', '20':'۲۰+ دقیقه در روز' };
+const JAW_FREQ_LABEL = { '2':'۲ جلسه در هفته', '3':'۳ جلسه در هفته', '4':'۴ جلسه در هفته' };
+const JAW_LEVEL_LABEL = { beginner:'اولین‌بارشه', mid:'یه‌کم تجربه داره', advanced:'مدت‌هاست تمرین می‌کنه' };
+// وقتی کاربر خودش اولویتِ ناحیه‌ای رو انتخاب نکرده، از رویِ «هدف» حدس می‌زنیم چه گروه‌عضله‌هایی
+// باید زودتر/بیشتر تو صف بیان. goal=all یعنی بدونِ تمرکزِ خاص، پوششِ متعادل.
+const JAW_GOAL_ZONE_MAP = {
+  doublechin:['mentalis','platysma','neck_center'],
+  jawdef:['masseter','temporalis'],
+  neckfirm:['platysma','neck_center'],
+  all:[],
+};
+// سقفِ تعدادِ کلِ حرکت‌های یه جلسه بر اساسِ زمانِ روزانه‌ای که کاربر انتخاب کرده — تخمین با
+// میانگینِ ~۳۵ ثانیه برای هر حرکت (کار+استراحت).
+const JAW_TIME_BUDGET = { '5':8, '10':18, '20':30 };
+// حرکت‌های پرخطر برای TMJ — اونایی که دامنه‌ی حرکتیِ مفصل رو تا آخر می‌برن یا مقاومت وارد
+// می‌کنن. HIGH = حتی با TMJِ خفیف هم حذف می‌شه؛ MODERATE = فقط وقتی وضعیت «زیاد/هرروز» باشه.
+const JAW_TMJ_RISK_HIGH = new Set(['بازکردنِ کاملِ دهان تا حداکثر', 'چرخشِ آرومِ فک به چپ و راست با دهانِ کمی‌باز']);
+const JAW_TMJ_RISK_MODERATE = new Set(['فشارِ آرومِ دندان‌ها روی هم', 'بردنِ فکِ پایین به جلو و نگه‌داشتن', 'باز و بسته‌کردنِ آرومِ دهان دربرابرِ مقاومتِ دست', 'جویدنِ روبه‌بالا (بدونِ آدامس)']);
+// مدتِ استراحتِ بینِ حرکت‌ها بر اساسِ سابقه‌ی تمرین — تازه‌کارها استراحتِ بیشتر لازم دارن.
+const JAW_LEVEL_REST_SEC = { beginner:20, mid:15, advanced:10 };
+function jawGetRestSec(){
+  const lvl = (storeData.jawPrefs && storeData.jawPrefs.level) || 'mid';
+  return JAW_LEVEL_REST_SEC[lvl] || 15;
+}
+
+function jawResetTmjSeverityUI(){
+  const wrap = document.getElementById('jawObTmjSeverityWrap');
+  if(wrap) wrap.style.display = jawObSelected.tmj === 'yes' ? '' : 'none';
+}
+function showJawOnboard(){
+  document.getElementById('jawOnboard').style.display = '';
+  document.getElementById('jawMainContent').style.display = 'none';
+  document.getElementById('jawObFieldsStep').style.display = '';
+  document.getElementById('jawObSplitConfirmStep').style.display = 'none';
+  jawObSelected = { goal:'', priority:[], tmj:'', tmjSeverity:'', time:'', freq:'', level:'' };
+  setSegActive('jawObGoalSeg', '');
+  setChipActive('jawObPriorityChips', []);
+  setSegActive('jawObTmjSeg', '');
+  setSegActive('jawObTmjSeveritySeg', '');
+  setSegActive('jawObTimeSeg', '');
+  setSegActive('jawObFreqSeg', '');
+  setSegActive('jawObLevelSeg', '');
+  jawResetTmjSeverityUI();
+  document.getElementById('jawObErr').style.display = 'none';
+}
+function renderJawPlanSummary(){
+  const el = document.getElementById('jawPlanSummary');
+  if(!el) return;
+  const p = storeData.jawPrefs;
+  if(!p){ el.textContent = ''; return; }
+  const zones = jawEffectivePriorityZones(p);
+  const zoneTxt = zones.length ? zones.map(z=> JAW_MUSCLE_GROUPS[z]||z).join('، ') : 'همه‌ی نواحی، بدونِ تمرکزِ خاص';
+  el.innerHTML = `📋 برنامه‌ت: ${JAW_TIME_LABEL[p.time]||''} · ${JAW_FREQ_LABEL[p.freq]||''} · تمرکز روی ${zoneTxt}`;
+}
+function showJawMain(){
+  document.getElementById('jawOnboard').style.display = 'none';
+  document.getElementById('jawMainContent').style.display = '';
+  const p = storeData.jawPrefs;
+  const summary = document.getElementById('jawPrefsSummary');
+  if(summary && p){
+    const priorityTxt = (p.priority && p.priority.length) ? p.priority.map(z=> JAW_PRIORITY_LABEL[z]||z).join(' و ') : 'بدونِ اولویتِ دستی (طبقِ هدف)';
+    summary.innerHTML =
+      '🎯 هدف: <b>'+(JAW_GOAL_LABEL[p.goal]||'-')+'</b><br>'+
+      '🔍 اولویتِ ناحیه‌ای: <b>'+priorityTxt+'</b><br>'+
+      '😬 وضعیتِ فک: <b>'+(JAW_TMJ_LABEL[p.tmj]||'-')+(p.tmj==='yes' ? (' ('+(JAW_TMJ_SEVERITY_LABEL[p.tmjSeverity]||'-')+')') : '')+'</b><br>'+
+      '⏱️ زمانِ روزانه: <b>'+(JAW_TIME_LABEL[p.time]||'-')+'</b><br>'+
+      '📅 تعدادِ جلسه‌ی هفته: <b>'+(JAW_FREQ_LABEL[p.freq]||'-')+'</b><br>'+
+      '🌱 سابقه: <b>'+(JAW_LEVEL_LABEL[p.level]||'-')+'</b>';
+  }
+  const validN = p && [2,3,4].indexOf(parseInt(p.freq,10)) >= 0 ? parseInt(p.freq,10) : 3;
+  jawCustomSplit = (p && p.customSplit && p.customSplit.length === validN)
+    ? p.customSplit.map(d=>({label:d.label, sub:d.sub, zones:(d.zones||[]).slice()}))
+    : null;
+  jawActiveDay = 0;
+  renderJawPlanSummary();
+  renderJawDayPills();
+  renderJawExerciseList();
+}
+function renderJawProgramTab(){
+  const jp = storeData.jawPrefs;
+  if(jp && jp.onboarded) showJawMain();
+  else showJawOnboard();
+}
+['jawObGoalSeg','jawObTmjSeg','jawObTimeSeg','jawObFreqSeg','jawObLevelSeg','jawObTmjSeveritySeg'].forEach(id=>{
+  const seg = document.getElementById(id);
+  if(!seg) return;
+  seg.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button'); if(!btn) return;
+    const key = id==='jawObGoalSeg'?'goal' : id==='jawObTmjSeg'?'tmj' : id==='jawObTimeSeg'?'time'
+      : id==='jawObFreqSeg'?'freq' : id==='jawObTmjSeveritySeg'?'tmjSeverity' : 'level';
+    jawObSelected[key] = btn.dataset.val;
+    setSegActive(id, btn.dataset.val);
+    if(id === 'jawObTmjSeg'){
+      if(btn.dataset.val !== 'yes') jawObSelected.tmjSeverity = '';
+      jawResetTmjSeverityUI();
+    }
+  });
+});
+document.getElementById('jawObPriorityChips').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  const v = btn.dataset.val;
+  const idx = jawObSelected.priority.indexOf(v);
+  if(idx>=0) jawObSelected.priority.splice(idx,1);
+  else { if(jawObSelected.priority.length>=2) jawObSelected.priority.shift(); jawObSelected.priority.push(v); }
+  setChipActive('jawObPriorityChips', jawObSelected.priority);
+});
+document.getElementById('jawObConfirmBtn').addEventListener('click', ()=>{
+  const needsSeverity = jawObSelected.tmj === 'yes' && !jawObSelected.tmjSeverity;
+  if(!jawObSelected.goal || !jawObSelected.tmj || needsSeverity || !jawObSelected.time || !jawObSelected.freq || !jawObSelected.level){
+    document.getElementById('jawObErr').style.display = 'block';
+    return;
+  }
+  document.getElementById('jawObErr').style.display = 'none';
+  // قبل از ساخت نهایی برنامه، مرحله‌ی «تایید چیدمانِ جلسه‌ها» رو نشون می‌دیم: طبقِ تعدادِ
+  // جلسه‌ی انتخابی، پیشنهاد می‌دیم کدوم ناحیه‌های صورت تو کدوم جلسه باشن، و کاربر می‌تونه
+  // همینو تایید کنه یا خودش ناحیه‌ها رو بینِ جلسه‌ها جابه‌جا کنه — عیناً هم‌الگو با تمرینِ بدنسازی.
+  document.getElementById('jawObFieldsStep').style.display = 'none';
+  document.getElementById('jawObSplitConfirmStep').style.display = '';
+  renderJawSplitConfirmStep();
+  window.scrollTo(0, 0);
+});
+function renderJawSplitConfirmStep(){
+  const n = parseInt(jawObSelected.freq, 10);
+  const suggestion = cloneSuggestedJawSplit(n);
+  jawSplitDayLabels = suggestion.map(d=>d.label);
+  // اگه کاربر قبلاً یه چیدمان دستی با همین تعداد جلسه داشته (مثلاً داره از «ویرایشِ جواب‌ها»
+  // برنامه‌شو دوباره می‌سازه)، همونو نقطه‌ی شروع می‌ذاریم؛ وگرنه از پیشنهادِ پیش‌فرض.
+  const prevSaved = storeData.jawPrefs && storeData.jawPrefs.customSplit;
+  const source = (prevSaved && prevSaved.length === n) ? prevSaved : suggestion;
+  jawSplitAssign = {};
+  source.forEach((day,i)=> (day.zones||[]).forEach(z=>{ jawSplitAssign[z] = i; }));
+  suggestion.forEach((day,i)=> day.zones.forEach(z=>{ if(!(z in jawSplitAssign)) jawSplitAssign[z] = i; }));
+  document.getElementById('jawObSplitConfirmIntro').textContent =
+    'طبق جواب‌هایی که دادی (هفته‌ای ' + toFa(n) + ' جلسه)، این چیدمان رو پیشنهاد می‌دیم:';
+  document.getElementById('jawObSplitConfirmErr').style.display = 'none';
+  paintJawSplitConfirm();
+}
+function paintJawSplitConfirm(){
+  const n = jawSplitDayLabels.length;
+  const dayZones = Array.from({length:n}, ()=>[]);
+  JAW_SPLIT_ZONE_ORDER.forEach(z=>{
+    const d = jawSplitAssign[z];
+    if(typeof d === 'number' && dayZones[d]) dayZones[d].push(z);
+  });
+  document.getElementById('jawObSplitSummary').innerHTML = jawSplitDayLabels.map((label,i)=>
+    `<div class="split-confirm-day"><div class="split-confirm-day-title">${label}</div><div class="split-confirm-day-sub">${dayZones[i].length ? dayZones[i].map(z=>JAW_MUSCLE_GROUPS[z]).join('، ') : 'هنوز ناحیه‌ای نداره — حداقل یکی رو بنداز اینجا'}</div></div>`
+  ).join('');
+  document.getElementById('jawObSplitRows').innerHTML = JAW_SPLIT_ZONE_ORDER.map(z=>{
+    const dayBtns = jawSplitDayLabels.map((label,i)=>
+      `<button type="button" class="split-day-btn${jawSplitAssign[z]===i?' active':''}" data-zone="${z}" data-day="${i}">${toFa(i+1)}</button>`
+    ).join('');
+    return `<div class="split-muscle-row"><span class="split-muscle-name">${JAW_MUSCLE_GROUPS[z]}</span><div class="split-day-btns">${dayBtns}</div></div>`;
+  }).join('');
+}
+document.getElementById('jawObSplitRows').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.split-day-btn'); if(!btn) return;
+  jawSplitAssign[btn.dataset.zone] = parseInt(btn.dataset.day, 10);
+  document.getElementById('jawObSplitConfirmErr').style.display = 'none';
+  paintJawSplitConfirm();
+});
+document.getElementById('jawObSplitBackBtn').addEventListener('click', ()=>{
+  document.getElementById('jawObSplitConfirmStep').style.display = 'none';
+  document.getElementById('jawObFieldsStep').style.display = '';
+  window.scrollTo(0, 0);
+});
+document.getElementById('jawObSplitConfirmBtn').addEventListener('click', ()=>{
+  const n = jawSplitDayLabels.length;
+  const dayZones = Array.from({length:n}, ()=>[]);
+  JAW_SPLIT_ZONE_ORDER.forEach(z=>{
+    const d = jawSplitAssign[z];
+    if(typeof d === 'number' && dayZones[d]) dayZones[d].push(z);
+  });
+  if(dayZones.some(list=> !list.length)){
+    document.getElementById('jawObSplitConfirmErr').style.display = 'block';
+    return;
+  }
+  const suggestion = cloneSuggestedJawSplit(n);
+  jawCustomSplit = suggestion.map((d,i)=> ({ label: d.label, sub: jawZoneSplitLabel(dayZones[i]), zones: dayZones[i] }));
+  storeData.jawPrefs = Object.assign({}, jawObSelected, {
+    onboarded:true,
+    customSplit: jawCustomSplit.map(d=>({label:d.label, sub:d.sub, zones:d.zones.slice()}))
+  });
+  saveData();
+  document.getElementById('jawObSplitConfirmStep').style.display = 'none';
+  document.getElementById('jawObFieldsStep').style.display = '';
+  showJawMain();
+  showToast('برنامه‌ی فکت آماده شد ✅', 'success');
+});
+document.getElementById('jawEditPrefsBtn').addEventListener('click', ()=>{
+  const p = storeData.jawPrefs || {};
+  jawObSelected = { goal:p.goal||'', priority:(p.priority||[]).slice(), tmj:p.tmj||'', tmjSeverity:p.tmjSeverity||'',
+    time:p.time||'', freq:p.freq||'', level:p.level||'' };
+  document.getElementById('jawOnboard').style.display = '';
+  document.getElementById('jawMainContent').style.display = 'none';
+  document.getElementById('jawObFieldsStep').style.display = '';
+  document.getElementById('jawObSplitConfirmStep').style.display = 'none';
+  setSegActive('jawObGoalSeg', jawObSelected.goal);
+  setChipActive('jawObPriorityChips', jawObSelected.priority);
+  setSegActive('jawObTmjSeg', jawObSelected.tmj);
+  setSegActive('jawObTmjSeveritySeg', jawObSelected.tmjSeverity);
+  setSegActive('jawObTimeSeg', jawObSelected.time);
+  setSegActive('jawObFreqSeg', jawObSelected.freq);
+  setSegActive('jawObLevelSeg', jawObSelected.level);
+  jawResetTmjSeverityUI();
+  document.getElementById('jawObErr').style.display = 'none';
+});
+
+
 
 /* ===================== تب «دفعات تمرین»: از روی همون MUSCLE_ENGAGEMENT هر جلسه (که برای
    رنگ‌کردن نقشه‌ی بدن استفاده می‌شه) می‌شماریم هر گروه عضلانیِ درشت (سینه/پشت/شانه/جلوبازو/
@@ -19778,6 +23973,7 @@ try{
   if(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.App){
     Capacitor.Plugins.App.addListener('resume', resetPremiumPayBtnIfStuck);
     Capacitor.Plugins.App.addListener('resume', ()=>{ try{ updateLiveCounter(); }catch(e){} });
+    Capacitor.Plugins.App.addListener('resume', ()=>{ try{ applyPendingOpenChat(); }catch(e){} });
     Capacitor.Plugins.App.addListener('appStateChange', (state)=>{
       if(state && state.isActive) resetPremiumPayBtnIfStuck();
       if(state && state.isActive){ try{ updateLiveCounter(); }catch(e){} }
@@ -19850,7 +24046,12 @@ function handleAppForegroundChange(isActive){
     sb.auth.getSession().then(({data})=>{
       if(!data.session && !intentionalSignOut) confirmRealSignOut();
       else handlePublicChatSession(data.session);
-    }).catch(()=>{});
+    }).catch(()=>{
+      // fetch اصلاً انجام نشد (مثلاً درست همون لحظه که گوشی از خواب بیدار شده و شبکه
+      // هنوز وصل نیست) — به‌جای سکوت کامل، همون مسیر retry+network-aware رو صدا می‌زنیم
+      // تا وقتی شبکه برگشت، خودش وضعیت واقعی رو تایید کنه.
+      if(!intentionalSignOut) confirmRealSignOut();
+    });
   } else {
     try{ sb.auth.stopAutoRefresh(); }catch(e){}
   }
@@ -20343,6 +24544,21 @@ function openAdminPanel(){
 loadData().then(()=>{
   syncTaskWidget();
   applyPendingWidgetToggles();
+  applyPendingOpenChat();
+  // با باز شدنِ عادیِ اپ (یعنی «حالت بدون‌برنامه» خاموش باشه)، همیشه مستقیم می‌ریم رو
+  // تبِ «برنامه‌ریزی» > زیرتبِ «برنامه‌ی روزانه»، تا کاربر بدون رد شدن از «نمای کلی»
+  // بلافاصله بتونه شروع کنه به تیک‌زدن. اگه «حالت بدون‌برنامه» روشن باشه دست نمی‌زنیم،
+  // چون applyNoProgramModeUI (که خودِ loadData صداش زده) از قبل عمداً این کاربرها رو
+  // رو «نمای کلی» نگه داشته. فقط همین یه‌بار، تو بوتِ اولیه — نه هر بار که
+  // normalizeAndRenderStoreData دوباره صدا زده می‌شه (مثلاً بعد از لاگین/سینک) — چون
+  // اون‌جا کاربر ممکنه وسط کار تو یه تبِ دیگه باشه و نباید بی‌دلیل پرت بشه.
+  try{
+    if(!(storeData.profile && storeData.profile.noProgramMode)){
+      setAppMode('private', 'today');
+      const programSubBtn = document.querySelector('#tab-today .subseg button[data-sub="program"]');
+      if(programSubBtn) programSubBtn.click();
+    }
+  }catch(err){ console.error('default planning tab on boot failed', err); }
 });
 
 if ('serviceWorker' in navigator) {
@@ -20631,6 +24847,7 @@ if ('serviceWorker' in navigator) {
     let efRoomChannel = null;    // کانالِ esmfamil_room_<roomId>، موازیِ hk3RoomChannel
     let efRoomChannelId = null;
     let efCurrentRound = null;   // { round_id, round_index, picker_user_id, letter, status, total_rounds } یا null
+    let efLastTurnRoundId = null; // آخرین round_id ای که براش نوتیفِ «نوبتِ توئه» فرستاده شده
     let efStartBusy = false;
     let efPickLetterBusy = false;
 
@@ -21015,6 +25232,16 @@ if ('serviceWorker' in navigator) {
 
         const isMyTurn = !!(publicChatUser && efCurrentRound.picker_user_id === publicChatUser.id);
         const awaitingLetter = efCurrentRound.status === 'awaiting_letter';
+
+        // نوتیفِ «نوبتِ توئه» — فقط وقتی این دور تازه شروع شده (نوبتِ قبلی متعلق به این دور نبوده)
+        // و برنامه بک‌گراند/بی‌فوکوسه؛ با efLastTurnRoundId جلویِ تکرار به‌ازایِ هر رندر گرفته می‌شه.
+        if(awaitingLetter && isMyTurn && efLastTurnRoundId !== efCurrentRound.round_id){
+          efLastTurnRoundId = efCurrentRound.round_id;
+          const backgrounded = document.hidden || !document.hasFocus();
+          if(backgrounded){
+            fireGameTurnNotification('esmfamil', '🔤 نوبتِ توئه', 'تو اسم فامیل نوبتِ توئه که حرف رو انتخاب کنی.');
+          }
+        }
 
         if(awaitingLetter && isMyTurn){
           turnBox.textContent = 'نوبتِ شماست — یه حرف انتخاب کن';
@@ -23972,6 +28199,7 @@ if ('serviceWorker' in navigator) {
           const backgrounded = document.hidden || !document.hasFocus();
           if(backgrounded){
             hk8SoundYourTurn();
+            fireGameTurnNotification('hokm', '🃏 نوبتِ توئه', 'تو حکم نوبتِ توئه که کارت بندازی.');
             const bellBtn = hk8El('notifBellBtn');
             if(bellBtn){
               bellBtn.classList.add('ring');
@@ -24031,3 +28259,83 @@ if ('serviceWorker' in navigator) {
 
   }catch(e){ console.warn('Hokm sound/notif module (STAGE 8) failed to load', e); }
 })();
+
+/* ================= STAGE 9: بازکردنِ «تاریخِ دستیِ شکست» + محافظِ دستکاریِ ساعت =================
+   خلاصه‌ی قابلیت (طبق درخواست):
+   ۱) مالکِ اپ (OWNER_EMAIL) همیشه می‌تونه موقعِ «شروع دوباره» دقیقاً مشخص کنه کِی شکست
+      خورده (حتی چند روز قبل)، به‌جای اینکه روزشمار همیشه از «همین الان» صفر بشه.
+   ۲) بقیه‌ی کاربرها همین قابلیت رو برای همیشه باز می‌کنن، همون بارِ اولی که روزشمارِ
+      اصلی‌شون واقعاً به قله (۹۰ روز) برسه — در storeData.backdateUnlocked ذخیره می‌شه که
+      برخلاف maxStreak/peakCelebrated با «شروع دوباره» پاک نمی‌شه.
+   ۳) محافظِ دستکاریِ ساعت: چون شمارشِ روزها بر مبنای ساعتِ خودِ گوشیه، بدونِ این محافظ
+      می‌شد با جلو کشیدنِ ساعت به ۹۰ روز «رسید» یا با عقب کشیدنش تاریخِ شکست رو غیرمنطقی
+      عقب برد. این‌جا با مقایسه‌ی «چقدر از نظرِ ساعتِ گوشی گذشته» در برابرِ «چقدر از نظرِ
+      ساعتِ سرور (از هدرِ Date جوابِ شبکه) واقعاً گذشته» بینِ دو چکِ متوالی، پرش‌های غیرعادی
+      رو تشخیص می‌ده. توجه: این یه بازدارنده‌ی سمتِ کلاینته، نه تضمینِ ریاضی — بدونِ یه
+      سرور که خودش مستقل حساب کنه، یه کاربرِ مصمم که کاملاً آفلاین بمونه بازم می‌تونه دور
+      بزنه؛ ولی رایج‌ترین حالت (عوض کردنِ ساعت و بعد آنلاین شدن/همگام‌سازی) رو می‌گیره.
+      هیچ داده‌ی واقعیِ کاربر پاک نمی‌شه — فقط تا وقتی ساعت دوباره منطقی بشه، قابلیت‌های
+      متکی‌به‌اعتماد (باز شدنِ جدیدِ backdateUnlocked، و خودِ گزینه‌ی تاریخِ دستی) قفل می‌مونن.
+*/
+function tgDateKeyOf(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+const TG_TOLERANCE_MS = 30*60*1000; // ۳۰ دقیقه تحمل برای تاخیرِ شبکه/درفتِ جزئیِ ساعت
+async function tgFetchServerMs(){
+  try{
+    const res = await fetch(SUPABASE_URL + '/rest/v1/', { method:'GET', headers:{ apikey: SUPABASE_ANON_KEY } });
+    const h = res && res.headers ? res.headers.get('date') : null;
+    if(!h) return null;
+    const ms = new Date(h).getTime();
+    return isNaN(ms) ? null : ms;
+  }catch(e){ return null; }
+}
+let tgCheckInProgress = false;
+async function tgRunCheck(){
+  if(tgCheckInProgress) return;
+  tgCheckInProgress = true;
+  try{
+    const serverMs = await tgFetchServerMs();
+    if(serverMs===null) return; // آفلاین/بلاک‌شده — وضعیتِ قبلی دست‌نخورده می‌مونه
+    const deviceMs = Date.now();
+    if(!storeData.timeGuard) storeData.timeGuard = { lastDeviceMs:null, lastServerMs:null, suspicious:false, suspiciousSince:null };
+    const tg = storeData.timeGuard;
+    if(tg.lastServerMs!=null && tg.lastDeviceMs!=null){
+      const deviceElapsed = deviceMs - tg.lastDeviceMs;
+      const serverElapsed = serverMs - tg.lastServerMs;
+      const drift = deviceElapsed - serverElapsed;
+      const wasSuspicious = !!tg.suspicious;
+      if(Math.abs(drift) > TG_TOLERANCE_MS){
+        tg.suspicious = true;
+        if(!tg.suspiciousSince) tg.suspiciousSince = new Date().toISOString();
+      } else {
+        tg.suspicious = false;
+        tg.suspiciousSince = null;
+      }
+      if(wasSuspicious !== tg.suspicious){ try{ tgUpdateBanner(); }catch(e){} }
+    }
+    tg.lastDeviceMs = deviceMs;
+    tg.lastServerMs = serverMs;
+    try{ saveData(); }catch(e){}
+  }catch(e){ /* یه شکستِ محافظ نباید کلِ اپ رو بترکونه */ }
+  finally{ tgCheckInProgress = false; }
+}
+function tgIsSuspicious(){ return !!(storeData.timeGuard && storeData.timeGuard.suspicious); }
+function tgCanBackdate(){ return !tgIsSuspicious() && (isAppOwner || !!storeData.backdateUnlocked); }
+function tgUpdateBanner(){
+  try{
+    const el = document.getElementById('tgClockWarning');
+    if(el) el.style.display = tgIsSuspicious() ? 'flex' : 'none';
+  }catch(e){}
+}
+try{ tgRunCheck(); }catch(e){}
+setInterval(()=>{ try{ tgRunCheck(); }catch(e){} }, 10*60*1000);
+try{
+  if(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.App){
+    Capacitor.Plugins.App.addListener('resume', ()=>{ try{ tgRunCheck(); }catch(e){} });
+  }
+}catch(e){}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible'){ try{ tgRunCheck(); }catch(e){} }
+});
+try{ tgUpdateBanner(); }catch(e){}
