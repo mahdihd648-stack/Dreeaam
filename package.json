@@ -11,6 +11,7 @@
     "@capacitor/browser": "latest",
     "@capacitor/app": "latest",
     "@capacitor/local-notifications": "latest",
+    "@capacitor/push-notifications": "latest",
     "@capacitor/share": "latest"
   },
   "devDependencies": {
