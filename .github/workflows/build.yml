@@ -4288,6 +4288,60 @@ jobs:
               f.write(src)
           PYEOF
 
+      - name: Enable code shrinking/obfuscation (R8) for release build
+        # minifyEnabled turns on R8, which renames classes/methods/fields to short
+        # meaningless names and strips unused code — this is what actually makes the
+        # release APK hard to read in a decompiler (jadx/apktool). shrinkResources
+        # drops unused resources too. debuggable=false blocks attaching a debugger to
+        # the release build. Rules below keep the handful of classes that are reached
+        # via reflection (Capacitor plugin registration, Firebase, our own
+        # widget/receiver classes referenced only by class-name string in the
+        # AndroidManifest) so R8 doesn't strip or rename something that's still needed
+        # at runtime.
+        run: |
+          set -e
+          APP_GRADLE="android/app/build.gradle"
+          PROGUARD_RULES="android/app/proguard-rules.pro"
+
+          cat >> "$PROGUARD_RULES" <<'RULESEOF'
+
+          # --- Added by CI: keep classes referenced only by name (manifest / reflection) ---
+          -keep class com.getcapacitor.** { *; }
+          -keep class com.google.firebase.** { *; }
+          -keep class com.mahdihd648.dreamlifeapp.** { *; }
+          -keepclassmembers class * extends com.getcapacitor.Plugin { *; }
+          -keepattributes *Annotation*
+          -dontwarn com.google.firebase.**
+          RULESEOF
+
+          python3 - "$APP_GRADLE" <<'PYEOF'
+          import sys, re
+          path = sys.argv[1]
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+
+          if 'minifyEnabled' not in src:
+              new_src, n = re.subn(
+                  r'(buildTypes\s*\{\s*release\s*\{)',
+                  r'\1\n            minifyEnabled true'
+                  r'\n            shrinkResources true'
+                  r'\n            debuggable false'
+                  r"\n            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'",
+                  src, count=1
+              )
+              if n == 0:
+                  print("::error::could not find buildTypes { release { } } block in android/app/build.gradle")
+                  sys.exit(1)
+              src = new_src
+
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(src)
+          PYEOF
+          if ! grep -q 'minifyEnabled true' "$APP_GRADLE"; then
+            echo "::error::minifyEnabled was not set in android/app/build.gradle"
+            exit 1
+          fi
+
       - name: Build release APK (signed)
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
