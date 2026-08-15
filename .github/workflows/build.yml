@@ -54,6 +54,18 @@ jobs:
             npm install @capacitor/push-notifications
           fi
 
+      - name: Ensure share plugin is present
+        # Same safety net again, for @capacitor/share — app.js calls
+        # Capacitor.Plugins.Share, but package.json never listed the plugin, so
+        # `npx cap sync android` had no native implementation to wire up and every
+        # share button in the native app silently did nothing. Auto-discovered by
+        # Capacitor the same way as push-notifications above — no MainActivity
+        # registerPlugin() call needed.
+        run: |
+          if ! node -e "require.resolve('@capacitor/share')" 2>/dev/null; then
+            npm install @capacitor/share
+          fi
+
       - name: Locate icon source at repo root
         # Single source of truth for every generated icon (web + native). Looks directly
         # in the repo root instead of resources/icon-only.png (which wasn't being found),
@@ -138,7 +150,19 @@ jobs:
           [ -f sw-1.js ] && cp sw-1.js www/sw.js || true
           [ -f sw.js ] && cp sw.js www/sw.js || true
           [ -d assets ] && cp -r assets www/assets || true
+
+          # sw.js ships a __SW_CACHE_VERSION__ placeholder in its CACHE_NAME so the
+          # app-shell cache is versioned. Stamp in the repo's VERSION file (same file
+          # the "Set app version" step already reads) so every version bump busts the
+          # old cache automatically — no manual sw.js edits needed on future releases.
+          if [ -f www/sw.js ]; then
+            SW_VERSION="dev"
+            [ -f VERSION ] && SW_VERSION="$(tr -d '[:space:]' < VERSION)"
+            sed -i "s/__SW_CACHE_VERSION__/${SW_VERSION}/g" www/sw.js
+          fi
+
           ls -la www
+
 
       - name: Obfuscate app.js for the native build (native APK only — repo source untouched)
         # index.html/app.js in the repo stay fully readable for us to keep developing.
