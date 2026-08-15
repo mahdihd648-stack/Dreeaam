@@ -163,49 +163,6 @@ jobs:
 
           ls -la www
 
-
-      - name: Obfuscate app.js for the native build (native APK only — repo source untouched)
-        # index.html/app.js in the repo stay fully readable for us to keep developing.
-        # This step only rewrites the COPY inside www/ that gets packaged into the APK
-        # (via `npx cap sync android` right after), so what ships to end users is much
-        # harder to read in a decompiler:
-        #   1) terser: strips comments/whitespace, mangles local variable names, drops
-        #      dead code — output is unreadable but still 100% functionally identical.
-        #   2) javascript-obfuscator: on top of that, renames remaining identifiers to
-        #      hex, splits/rotates string literals into a lookup array (so UI text and
-        #      endpoint paths aren't sitting in the file as plain strings), and adds
-        #      control-flow flattening so the logic itself is much harder to trace.
-        # This raises the bar a lot but is not unbreakable — it is JS running in a
-        # WebView, so a determined attacker can still unpack the APK and deobfuscate.
-        # It does NOT hide the Supabase URL/anon key (those are meant to be public;
-        # real protection for them is Supabase RLS, not obscurity) — if anything else
-        # sensitive (private API keys, admin secrets) is ever added to app.js, it must
-        # never ship client-side at all, obfuscated or not.
-        run: |
-          set -e
-          npm install --no-save terser javascript-obfuscator
-
-          npx terser www/app.js \
-            --compress --mangle \
-            -o www/app.js
-
-          npx javascript-obfuscator www/app.js \
-            --output www/app.js \
-            --compact true \
-            --control-flow-flattening true \
-            --control-flow-flattening-threshold 0.75 \
-            --dead-code-injection true \
-            --dead-code-injection-threshold 0.4 \
-            --string-array true \
-            --string-array-encoding base64 \
-            --string-array-threshold 0.85 \
-            --rename-globals false \
-            --self-defending true \
-            --disable-console-output true \
-            --identifier-names-generator hexadecimal
-
-          echo "Obfuscated www/app.js size: $(wc -c < www/app.js) bytes"
-
       - name: Add Android platform
         run: npx cap add android
 
@@ -1250,6 +1207,7 @@ jobs:
                   ChecklistWidgetProvider.refreshAll(getContext());
                   DayProgressWidgetProvider.refreshAll(getContext());
                   QuoteWidgetProvider.refreshAll(getContext());
+                  CountdownWidgetProvider.refreshAll(getContext());
                   call.resolve();
               }
 
@@ -1386,6 +1344,45 @@ jobs:
                   if ("none".equals(pattern) || pattern == null) return 0;
                   int id = context.getResources().getIdentifier("widget_pattern_" + pattern, "drawable", appId);
                   return id;
+              }
+
+              // ---- Contrast-safe text for bg="gradient" -------------------------------------
+              // The theme's `text`/`muted` colors are only ever chosen to read well against the
+              // flat `card` color (see WidgetThemeCatalog / the app's own theme picker) -- they
+              // know nothing about the accent->accent2 gradient painted for bg="gradient". Some
+              // themes' accent pair renders as a dark/near-black gradient (e.g. "white"'s
+              // #2b2b2b -> #555555), so the theme's dark `text` landed on top of it invisibly.
+              // gradientTextColors() below picks between white and near-black using real WCAG
+              // contrast math against BOTH gradient stops, so it stays legible across the whole
+              // gradient -- whatever theme or custom accent pair produced it -- instead of
+              // assuming the card-oriented pairing still applies.
+              private static double srgbChannel(double c) {
+                  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+              }
+              private static double relativeLuminance(int color) {
+                  double r = srgbChannel(Color.red(color) / 255.0);
+                  double g = srgbChannel(Color.green(color) / 255.0);
+                  double b = srgbChannel(Color.blue(color) / 255.0);
+                  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+              }
+              private static double contrastRatio(int a, int b) {
+                  double la = relativeLuminance(a), lb = relativeLuminance(b);
+                  double hi = Math.max(la, lb), lo = Math.min(la, lb);
+                  return (hi + 0.05) / (lo + 0.05);
+              }
+
+              /** Returns {primaryText, secondaryMutedText} as ARGB ints, picked so both read
+               *  clearly against every point of an accent->accent2 gradient (worst-case contrast
+               *  across the two stops), not just whichever stop happens to be lighter. */
+              static int[] gradientTextColors(int accent, int accent2) {
+                  int nearBlack = 0xFF1A1610;
+                  double whiteWorst = Math.min(contrastRatio(Color.WHITE, accent), contrastRatio(Color.WHITE, accent2));
+                  double blackWorst = Math.min(contrastRatio(nearBlack, accent), contrastRatio(nearBlack, accent2));
+                  if (whiteWorst >= blackWorst) {
+                      return new int[]{ 0xFFFFFFFF, 0xD9FFFFFF };
+                  } else {
+                      return new int[]{ nearBlack, 0xB31A1610 };
+                  }
               }
           }
           JAVAEOF
@@ -2074,6 +2071,16 @@ jobs:
                   RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_checklist);
                   WidgetStyle st = WidgetStyle.resolve(context, widgetId);
 
+                  // bg="gradient" paints an accent->accent2 bitmap behind everything below, so the
+                  // theme's normal card-oriented text/muted colors (chosen to read on st.card) can't
+                  // be trusted here -- swap in contrast-checked ones (see gradientTextColors).
+                  int effText = st.text, effMuted = st.muted;
+                  if ("gradient".equals(st.bg)) {
+                      int[] gtc = WidgetStyle.gradientTextColors(st.accent, st.accent2);
+                      effText = gtc[0];
+                      effMuted = gtc[1];
+                  }
+
                   if ("transparent".equals(st.bg)) {
                       views.setViewVisibility(R.id.cardShadow, View.GONE);
                       views.setViewVisibility(R.id.cardBg, View.GONE);
@@ -2135,9 +2142,9 @@ jobs:
                       views.setViewVisibility(R.id.cardPattern, View.GONE);
                   }
 
-                  views.setInt(R.id.title, "setTextColor", st.text);
-                  views.setInt(R.id.emptyView, "setTextColor", st.muted);
-                  views.setInt(R.id.emptyIcon, "setColorFilter", st.muted);
+                  views.setInt(R.id.title, "setTextColor", effText);
+                  views.setInt(R.id.emptyView, "setTextColor", effMuted);
+                  views.setInt(R.id.emptyIcon, "setColorFilter", effMuted);
                   views.setInt(R.id.emptyIcon, "setImageAlpha", 140);
 
                   // Count today's progress purely for the header's "done/total" jewel badge and its
@@ -2158,7 +2165,7 @@ jobs:
                       views.setTextViewText(R.id.progressBadgeText, done + "/" + total);
                       views.setInt(R.id.progressBadgeBg, "setColorFilter", st.accent);
                       views.setInt(R.id.progressBadgeBg, "setImageAlpha", 225);
-                      int track = (st.muted & 0x00FFFFFF) | 0x33000000;
+                      int track = (effMuted & 0x00FFFFFF) | 0x33000000;
                       views.setImageViewBitmap(R.id.progressBar, progressBarBitmap(pct, 300, 7, context, st.accent, st.accent2, track));
                   } else {
                       views.setViewVisibility(R.id.progressBadgeWrap, View.GONE);
@@ -2255,6 +2262,7 @@ jobs:
                   private final int widgetId;
                   private JSONArray tasks = new JSONArray();
                   private WidgetStyle style;
+                  private int rowTextColor;
                   private Bitmap doneMedallion;
                   private Bitmap pendingMedallion;
 
@@ -2271,6 +2279,12 @@ jobs:
 
                   private void reload() {
                       style = WidgetStyle.resolve(context, widgetId);
+                      // Same reasoning as ChecklistWidgetProvider.updateOne: row text sits on top of
+                      // the accent->accent2 gradient bitmap in bg="gradient" mode, so it needs the
+                      // contrast-checked color, not the theme's card-oriented style.text.
+                      rowTextColor = "gradient".equals(style.bg)
+                              ? WidgetStyle.gradientTextColors(style.accent, style.accent2)[0]
+                              : style.text;
                       SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
                       try {
                           tasks = new JSONArray(prefs.getString(TaskWidgetPlugin.KEY_TASKS, "[]"));
@@ -2299,7 +2313,7 @@ jobs:
                           boolean done = t.optBoolean("done", false);
 
                           item.setTextViewText(R.id.itemLabel, t.optString("label"));
-                          item.setInt(R.id.itemLabel, "setTextColor", style.text);
+                          item.setInt(R.id.itemLabel, "setTextColor", rowTextColor);
                           // Strikethrough + soft fade for completed tasks; crisp full color for pending.
                           item.setInt(R.id.itemLabel, "setPaintFlags",
                               done ? (Paint.ANTI_ALIAS_FLAG | Paint.STRIKE_THRU_TEXT_FLAG) : Paint.ANTI_ALIAS_FLAG);
@@ -2843,6 +2857,17 @@ jobs:
                   WidgetStyle st = WidgetStyle.resolve(context, widgetId);
                   RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_quote);
 
+                  // In bg="gradient" mode, quoteAuthor/quoteMark normally use st.accent/st.accent2
+                  // for a branded tint -- but that means literally the same colors as the gradient
+                  // behind them, which is unreadable. Fall back to contrast-checked text there too.
+                  int effText = st.text, effAccent = st.accent, effAccent2 = st.accent2;
+                  if ("gradient".equals(st.bg)) {
+                      int[] gtc = WidgetStyle.gradientTextColors(st.accent, st.accent2);
+                      effText = gtc[0];
+                      effAccent = gtc[0];
+                      effAccent2 = gtc[1];
+                  }
+
                   // Same recolorable card treatment as the checklist widget (rounded/pill/sharp,
                   // opaque/glass/transparent/gradient/outline), so a quote widget dropped next to
                   // the others matches. cardGradientBitmap is reused from ChecklistWidgetProvider
@@ -2903,9 +2928,9 @@ jobs:
                   String[] entry = QuoteCatalog.QUOTES[currentIndex(context, widgetId)];
                   views.setTextViewText(R.id.quoteText, entry[0]);
                   views.setTextViewText(R.id.quoteAuthor, "\u2014 " + entry[1]);
-                  views.setInt(R.id.quoteMark, "setTextColor", st.accent2);
-                  views.setInt(R.id.quoteText, "setTextColor", st.text);
-                  views.setInt(R.id.quoteAuthor, "setTextColor", st.accent);
+                  views.setInt(R.id.quoteMark, "setTextColor", effAccent2);
+                  views.setInt(R.id.quoteText, "setTextColor", effText);
+                  views.setInt(R.id.quoteAuthor, "setTextColor", effAccent);
 
                   // Tap anywhere on the card to swap in a different quote (see ACTION_QUOTE_NEXT).
                   views.setOnClickPendingIntent(R.id.widgetRoot, nextIntent(context, widgetId));
@@ -3229,6 +3254,14 @@ jobs:
                   previewHolder.removeAllViews();
                   int[] colors = followTheme ? currentAppColors() : WidgetThemeCatalog.get(themeName);
                   int accent = colors[0], accent2 = colors[1], card = colors[2], text = colors[3], muted = colors[4];
+                  // Mirror ChecklistWidgetProvider.updateOne: on the gradient background, preview
+                  // text needs contrast-checked colors instead of the theme's card-oriented pair,
+                  // so this preview actually matches what shows up on the home screen.
+                  if (isChecklist && "gradient".equals(bg)) {
+                      int[] gtc = WidgetStyle.gradientTextColors(accent, accent2);
+                      text = gtc[0];
+                      muted = gtc[1];
+                  }
 
                   FrameLayout.LayoutParams full = new FrameLayout.LayoutParams(
                           ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
@@ -3384,6 +3417,479 @@ jobs:
                       // text) immediately, instead of waiting for the next background onUpdate.
                       DayProgressWidgetProvider.rescheduleTick(this);
                   }
+
+                  Intent result = new Intent();
+                  result.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
+                  setResult(RESULT_OK, result);
+                  finish();
+              }
+          }
+          JAVAEOF
+
+          # ---- CountdownWidgetProvider.java (custom "days until X" countdown widget -- unlike
+          #      DayProgressWidgetProvider, which fills a ring from local midnight to midnight
+          #      *today*, this counts the whole-day gap to a date the user picked, e.g. "110 days
+          #      until کنکور", ticking down by exactly 1 once every 24h) ----
+          cat > "$WIDGET_DIR/CountdownWidgetProvider.java" <<JAVAEOF
+          package ${APP_ID}.widget;
+
+          import ${APP_ID}.R;
+          import android.app.AlarmManager;
+          import android.app.PendingIntent;
+          import android.appwidget.AppWidgetManager;
+          import android.appwidget.AppWidgetProvider;
+          import android.content.ComponentName;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.widget.RemoteViews;
+          import java.util.Calendar;
+
+          /** Home-screen "days until X" countdown widget: the user picks an event title and a
+           *  target date in CountdownConfigActivity when adding the widget (or by tapping it
+           *  later to edit), and the widget shows the whole-day difference between today and
+           *  that date. A single exact alarm fires right after local midnight to recompute every
+           *  instance's remaining-days count; every onUpdate also recomputes it as a safety net
+           *  (covers reboots / missed alarms / a widget freshly dropped on the home screen). */
+          public class CountdownWidgetProvider extends AppWidgetProvider {
+
+              public static final String ACTION_COUNTDOWN_TICK = "${APP_ID}.ACTION_COUNTDOWN_TICK";
+
+              static String titleKey(int widgetId) { return "cd_title_" + widgetId; }
+              static String yearKey(int widgetId) { return "cd_year_" + widgetId; }
+              static String monthKey(int widgetId) { return "cd_month_" + widgetId; }
+              static String dayKey(int widgetId) { return "cd_day_" + widgetId; }
+
+              public static void refreshAll(Context context) {
+                  AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+                  int[] ids = mgr.getAppWidgetIds(new ComponentName(context, CountdownWidgetProvider.class));
+                  for (int id : ids) updateOne(context, mgr, id);
+              }
+
+              public static void refreshOne(Context context, int widgetId) {
+                  updateOne(context, AppWidgetManager.getInstance(context), widgetId);
+              }
+
+              private static PendingIntent tickIntent(Context context) {
+                  Intent intent = new Intent(context, CountdownWidgetProvider.class);
+                  intent.setAction(ACTION_COUNTDOWN_TICK);
+                  return PendingIntent.getBroadcast(context, 0, intent,
+                          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+              }
+
+              /** Schedules one exact alarm for the next local midnight -- same low-cost once-a-day
+               *  approach as QuoteWidgetProvider. All instances share this one alarm; updateOne
+               *  recomputes each of them independently since each has its own stored target date. */
+              private static void scheduleMidnightAlarm(Context context) {
+                  try {
+                      AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+                      if (am == null) return;
+                      Calendar next = Calendar.getInstance();
+                      next.add(Calendar.DAY_OF_YEAR, 1);
+                      next.set(Calendar.HOUR_OF_DAY, 0);
+                      next.set(Calendar.MINUTE, 0);
+                      next.set(Calendar.SECOND, 5);
+                      next.set(Calendar.MILLISECOND, 0);
+                      am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.getTimeInMillis(), tickIntent(context));
+                  } catch (Exception e) { /* best-effort */ }
+              }
+
+              private static void cancelMidnightAlarm(Context context) {
+                  try {
+                      AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+                      if (am != null) am.cancel(tickIntent(context));
+                  } catch (Exception e) { /* best-effort */ }
+              }
+
+              @Override
+              public void onEnabled(Context context) { scheduleMidnightAlarm(context); }
+
+              @Override
+              public void onDisabled(Context context) { cancelMidnightAlarm(context); }
+
+              @Override
+              public void onUpdate(Context context, AppWidgetManager mgr, int[] appWidgetIds) {
+                  scheduleMidnightAlarm(context); // safety net: re-arms the alarm in case it was lost (e.g. reboot)
+                  for (int id : appWidgetIds) updateOne(context, mgr, id);
+              }
+
+              @Override
+              public void onReceive(Context context, Intent intent) {
+                  super.onReceive(context, intent);
+                  if (ACTION_COUNTDOWN_TICK.equals(intent.getAction())) {
+                      refreshAll(context);
+                      scheduleMidnightAlarm(context); // reschedule for the following midnight
+                  }
+              }
+
+              @Override
+              public void onDeleted(Context context, int[] appWidgetIds) {
+                  SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  SharedPreferences.Editor editor = prefs.edit();
+                  for (int id : appWidgetIds) {
+                      editor.remove(titleKey(id));
+                      editor.remove(yearKey(id));
+                      editor.remove(monthKey(id));
+                      editor.remove(dayKey(id));
+                  }
+                  editor.apply();
+              }
+
+              /** Whole-day difference between local midnight today and local midnight on the
+               *  target date -- both sides zeroed to midnight first so e.g. "tomorrow at 11pm"
+               *  still reads as 1, not 0. Returns Long.MIN_VALUE if no date has been saved yet. */
+              static long daysRemaining(Context context, int widgetId) {
+                  SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  int y = prefs.getInt(yearKey(widgetId), -1);
+                  if (y == -1) return Long.MIN_VALUE;
+                  int m = prefs.getInt(monthKey(widgetId), 0);
+                  int d = prefs.getInt(dayKey(widgetId), 1);
+
+                  Calendar today = Calendar.getInstance();
+                  today.set(Calendar.HOUR_OF_DAY, 0); today.set(Calendar.MINUTE, 0);
+                  today.set(Calendar.SECOND, 0); today.set(Calendar.MILLISECOND, 0);
+
+                  Calendar target = Calendar.getInstance();
+                  target.set(y, m, d, 0, 0, 0);
+                  target.set(Calendar.MILLISECOND, 0);
+
+                  long diffMs = target.getTimeInMillis() - today.getTimeInMillis();
+                  return Math.round(diffMs / 86400000.0);
+              }
+
+              private static void updateOne(Context context, AppWidgetManager mgr, int widgetId) {
+                  WidgetStyle st = WidgetStyle.resolve(context, widgetId);
+                  RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_countdown);
+
+                  // Same contrast fallback as QuoteWidgetProvider: on a gradient background the
+                  // accent colors are the background itself, so they're unreadable as text color.
+                  int effText = st.text, effAccent = st.accent, effAccent2 = st.accent2, effMuted = st.muted;
+                  if ("gradient".equals(st.bg)) {
+                      int[] gtc = WidgetStyle.gradientTextColors(st.accent, st.accent2);
+                      effText = gtc[0];
+                      effAccent = gtc[0];
+                      effAccent2 = gtc[1];
+                      effMuted = gtc[0];
+                  }
+
+                  // Same recolorable card treatment as the quote/checklist widgets (rounded/pill/sharp,
+                  // opaque/glass/transparent/gradient/outline).
+                  if ("transparent".equals(st.bg)) {
+                      views.setViewVisibility(R.id.cardShadow, View.GONE);
+                      views.setViewVisibility(R.id.cardBg, View.GONE);
+                  } else if ("outline".equals(st.bg)) {
+                      int outlineRes = "pill".equals(st.shape) ? R.drawable.widget_card_outline_pill
+                                     : "sharp".equals(st.shape) ? R.drawable.widget_card_outline_sharp
+                                     : R.drawable.widget_card_outline;
+                      views.setViewVisibility(R.id.cardShadow, View.GONE);
+                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardBg, outlineRes);
+                      views.setInt(R.id.cardBg, "setColorFilter", st.accent);
+                      views.setInt(R.id.cardBg, "setImageAlpha", 255);
+                  } else if ("gradient".equals(st.bg)) {
+                      float cornerRadiusDp = "pill".equals(st.shape) ? 999f : "sharp".equals(st.shape) ? 4f : 24f;
+                      Bundle sizeOpts = mgr.getAppWidgetOptions(widgetId);
+                      int wDp = Math.max(90, sizeOpts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 130));
+                      int hDp = Math.max(90, sizeOpts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 130));
+                      int shadowRes = "pill".equals(st.shape) ? R.drawable.widget_card_shadow_pill
+                                    : "sharp".equals(st.shape) ? R.drawable.widget_card_shadow_sharp
+                                    : R.drawable.widget_card_shadow;
+                      views.setViewVisibility(R.id.cardShadow, View.VISIBLE);
+                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardShadow, shadowRes);
+                      views.setInt(R.id.cardShadow, "setImageAlpha", 150);
+                      views.setImageViewBitmap(R.id.cardBg, ChecklistWidgetProvider.cardGradientBitmap(wDp, hDp, context, st.accent, st.accent2, cornerRadiusDp));
+                      views.setInt(R.id.cardBg, "setImageAlpha", 255);
+                  } else {
+                      int shapeRes = "pill".equals(st.shape) ? R.drawable.widget_card_shape_pill
+                                   : "sharp".equals(st.shape) ? R.drawable.widget_card_shape_sharp
+                                   : R.drawable.widget_card_shape;
+                      int shadowRes = "pill".equals(st.shape) ? R.drawable.widget_card_shadow_pill
+                                    : "sharp".equals(st.shape) ? R.drawable.widget_card_shadow_sharp
+                                    : R.drawable.widget_card_shadow;
+                      views.setViewVisibility(R.id.cardShadow, View.VISIBLE);
+                      views.setViewVisibility(R.id.cardBg, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardShadow, shadowRes);
+                      views.setImageViewResource(R.id.cardBg, shapeRes);
+                      views.setInt(R.id.cardBg, "setColorFilter", st.card);
+                      boolean glass = "glass".equals(st.bg);
+                      views.setInt(R.id.cardBg, "setImageAlpha", glass ? 165 : 255);
+                      views.setInt(R.id.cardShadow, "setImageAlpha", glass ? 90 : 140);
+                  }
+
+                  int patternRes = "transparent".equals(st.bg) ? 0 : WidgetStyle.patternDrawableRes(context, st.pattern);
+                  if (patternRes != 0) {
+                      views.setViewVisibility(R.id.cardPattern, View.VISIBLE);
+                      views.setImageViewResource(R.id.cardPattern, patternRes);
+                      views.setInt(R.id.cardPattern, "setColorFilter", st.accent2);
+                      views.setInt(R.id.cardPattern, "setImageAlpha", 46);
+                  } else {
+                      views.setViewVisibility(R.id.cardPattern, View.GONE);
+                  }
+
+                  SharedPreferences prefs = context.getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  String title = prefs.getString(titleKey(widgetId), "");
+                  long days = daysRemaining(context, widgetId);
+
+                  views.setTextViewText(R.id.countdownTitle, title.isEmpty() ? "رویداد" : title);
+                  views.setInt(R.id.countdownTitle, "setTextColor", effMuted);
+
+                  if (days == Long.MIN_VALUE) {
+                      views.setTextViewText(R.id.countdownNumber, "?");
+                      views.setTextViewText(R.id.countdownLabel, "برای تنظیم ضربه بزن");
+                  } else if (days > 0) {
+                      views.setTextViewText(R.id.countdownNumber, String.valueOf(days));
+                      views.setTextViewText(R.id.countdownLabel, "روز مانده");
+                  } else if (days == 0) {
+                      views.setTextViewText(R.id.countdownNumber, "\uD83C\uDF89");
+                      views.setTextViewText(R.id.countdownLabel, "امروز است!");
+                  } else {
+                      views.setTextViewText(R.id.countdownNumber, String.valueOf(-days));
+                      views.setTextViewText(R.id.countdownLabel, "روز گذشت");
+                  }
+                  views.setInt(R.id.countdownNumber, "setTextColor", effAccent);
+                  views.setInt(R.id.countdownLabel, "setTextColor", effAccent2);
+
+                  // Tap the card to reopen the config screen and change the title/date later.
+                  Intent configIntent = new Intent(context, CountdownConfigActivity.class);
+                  configIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
+                  configIntent.setData(android.net.Uri.parse("widget://countdown/" + widgetId));
+                  PendingIntent editPi = PendingIntent.getActivity(context, widgetId, configIntent,
+                          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                  views.setOnClickPendingIntent(R.id.widgetRoot, editPi);
+
+                  mgr.updateAppWidget(widgetId, views);
+              }
+          }
+          JAVAEOF
+
+          # ---- CountdownConfigActivity.java (the "add widget" / tap-to-edit screen for the
+          #      countdown widget -- unlike WidgetConfigActivity, which only customizes *look*
+          #      for the checklist/day-progress widgets, this collects the actual content: an
+          #      event title and a target date, since every countdown instance points at a
+          #      different date the user picks) ----
+          cat > "$WIDGET_DIR/CountdownConfigActivity.java" <<JAVAEOF
+          package ${APP_ID}.widget;
+
+          import android.app.Activity;
+          import android.app.DatePickerDialog;
+          import android.appwidget.AppWidgetManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
+          import android.os.Bundle;
+          import android.text.InputType;
+          import android.util.TypedValue;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import java.util.Calendar;
+          import java.util.Locale;
+
+          /** "Add widget" / tap-to-edit screen for the countdown widget. Reused both when the
+           *  widget is first dropped on the home screen (system-driven, must call setResult
+           *  before finishing) and when the user taps an already-placed widget to change its
+           *  event or date later -- CountdownWidgetProvider routes both flows here. */
+          public class CountdownConfigActivity extends Activity {
+
+              private int appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID;
+              private int pickedYear, pickedMonth, pickedDay;
+              private boolean dateChosen = false;
+
+              private EditText titleInput;
+              private TextView dateValueText;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  setResult(RESULT_CANCELED);
+
+                  Bundle extras = getIntent().getExtras();
+                  if (extras != null) {
+                      appWidgetId = extras.getInt(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);
+                  }
+                  if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+                      finish();
+                      return;
+                  }
+
+                  SharedPreferences prefs = getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  String existingTitle = prefs.getString(CountdownWidgetProvider.titleKey(appWidgetId), "");
+                  int existingYear = prefs.getInt(CountdownWidgetProvider.yearKey(appWidgetId), -1);
+
+                  Calendar cal = Calendar.getInstance();
+                  if (existingYear != -1) {
+                      pickedYear = existingYear;
+                      pickedMonth = prefs.getInt(CountdownWidgetProvider.monthKey(appWidgetId), cal.get(Calendar.MONTH));
+                      pickedDay = prefs.getInt(CountdownWidgetProvider.dayKey(appWidgetId), cal.get(Calendar.DAY_OF_MONTH));
+                      dateChosen = true;
+                  } else {
+                      // Sensible default so "Save" always works even if the user never opens the
+                      // date picker: one month out, rather than leaving the widget unconfigured.
+                      cal.add(Calendar.MONTH, 1);
+                      pickedYear = cal.get(Calendar.YEAR);
+                      pickedMonth = cal.get(Calendar.MONTH);
+                      pickedDay = cal.get(Calendar.DAY_OF_MONTH);
+                  }
+
+                  buildUi(existingTitle);
+              }
+
+              private int dp(int v) {
+                  return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
+              }
+
+              private void buildUi(String existingTitle) {
+                  ScrollView scroll = new ScrollView(this);
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                  root.setPadding(dp(24), dp(28), dp(24), dp(28));
+                  root.setBackgroundColor(Color.parseColor("#FDFCFF"));
+
+                  TextView heading = new TextView(this);
+                  heading.setText("شمارش معکوس تا رویداد");
+                  heading.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  heading.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                  heading.setTypeface(null, Typeface.BOLD);
+                  heading.setTextSize(19);
+                  heading.setTextColor(Color.parseColor("#241F3D"));
+                  root.addView(heading);
+
+                  TextView subheading = new TextView(this);
+                  subheading.setText("مثلاً: کنکور، تولد، سفر، یا هر ددلاینی که داری");
+                  subheading.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  subheading.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                  subheading.setTextSize(13);
+                  subheading.setTextColor(Color.parseColor("#8A84AB"));
+                  LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                  subLp.topMargin = dp(4);
+                  subLp.bottomMargin = dp(24);
+                  root.addView(subheading, subLp);
+
+                  TextView titleLabel = new TextView(this);
+                  titleLabel.setText("عنوان رویداد");
+                  titleLabel.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  titleLabel.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                  titleLabel.setTextSize(13);
+                  titleLabel.setTypeface(null, Typeface.BOLD);
+                  titleLabel.setTextColor(Color.parseColor("#241F3D"));
+                  root.addView(titleLabel);
+
+                  titleInput = new EditText(this);
+                  titleInput.setText(existingTitle);
+                  titleInput.setHint("مثلاً: کنکور");
+                  titleInput.setInputType(InputType.TYPE_CLASS_TEXT);
+                  titleInput.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  titleInput.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                  titleInput.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+                  titleInput.setTextSize(15);
+                  titleInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+                  GradientDrawable inputBg = new GradientDrawable();
+                  inputBg.setCornerRadius(dp(12));
+                  inputBg.setColor(Color.parseColor("#F2F0FA"));
+                  titleInput.setBackground(inputBg);
+                  LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                  titleLp.topMargin = dp(8);
+                  titleLp.bottomMargin = dp(20);
+                  root.addView(titleInput, titleLp);
+
+                  TextView dateLabel = new TextView(this);
+                  dateLabel.setText("تاریخ رویداد");
+                  dateLabel.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  dateLabel.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                  dateLabel.setTextSize(13);
+                  dateLabel.setTypeface(null, Typeface.BOLD);
+                  dateLabel.setTextColor(Color.parseColor("#241F3D"));
+                  root.addView(dateLabel);
+
+                  dateValueText = new TextView(this);
+                  dateValueText.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  dateValueText.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                  dateValueText.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+                  dateValueText.setTextSize(15);
+                  dateValueText.setTextColor(Color.parseColor("#4338CA"));
+                  dateValueText.setTypeface(null, Typeface.BOLD);
+                  dateValueText.setPadding(dp(12), dp(12), dp(12), dp(12));
+                  GradientDrawable dateBg = new GradientDrawable();
+                  dateBg.setCornerRadius(dp(12));
+                  dateBg.setColor(Color.parseColor("#F2F0FA"));
+                  dateValueText.setBackground(dateBg);
+                  updateDateText();
+                  LinearLayout.LayoutParams dateLp = new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                  dateLp.topMargin = dp(8);
+                  dateLp.bottomMargin = dp(28);
+                  dateValueText.setOnClickListener(new View.OnClickListener() {
+                      @Override public void onClick(View v) { openDatePicker(); }
+                  });
+                  root.addView(dateValueText, dateLp);
+
+                  Button saveBtn = new Button(this);
+                  saveBtn.setText("ذخیره");
+                  saveBtn.setAllCaps(false);
+                  saveBtn.setTextColor(Color.WHITE);
+                  saveBtn.setTypeface(null, Typeface.BOLD);
+                  GradientDrawable saveBg = new GradientDrawable();
+                  saveBg.setCornerRadius(dp(14));
+                  saveBg.setColor(Color.parseColor("#4338CA"));
+                  saveBtn.setBackground(saveBg);
+                  saveBtn.setOnClickListener(new View.OnClickListener() {
+                      @Override public void onClick(View v) { save(); }
+                  });
+                  LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+                  root.addView(saveBtn, saveLp);
+
+                  scroll.addView(root);
+                  setContentView(scroll);
+              }
+
+              private void openDatePicker() {
+                  DatePickerDialog dialog = new DatePickerDialog(this,
+                          new DatePickerDialog.OnDateSetListener() {
+                              @Override
+                              public void onDateSet(android.widget.DatePicker view, int year, int month, int dayOfMonth) {
+                                  pickedYear = year;
+                                  pickedMonth = month;
+                                  pickedDay = dayOfMonth;
+                                  dateChosen = true;
+                                  updateDateText();
+                              }
+                          }, pickedYear, pickedMonth, pickedDay);
+                  dialog.show();
+              }
+
+              private void updateDateText() {
+                  String[] months = {"ژانویه","فوریه","مارس","آوریل","مه","ژوئن","ژوئیه","اوت","سپتامبر","اکتبر","نوامبر","دسامبر"};
+                  String label = String.format(Locale.US, "%d %s %d", pickedDay, months[pickedMonth], pickedYear);
+                  dateValueText.setText(dateChosen ? label : label + "  (برای انتخاب ضربه بزن)");
+              }
+
+              private void save() {
+                  String title = titleInput.getText().toString().trim();
+                  if (title.isEmpty()) title = "رویداد";
+
+                  SharedPreferences prefs = getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  prefs.edit()
+                          .putString(CountdownWidgetProvider.titleKey(appWidgetId), title)
+                          .putInt(CountdownWidgetProvider.yearKey(appWidgetId), pickedYear)
+                          .putInt(CountdownWidgetProvider.monthKey(appWidgetId), pickedMonth)
+                          .putInt(CountdownWidgetProvider.dayKey(appWidgetId), pickedDay)
+                          .apply();
+
+                  CountdownWidgetProvider.refreshOne(this, appWidgetId);
 
                   Intent result = new Intent();
                   result.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
@@ -3722,6 +4228,81 @@ jobs:
                       android:textSize="11.5sp"
                       android:maxLines="1"
                       android:ellipsize="end" />
+
+              </LinearLayout>
+          </FrameLayout>
+          XMLEOF
+
+          # ---- res/layout/widget_countdown.xml ("days until X" countdown widget) ----
+          cat > "$RES_DIR/layout/widget_countdown.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/widgetRoot"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent">
+
+              <!-- Same floating-card treatment as the other widgets: soft shadow, then the
+                   recolorable card (rounded/pill/sharp per WidgetStyle), then the optional pattern. -->
+              <ImageView
+                  android:id="@+id/cardShadow"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:layout_marginTop="3dp"
+                  android:src="@drawable/widget_card_shadow"
+                  android:scaleType="fitXY" />
+
+              <ImageView
+                  android:id="@+id/cardBg"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:src="@drawable/widget_card_shape"
+                  android:scaleType="fitXY" />
+
+              <ImageView
+                  android:id="@+id/cardPattern"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:scaleType="fitXY"
+                  android:visibility="gone" />
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:orientation="vertical"
+                  android:gravity="center"
+                  android:padding="12dp">
+
+                  <TextView
+                      android:id="@+id/countdownTitle"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:textDirection="rtl"
+                      android:textAlignment="center"
+                      android:textColor="#8A84AB"
+                      android:textSize="12sp"
+                      android:maxLines="1"
+                      android:ellipsize="end" />
+
+                  <TextView
+                      android:id="@+id/countdownNumber"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="2dp"
+                      android:textColor="#4338CA"
+                      android:textStyle="bold"
+                      android:textSize="34sp"
+                      android:maxLines="1" />
+
+                  <TextView
+                      android:id="@+id/countdownLabel"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="2dp"
+                      android:textDirection="rtl"
+                      android:textAlignment="center"
+                      android:textColor="#BF26D3"
+                      android:textSize="11.5sp"
+                      android:maxLines="1" />
 
               </LinearLayout>
           </FrameLayout>
@@ -4205,6 +4786,25 @@ jobs:
               android:widgetCategory="home_screen" />
           XMLEOF
 
+          # ---- res/xml/widget_countdown_info.xml ----
+          cat > "$RES_DIR/xml/widget_countdown_info.xml" <<XMLEOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="110dp"
+              android:minHeight="110dp"
+              android:minResizeWidth="90dp"
+              android:minResizeHeight="90dp"
+              android:targetCellWidth="2"
+              android:targetCellHeight="2"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_countdown"
+              android:previewImage="@mipmap/ic_launcher"
+              android:resizeMode="horizontal|vertical"
+              android:configure="${APP_ID}.widget.CountdownConfigActivity"
+              android:widgetFeatures="reconfigurable"
+              android:widgetCategory="home_screen" />
+          XMLEOF
+
           # ---- res/drawable/widget_check_on.xml ----
           cat > "$RES_DIR/drawable/widget_check_on.xml" <<'XMLEOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -4265,7 +4865,22 @@ jobs:
                   '        </intent-filter>\n'
                   '        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_quote_info" />\n'
                   '    </receiver>\n'
+                  '    <receiver android:name="' + app_id + '.widget.CountdownWidgetProvider" android:exported="true">\n'
+                  '        <intent-filter>\n'
+                  '            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
+                  '            <action android:name="' + app_id + '.ACTION_COUNTDOWN_TICK" />\n'
+                  '        </intent-filter>\n'
+                  '        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_countdown_info" />\n'
+                  '    </receiver>\n'
                   '    <activity android:name="' + app_id + '.widget.WidgetConfigActivity"\n'
+                  '        android:exported="true"\n'
+                  '        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">\n'
+                  '        <intent-filter>\n'
+                  '            <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />\n'
+                  '            <category android:name="android.intent.category.DEFAULT" />\n'
+                  '        </intent-filter>\n'
+                  '    </activity>\n'
+                  '    <activity android:name="' + app_id + '.widget.CountdownConfigActivity"\n'
                   '        android:exported="true"\n'
                   '        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">\n'
                   '        <intent-filter>\n'
@@ -4279,6 +4894,860 @@ jobs:
           with open(path, 'w', encoding='utf-8') as f:
               f.write(src)
           WIDGETPYEOF
+
+      - name: Inject Peak Danger emergency widget (نهایت خطر) -- part 1 of 2 (activity + widget provider)
+        # Fifth home-screen widget: an SOS button for moments of intense urge. Tapping it opens
+        # a fixed 6-minute session (PeakDangerActivity) that keeps the user actively engaged --
+        # short math problems, a small tap game, a short writing prompt, cycling until the timer
+        # ends. A wrong answer just gets a warning and a retry, no penalty. Deliberately abandoning
+        # an *active* session (confirmed back-press, or leaving via Home/app-switch) resets the
+        # streak (TaskWidgetPlugin.KEY_DAY) to zero -- but a mere interruption like the screen
+        # locking or a call coming in just pauses the timer and resumes where it left off, so the
+        # user is never punished for something outside their control.
+        #
+        # Part 2 (separate follow-up step) still needs to: register PeakDangerWidgetProvider as a
+        # <receiver> and PeakDangerActivity as an <activity> in AndroidManifest.xml, add the
+        # res/xml/widget_peak_danger_info.xml appwidget-provider descriptor those reference, and
+        # add a TaskWidgetPlugin method so the JS app can read/clear KEY_PENDING_RESET on next
+        # launch and keep its own local streak state in sync. Until part 2 lands, this widget
+        # cannot be placed on a home screen or referenced by the manifest yet -- this step only
+        # generates the Java classes + resources it needs.
+        run: |
+          set -e
+          APP_ID="com.mahdihd648.dreamlifeapp"
+          APP_PATH="${APP_ID//./\/}"
+          JAVA_DIR="android/app/src/main/java/${APP_PATH}"
+          WIDGET_DIR="${JAVA_DIR}/widget"
+          RES_DIR="android/app/src/main/res"
+
+          mkdir -p "$WIDGET_DIR" "$RES_DIR/layout" "$RES_DIR/xml" "$RES_DIR/drawable"
+
+          # ---- res/drawable/widget_danger_bg.xml ----
+          cat > "$RES_DIR/drawable/widget_danger_bg.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <corners android:radius="20dp" />
+              <gradient android:startColor="#E53935" android:endColor="#B71C1C" android:angle="135" />
+          </shape>
+          XMLEOF
+
+          # ---- res/layout/widget_peak_danger.xml ----
+          cat > "$RES_DIR/layout/widget_peak_danger.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/widgetRoot"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:gravity="center"
+              android:background="@drawable/widget_danger_bg"
+              android:padding="10dp">
+
+              <TextView
+                  android:id="@+id/dangerIcon"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="\u26A0\uFE0F"
+                  android:textSize="26sp" />
+
+              <TextView
+                  android:id="@+id/dangerTitle"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="4dp"
+                  android:text="نهایت خطر"
+                  android:textColor="#FFFFFF"
+                  android:textStyle="bold"
+                  android:textSize="15sp"
+                  android:textDirection="rtl" />
+
+              <TextView
+                  android:id="@+id/dangerSubtitle"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="برای تمرکز فوری لمس کن"
+                  android:textColor="#FFE3E1"
+                  android:textSize="11sp"
+                  android:textDirection="rtl" />
+
+          </LinearLayout>
+          XMLEOF
+
+          # ---- PeakDangerWidgetProvider.java ----
+          cat > "$WIDGET_DIR/PeakDangerWidgetProvider.java" <<JAVAEOF
+          package ${APP_ID}.widget;
+
+          import ${APP_ID}.R;
+          import android.app.PendingIntent;
+          import android.appwidget.AppWidgetManager;
+          import android.appwidget.AppWidgetProvider;
+          import android.content.ComponentName;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.widget.RemoteViews;
+
+          /** Home-screen "SOS" widget (نهایت خطر). Unlike the other four widgets this one carries no
+           *  configurable theme -- it's an emergency button, so it always renders in the same high-contrast
+           *  red alert style on purpose, regardless of the app's current color theme. Tapping it launches
+           *  PeakDangerActivity directly (no config step, nothing to set up first). See PeakDangerActivity
+           *  for the actual 6-minute intervention flow and the streak-reset-on-abandon logic. */
+          public class PeakDangerWidgetProvider extends AppWidgetProvider {
+
+              @Override
+              public void onUpdate(Context context, AppWidgetManager mgr, int[] appWidgetIds) {
+                  for (int id : appWidgetIds) {
+                      updateOne(context, mgr, id);
+                  }
+              }
+
+              static void refreshAll(Context context) {
+                  AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+                  int[] ids = mgr.getAppWidgetIds(new ComponentName(context, PeakDangerWidgetProvider.class));
+                  for (int id : ids) {
+                      updateOne(context, mgr, id);
+                  }
+              }
+
+              private static void updateOne(Context context, AppWidgetManager mgr, int widgetId) {
+                  RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_peak_danger);
+
+                  Intent launch = new Intent(context, PeakDangerActivity.class);
+                  launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                  PendingIntent pi = PendingIntent.getActivity(context, widgetId, launch,
+                          PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                  views.setOnClickPendingIntent(R.id.widgetRoot, pi);
+
+                  mgr.updateAppWidget(widgetId, views);
+              }
+          }
+          JAVAEOF
+
+          # ---- PeakDangerActivity.java ----
+          cat > "$WIDGET_DIR/PeakDangerActivity.java" <<JAVAEOF
+          package ${APP_ID}.widget;
+
+          import ${APP_ID}.R;
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.content.Context;
+          import android.content.DialogInterface;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
+          import android.content.SharedPreferences;
+          import android.os.Bundle;
+          import android.os.CountDownTimer;
+          import android.text.Editable;
+          import android.text.InputType;
+          import android.text.TextWatcher;
+          import android.util.TypedValue;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.view.WindowManager;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import java.util.Locale;
+          import java.util.Random;
+
+          /** Full-screen "SOS" intervention launched by PeakDangerWidgetProvider (نهایت خطر). Keeps the
+           *  user actively engaged (math / a small tap game / a short writing prompt) for a fixed six
+           *  minute window so an intense urge has time to pass. A wrong answer only gets a warning and a
+           *  retry -- nothing is lost for making a mistake. What resets the streak to zero is deliberately
+           *  abandoning an *active* session (confirmed back-press, or leaving via Home/app-switch), never
+           *  an interruption like the screen locking or a phone call, which just pauses and resumes where
+           *  it left off. See resetStreakForAbandon() / onUserLeaveHint() / onBackPressed(). */
+          public class PeakDangerActivity extends Activity {
+
+              private static final int SESSION_SECONDS = 360;
+              public static final String KEY_PENDING_RESET = "peak_danger_pending_reset";
+              public static final String KEY_PENDING_RESET_AT = "peak_danger_pending_reset_at";
+
+              private static final String COL_BG = "#170B22";
+              private static final String COL_ACCENT = "#FF5449";
+              private static final String COL_ACCENT_DARK = "#B71C1C";
+              private static final String COL_TEXT = "#FFFFFF";
+              private static final String COL_MUTED = "#D8C9E6";
+              private static final String COL_OK = "#3FB87F";
+
+              private final Random rnd = new Random();
+
+              private CountDownTimer sessionTimer;
+              private boolean sessionActive = false;
+              private boolean sessionCompleted = false;
+              private boolean leftDeliberately = false;
+              private int remainingSeconds = SESSION_SECONDS;
+              private int taskIndex = 0;
+              private int mathAnswer;
+
+              private LinearLayout root;
+              private TextView timerText;
+              private FrameLayout taskContainer;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  showIntroScreen();
+              }
+
+              private int dp(int v) {
+                  return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
+              }
+
+              private GradientDrawable pillDrawable(String colorHex) {
+                  GradientDrawable d = new GradientDrawable();
+                  d.setColor(Color.parseColor(colorHex));
+                  d.setCornerRadius(dp(16));
+                  return d;
+              }
+
+              private GradientDrawable circleDrawable(String colorHex) {
+                  GradientDrawable d = new GradientDrawable();
+                  d.setShape(GradientDrawable.OVAL);
+                  d.setColor(Color.parseColor(colorHex));
+                  return d;
+              }
+
+              // ---------------------------------------------------------------- intro screen
+
+              private void showIntroScreen() {
+                  ScrollView scroll = new ScrollView(this);
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                  box.setGravity(Gravity.CENTER);
+                  box.setPadding(dp(28), dp(40), dp(28), dp(40));
+                  box.setBackgroundColor(Color.parseColor(COL_BG));
+
+                  TextView icon = new TextView(this);
+                  icon.setText("\u26A0\uFE0F");
+                  icon.setTextSize(44);
+                  icon.setGravity(Gravity.CENTER);
+                  box.addView(icon);
+
+                  TextView title = new TextView(this);
+                  title.setText("نهایت خطر");
+                  title.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  title.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  title.setTypeface(null, Typeface.BOLD);
+                  title.setTextSize(24);
+                  title.setTextColor(Color.parseColor(COL_TEXT));
+                  LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  titleLp.topMargin = dp(16);
+                  box.addView(title, titleLp);
+
+                  TextView body = new TextView(this);
+                  body.setText("۶ دقیقه با هم می‌مونیم. چند تمرین کوتاه (ریاضی، یه بازی کوچیک، چند خط نوشتن) بهت می‌دم تا ذهنت درگیر بشه و این لحظه بگذره.\n\nاگه وسط راه بیرون بزنی و ولش کنی، روزشمارت صفر می‌شه. هر جور شده، تا آخرش بمون.");
+                  body.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  body.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  body.setTextSize(15);
+                  body.setTextColor(Color.parseColor(COL_MUTED));
+                  LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  bodyLp.topMargin = dp(18);
+                  box.addView(body, bodyLp);
+
+                  Button startBtn = new Button(this);
+                  startBtn.setText("شروع می‌کنم");
+                  startBtn.setAllCaps(false);
+                  startBtn.setTypeface(null, Typeface.BOLD);
+                  startBtn.setTextColor(Color.parseColor(COL_TEXT));
+                  startBtn.setBackground(pillDrawable(COL_ACCENT));
+                  LinearLayout.LayoutParams startLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+                  startLp.topMargin = dp(30);
+                  startBtn.setOnClickListener(new View.OnClickListener() {
+                      @Override public void onClick(View v) { startSession(); }
+                  });
+                  box.addView(startBtn, startLp);
+
+                  Button laterBtn = new Button(this);
+                  laterBtn.setText("الان نه");
+                  laterBtn.setAllCaps(false);
+                  laterBtn.setTextColor(Color.parseColor(COL_MUTED));
+                  laterBtn.setBackgroundColor(Color.TRANSPARENT);
+                  LinearLayout.LayoutParams laterLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
+                  laterLp.topMargin = dp(6);
+                  laterBtn.setOnClickListener(new View.OnClickListener() {
+                      @Override public void onClick(View v) { finish(); }
+                  });
+                  box.addView(laterBtn, laterLp);
+
+                  scroll.addView(box, new ViewGroup.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                  setContentView(scroll);
+              }
+
+              // ---------------------------------------------------------------- session screen
+
+              private void startSession() {
+                  sessionActive = true;
+                  sessionCompleted = false;
+                  leftDeliberately = false;
+                  remainingSeconds = SESSION_SECONDS;
+                  taskIndex = 0;
+                  buildSessionUi();
+                  runTimer(remainingSeconds);
+                  nextTask();
+              }
+
+              private void buildSessionUi() {
+                  root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                  root.setBackgroundColor(Color.parseColor(COL_BG));
+                  root.setPadding(dp(24), dp(32), dp(24), dp(24));
+
+                  timerText = new TextView(this);
+                  timerText.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  timerText.setTypeface(null, Typeface.BOLD);
+                  timerText.setTextSize(34);
+                  timerText.setTextColor(Color.parseColor(COL_ACCENT));
+                  root.addView(timerText, new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                  updateTimerText();
+
+                  TextView hint = new TextView(this);
+                  hint.setText("تا وقتی این تموم نشه، بیرون نرو");
+                  hint.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  hint.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  hint.setTextSize(12);
+                  hint.setTextColor(Color.parseColor(COL_MUTED));
+                  LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  hintLp.bottomMargin = dp(16);
+                  root.addView(hint, hintLp);
+
+                  taskContainer = new FrameLayout(this);
+                  root.addView(taskContainer, new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+                  setContentView(root);
+              }
+
+              private void runTimer(int fromSeconds) {
+                  if (sessionTimer != null) sessionTimer.cancel();
+                  sessionTimer = new CountDownTimer(fromSeconds * 1000L, 1000L) {
+                      @Override public void onTick(long msLeft) {
+                          remainingSeconds = (int) (msLeft / 1000L);
+                          updateTimerText();
+                      }
+                      @Override public void onFinish() {
+                          remainingSeconds = 0;
+                          sessionActive = false;
+                          sessionCompleted = true;
+                          showSuccessScreen();
+                      }
+                  };
+                  sessionTimer.start();
+              }
+
+              private void updateTimerText() {
+                  if (timerText == null) return;
+                  int m = remainingSeconds / 60;
+                  int s = remainingSeconds % 60;
+                  timerText.setText(String.format(Locale.US, "%02d:%02d", m, s));
+              }
+
+              // ---------------------------------------------------------------- task rotation
+
+              private void nextTask() {
+                  taskIndex++;
+                  taskContainer.removeAllViews();
+                  int kind = taskIndex % 3;
+                  if (kind == 1) buildMathTask();
+                  else if (kind == 2) buildTapTask();
+                  else buildWriteTask();
+              }
+
+              private void buildMathTask() {
+                  final LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                  box.setGravity(Gravity.CENTER);
+
+                  int a = 2 + rnd.nextInt(18);
+                  int b = 2 + rnd.nextInt(18);
+                  int op = rnd.nextInt(3);
+                  String opSign;
+                  if (op == 0) {
+                      opSign = "+";
+                      mathAnswer = a + b;
+                  } else if (op == 1) {
+                      if (b > a) { int t = a; a = b; b = t; }
+                      opSign = "\u2212";
+                      mathAnswer = a - b;
+                  } else {
+                      a = 2 + rnd.nextInt(9);
+                      b = 2 + rnd.nextInt(9);
+                      opSign = "\u00D7";
+                      mathAnswer = a * b;
+                  }
+
+                  TextView label = new TextView(this);
+                  label.setText("جواب این چنده؟");
+                  label.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  label.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  label.setTextColor(Color.parseColor(COL_MUTED));
+                  label.setTextSize(14);
+                  box.addView(label);
+
+                  TextView expr = new TextView(this);
+                  expr.setText(a + " " + opSign + " " + b);
+                  expr.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  expr.setTypeface(null, Typeface.BOLD);
+                  expr.setTextSize(40);
+                  expr.setTextColor(Color.parseColor(COL_TEXT));
+                  LinearLayout.LayoutParams exprLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  exprLp.topMargin = dp(8);
+                  exprLp.bottomMargin = dp(20);
+                  box.addView(expr, exprLp);
+
+                  final EditText input = new EditText(this);
+                  input.setInputType(InputType.TYPE_CLASS_NUMBER);
+                  input.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  input.setTextSize(20);
+                  input.setTextColor(Color.parseColor(COL_TEXT));
+                  input.setHintTextColor(Color.parseColor(COL_MUTED));
+                  box.addView(input, new LinearLayout.LayoutParams(dp(160), dp(52)));
+
+                  final TextView feedback = new TextView(this);
+                  feedback.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  feedback.setTextSize(13);
+                  LinearLayout.LayoutParams feedbackLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  feedbackLp.topMargin = dp(10);
+                  box.addView(feedback, feedbackLp);
+
+                  final Button checkBtn = new Button(this);
+                  checkBtn.setText("بررسی کن");
+                  checkBtn.setAllCaps(false);
+                  checkBtn.setTextColor(Color.parseColor(COL_TEXT));
+                  checkBtn.setBackground(pillDrawable(COL_ACCENT));
+                  LinearLayout.LayoutParams checkLp = new LinearLayout.LayoutParams(dp(200), dp(50));
+                  checkLp.topMargin = dp(18);
+                  checkBtn.setOnClickListener(new View.OnClickListener() {
+                      @Override public void onClick(View v) {
+                          String raw = input.getText().toString().trim();
+                          Integer given = null;
+                          try { given = Integer.parseInt(raw); } catch (Exception ignored) {}
+                          if (given != null && given == mathAnswer) {
+                              feedback.setText("\u2705 درست بود!");
+                              feedback.setTextColor(Color.parseColor(COL_OK));
+                              checkBtn.setEnabled(false);
+                              taskContainer.postDelayed(new Runnable() {
+                                  @Override public void run() { nextTask(); }
+                              }, 550);
+                          } else {
+                              feedback.setText("\u274C اشتباهه، دوباره امتحان کن");
+                              feedback.setTextColor(Color.parseColor(COL_ACCENT));
+                              input.setText("");
+                          }
+                      }
+                  });
+                  box.addView(checkBtn, checkLp);
+
+                  taskContainer.addView(box, new FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+              }
+
+              private void buildTapTask() {
+                  final int required = 6;
+                  final int[] done = { 0 };
+                  final int size = dp(64);
+
+                  final FrameLayout stage = new FrameLayout(this);
+
+                  final TextView label = new TextView(this);
+                  label.setText("روی دایره ضربه بزن: 0 از " + required);
+                  label.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  label.setTextColor(Color.parseColor(COL_MUTED));
+                  label.setTextSize(14);
+                  FrameLayout.LayoutParams labelLp = new FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                          Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                  labelLp.topMargin = dp(6);
+                  stage.addView(label, labelLp);
+
+                  final Button dot = new Button(this);
+                  dot.setText("");
+                  dot.setBackground(circleDrawable(COL_ACCENT));
+                  final FrameLayout.LayoutParams dotLp = new FrameLayout.LayoutParams(size, size);
+                  placeRandom(dotLp, size);
+                  stage.addView(dot, dotLp);
+
+                  dot.setOnClickListener(new View.OnClickListener() {
+                      @Override public void onClick(View v) {
+                          done[0]++;
+                          if (done[0] >= required) {
+                              nextTask();
+                          } else {
+                              label.setText("روی دایره ضربه بزن: " + done[0] + " از " + required);
+                              FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) dot.getLayoutParams();
+                              placeRandom(lp, size);
+                              dot.setLayoutParams(lp);
+                          }
+                      }
+                  });
+
+                  taskContainer.addView(stage, new FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+              }
+
+              private void placeRandom(FrameLayout.LayoutParams lp, int size) {
+                  int stageW = taskContainer.getWidth();
+                  int stageH = taskContainer.getHeight();
+                  if (stageW <= size || stageH <= size) {
+                      lp.gravity = Gravity.CENTER;
+                      lp.leftMargin = 0;
+                      lp.topMargin = 0;
+                      return;
+                  }
+                  lp.gravity = Gravity.TOP | Gravity.START;
+                  lp.leftMargin = rnd.nextInt(stageW - size);
+                  lp.topMargin = dp(50) + rnd.nextInt(Math.max(1, stageH - size - dp(50)));
+              }
+
+              private void buildWriteTask() {
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+
+                  TextView label = new TextView(this);
+                  label.setText("چند خط بنویس: الان چه حسی داری؟ یا یکی از دلایلی که می‌خوای ادامه بدی رو بنویس.");
+                  label.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  label.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+                  label.setTextColor(Color.parseColor(COL_MUTED));
+                  label.setTextSize(15);
+                  box.addView(label);
+
+                  final EditText input = new EditText(this);
+                  input.setGravity(Gravity.TOP | Gravity.START);
+                  input.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  input.setMinLines(4);
+                  input.setTextColor(Color.parseColor(COL_TEXT));
+                  input.setHintTextColor(Color.parseColor(COL_MUTED));
+                  input.setHint("همینجا بنویس...");
+                  LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  inputLp.topMargin = dp(14);
+                  box.addView(input, inputLp);
+
+                  final Button nextBtn = new Button(this);
+                  nextBtn.setText("ادامه");
+                  nextBtn.setAllCaps(false);
+                  nextBtn.setEnabled(false);
+                  nextBtn.setTextColor(Color.parseColor(COL_TEXT));
+                  nextBtn.setBackground(pillDrawable(COL_ACCENT));
+                  LinearLayout.LayoutParams nextLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
+                  nextLp.topMargin = dp(16);
+                  nextBtn.setOnClickListener(new View.OnClickListener() {
+                      @Override public void onClick(View v) { nextTask(); }
+                  });
+                  box.addView(nextBtn, nextLp);
+
+                  input.addTextChangedListener(new TextWatcher() {
+                      @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+                      @Override public void onTextChanged(CharSequence s, int a, int b, int c) {
+                          nextBtn.setEnabled(s.length() >= 12);
+                      }
+                      @Override public void afterTextChanged(Editable s) {}
+                  });
+
+                  taskContainer.addView(box, new FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP));
+              }
+
+              // ---------------------------------------------------------------- success / abandonment
+
+              private void showSuccessScreen() {
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                  box.setGravity(Gravity.CENTER);
+                  box.setPadding(dp(28), dp(40), dp(28), dp(40));
+                  box.setBackgroundColor(Color.parseColor(COL_BG));
+
+                  TextView icon = new TextView(this);
+                  icon.setText("\uD83C\uDF3F");
+                  icon.setTextSize(44);
+                  box.addView(icon);
+
+                  TextView title = new TextView(this);
+                  title.setText("گذشت");
+                  title.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  title.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  title.setTypeface(null, Typeface.BOLD);
+                  title.setTextSize(24);
+                  title.setTextColor(Color.parseColor(COL_TEXT));
+                  LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  titleLp.topMargin = dp(16);
+                  box.addView(title, titleLp);
+
+                  TextView body = new TextView(this);
+                  body.setText("۶ دقیقه تموم شد و تو موندی. روزشمارت دست‌نخورده باقی موند.");
+                  body.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  body.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  body.setTextSize(15);
+                  body.setTextColor(Color.parseColor(COL_MUTED));
+                  LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  bodyLp.topMargin = dp(12);
+                  box.addView(body, bodyLp);
+
+                  Button closeBtn = new Button(this);
+                  closeBtn.setText("بستن");
+                  closeBtn.setAllCaps(false);
+                  closeBtn.setTextColor(Color.parseColor(COL_TEXT));
+                  closeBtn.setBackground(pillDrawable(COL_OK));
+                  LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+                  closeLp.topMargin = dp(30);
+                  closeBtn.setOnClickListener(new View.OnClickListener() {
+                      @Override public void onClick(View v) { finish(); }
+                  });
+                  box.addView(closeBtn, closeLp);
+
+                  setContentView(box);
+              }
+
+              private void showAbandonedScreen() {
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+                  box.setGravity(Gravity.CENTER);
+                  box.setPadding(dp(28), dp(40), dp(28), dp(40));
+                  box.setBackgroundColor(Color.parseColor(COL_BG));
+
+                  TextView title = new TextView(this);
+                  title.setText("جلسه ناتموم موند");
+                  title.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  title.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  title.setTypeface(null, Typeface.BOLD);
+                  title.setTextSize(22);
+                  title.setTextColor(Color.parseColor(COL_TEXT));
+                  box.addView(title);
+
+                  TextView body = new TextView(this);
+                  body.setText("چون وسط راه بیرون رفتی، طبق قانونی که خودت گذاشتی، روزشمار صفر شد. هر وقت آماده بودی، دوباره امتحان کن.");
+                  body.setTextDirection(View.TEXT_DIRECTION_RTL);
+                  body.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+                  body.setTextSize(15);
+                  body.setTextColor(Color.parseColor(COL_MUTED));
+                  LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  bodyLp.topMargin = dp(14);
+                  box.addView(body, bodyLp);
+
+                  Button closeBtn = new Button(this);
+                  closeBtn.setText("بستن");
+                  closeBtn.setAllCaps(false);
+                  closeBtn.setTextColor(Color.parseColor(COL_TEXT));
+                  closeBtn.setBackground(pillDrawable(COL_ACCENT_DARK));
+                  LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+                  closeLp.topMargin = dp(24);
+                  closeBtn.setOnClickListener(new View.OnClickListener() {
+                      @Override public void onClick(View v) { finish(); }
+                  });
+                  box.addView(closeBtn, closeLp);
+
+                  setContentView(box);
+              }
+
+              private void resetStreakForAbandon() {
+                  SharedPreferences prefs = getSharedPreferences(TaskWidgetPlugin.PREFS_NAME, Context.MODE_PRIVATE);
+                  prefs.edit()
+                          .putInt(TaskWidgetPlugin.KEY_DAY, 0)
+                          .putBoolean(KEY_PENDING_RESET, true)
+                          .putLong(KEY_PENDING_RESET_AT, System.currentTimeMillis())
+                          .apply();
+                  DayProgressWidgetProvider.refreshAll(this);
+              }
+
+              // ---------------------------------------------------------------- lifecycle
+
+              @Override
+              public void onUserLeaveHint() {
+                  super.onUserLeaveHint();
+                  if (sessionActive && !sessionCompleted) {
+                      leftDeliberately = true;
+                      sessionActive = false;
+                      if (sessionTimer != null) sessionTimer.cancel();
+                      resetStreakForAbandon();
+                  }
+              }
+
+              @Override
+              protected void onPause() {
+                  super.onPause();
+                  if (sessionTimer != null) sessionTimer.cancel();
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  if (leftDeliberately) {
+                      showAbandonedScreen();
+                  } else if (sessionActive && !sessionCompleted && root != null) {
+                      runTimer(remainingSeconds);
+                  }
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (sessionActive && !sessionCompleted) {
+                      new AlertDialog.Builder(this)
+                              .setTitle("مطمئنی؟")
+                              .setMessage("اگه الان بری بیرون، روزشمارت صفر می‌شه. بمون تا این لحظه بگذره.")
+                              .setPositiveButton("بمونم", new DialogInterface.OnClickListener() {
+                                  @Override public void onClick(DialogInterface d, int w) { d.dismiss(); }
+                              })
+                              .setNegativeButton("خارج شو", new DialogInterface.OnClickListener() {
+                                  @Override public void onClick(DialogInterface d, int w) {
+                                      leftDeliberately = true;
+                                      sessionActive = false;
+                                      if (sessionTimer != null) sessionTimer.cancel();
+                                      resetStreakForAbandon();
+                                      finish();
+                                  }
+                              })
+                              .setCancelable(true)
+                              .show();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  super.onDestroy();
+                  if (sessionTimer != null) sessionTimer.cancel();
+              }
+          }
+          JAVAEOF
+
+      - name: Inject Peak Danger emergency widget (نهایت خطر) -- part 2 of 2 (manifest + widget descriptor + plugin bridge)
+        # Completes the widget started in part 1: registers PeakDangerWidgetProvider as a
+        # <receiver> and PeakDangerActivity as an <activity> in AndroidManifest.xml, adds the
+        # res/xml/widget_peak_danger_info.xml appwidget-provider descriptor PeakDangerWidgetProvider's
+        # meta-data already points to, and adds TaskWidgetPlugin.getPeakDangerReset() so app.js can
+        # read/clear KEY_PENDING_RESET(_AT) on next launch and mirror the native streak reset that
+        # PeakDangerActivity.resetStreakForAbandon() already wrote to SharedPreferences. Only after
+        # this step can the widget actually be referenced by the manifest / placed on a home screen.
+        run: |
+          set -e
+          APP_ID="com.mahdihd648.dreamlifeapp"
+          APP_PATH="${APP_ID//./\/}"
+          JAVA_DIR="android/app/src/main/java/${APP_PATH}"
+          WIDGET_DIR="${JAVA_DIR}/widget"
+          RES_DIR="android/app/src/main/res"
+
+          mkdir -p "$RES_DIR/xml"
+
+          # ---- res/xml/widget_peak_danger_info.xml ----
+          cat > "$RES_DIR/xml/widget_peak_danger_info.xml" <<'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="110dp"
+              android:minHeight="110dp"
+              android:minResizeWidth="90dp"
+              android:minResizeHeight="90dp"
+              android:targetCellWidth="2"
+              android:targetCellHeight="2"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_peak_danger"
+              android:previewImage="@mipmap/ic_launcher"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen" />
+          XMLEOF
+
+          # ---- AndroidManifest.xml: register PeakDangerWidgetProvider + PeakDangerActivity ----
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          python3 - "$MANIFEST" "$APP_ID" <<'WIDGETPYEOF'
+          import sys, re
+          path = sys.argv[1]
+          app_id = sys.argv[2]
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+
+          if 'PeakDangerWidgetProvider' not in src:
+              entries = (
+                  '    <receiver android:name="' + app_id + '.widget.PeakDangerWidgetProvider" android:exported="true">\n'
+                  '        <intent-filter>\n'
+                  '            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
+                  '        </intent-filter>\n'
+                  '        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_peak_danger_info" />\n'
+                  '    </receiver>\n'
+                  '    <!-- No intent-filter: launched only by an explicit Intent from PeakDangerWidgetProvider,\n'
+                  '         so it does not need to be exported. -->\n'
+                  '    <activity android:name="' + app_id + '.widget.PeakDangerActivity"\n'
+                  '        android:exported="false"\n'
+                  '        android:launchMode="singleTop"\n'
+                  '        android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />\n'
+              )
+              src = src.replace('</application>', entries + '</application>', 1)
+
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(src)
+          WIDGETPYEOF
+
+          # ---- TaskWidgetPlugin.java: add getPeakDangerReset() so app.js can consume the
+          #      pending-reset flag PeakDangerActivity.resetStreakForAbandon() writes ----
+          python3 - "$WIDGET_DIR/TaskWidgetPlugin.java" <<'PYEOF'
+          import sys
+          path = sys.argv[1]
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+
+          if 'getPeakDangerReset' not in src:
+              method = (
+                  '\n'
+                  '    @PluginMethod\n'
+                  '    public void getPeakDangerReset(PluginCall call) {\n'
+                  '        SharedPreferences p = prefs();\n'
+                  '        boolean pending = p.getBoolean(PeakDangerActivity.KEY_PENDING_RESET, false);\n'
+                  '        long at = p.getLong(PeakDangerActivity.KEY_PENDING_RESET_AT, 0);\n'
+                  '        if (pending) {\n'
+                  '            p.edit()\n'
+                  '                .putBoolean(PeakDangerActivity.KEY_PENDING_RESET, false)\n'
+                  '                .remove(PeakDangerActivity.KEY_PENDING_RESET_AT)\n'
+                  '                .apply();\n'
+                  '        }\n'
+                  '        JSObject ret = new JSObject();\n'
+                  '        ret.put("reset", pending);\n'
+                  '        ret.put("resetAt", at);\n'
+                  '        call.resolve(ret);\n'
+                  '    }\n'
+              )
+              idx = src.rstrip().rfind('}')
+              if idx == -1:
+                  print("::error::could not find closing brace in TaskWidgetPlugin.java")
+                  sys.exit(1)
+              src = src[:idx] + method + src[idx:]
+
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(src)
+          PYEOF
+
+          if ! grep -q 'PeakDangerWidgetProvider' "$MANIFEST"; then
+            echo "::error::PeakDangerWidgetProvider was not registered in AndroidManifest.xml"
+            exit 1
+          fi
+          if ! grep -q 'getPeakDangerReset' "$WIDGET_DIR/TaskWidgetPlugin.java"; then
+            echo "::error::getPeakDangerReset was not added to TaskWidgetPlugin.java"
+            exit 1
+          fi
 
       - name: Add notification permissions (POST_NOTIFICATIONS / exact alarm / boot)
         # Without these, @capacitor/local-notifications schedules silently fail or get dropped
