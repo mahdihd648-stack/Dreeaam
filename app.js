@@ -367,6 +367,86 @@ function pickAvoidExtra(id){
   return Array.isArray(v) ? v[Math.floor(Math.random()*v.length)] : v;
 }
 
+/* ---- Exit-cloud persona lines, keyed by the same ADDICTION_LABELS ids used everywhere
+   else (profile.addictions). Two moods per habit: `comfort` (used right after a logged
+   slip, or as a general "من قدم‌به‌قدم کنارتم" reassurance when the day's plan is left
+   unfinished) and `praise` (used right after a logged resisted urge for that exact habit).
+   Written like a coach who knows exactly which habit this person is fighting — same spirit
+   as the ورزشکار/نقاش identity titles above, just for the harder avoid-side habits instead
+   of the build-side ones. namePart is prepended by the caller (pickExitCloudMessage), and
+   {X} is filled in via fillX() for the custom 'other' habit. ---- */
+const ADDICTION_EXIT_PERSONA = {
+  phone: {
+    comfort: ['نترس، گوشی رو یهو کسی ترک نمی‌کنه؛ قدم‌به‌قدم با هم کمش می‌کنیم.', 'یه روز پرگوشی پایان راه نیست، فردا دوباره از اول شروع کن.'],
+    praise: ['امروز کمتر رفتی سراغ گوشی، دقیقاً همینو می‌خواستم ببینم.', 'داری واقعاً کنترل گوشیتو به‌دست میاری.']
+  },
+  porn: {
+    comfort: ['نگران نباش، این مسیرو با هم قدم‌به‌قدم می‌ریم؛ یه لغزش خط بطلان رو همه‌چیز نمی‌کشه.', 'خودتو بابتش له نکن؛ فردا دوباره از همینجا ادامه می‌دیم.'],
+    praise: ['امروز جلوی محرک ایستادی و بردی. بهت افتخار می‌کنم.', 'کنترل امروزت دقیقاً همون چیزیه که این مسیرو می‌سازه.']
+  },
+  gaming: {
+    comfort: ['بازی رو یهو کنار نمی‌ذاری، من کمکت می‌کنم کم‌کمش کنی.', 'یه روز پربازی پایان راه نیست؛ فردا دوباره سقف زمانتو نگه دار.'],
+    praise: ['امروز به سقف زمانی بازیت پایبند موندی، آفرین.', 'بازی داره برات یه سرگرمی کنترل‌شده می‌شه، نه یه فرار.']
+  },
+  smoking: {
+    comfort: ['ترک سیگار یه‌شبه نیست؛ کمکت می‌کنم قدم‌به‌قدم مصرفتو کم کنی.', 'یه نخ امروز، پایان مسیر نیست. فردا برمی‌گردیم سر برنامه.'],
+    praise: ['امروز مصرفتو کنترل کردی، همینه دقیقاً.', 'داری واقعاً سیگارو پس می‌زنی. بهت افتخار می‌کنم.']
+  },
+  alcohol: {
+    comfort: ['نگران نباش، این عادتو با هم و آروم‌آروم کنار می‌ذاریم.', 'یه لغزش امشب، فردا رو خراب نمی‌کنه.'],
+    praise: ['امروز بدون الکل از پسش براومدی، عالی بود.', 'کنترل امروزت دقیقاً یه قدم به جلوئه.']
+  },
+  binge: {
+    comfort: ['نترس، کمکت می‌کنم این شکمو بودنو کم‌کم بذاری کنار.', 'یه پرخوری امروز خط پایان نیست؛ فردا دوباره از گرسنگی واقعی شروع می‌کنیم.'],
+    praise: ['امروز به بدنت گوش دادی، نه به هیجانت. آفرین.', 'دیگه شکمو بودن جای قبلو نداره؛ داری خیلی خوب پیش می‌ری.']
+  },
+  sleep: {
+    comfort: ['نظم خواب یه‌شبه درست نمی‌شه، من کنارتم تا کم‌کم جا بیفته.', 'امشب دیر خوابیدی؟ اشکالی نداره، فردا دوباره سرساعت شروع کن.'],
+    praise: ['ساعت خوابت امروز منظم‌تر بود، همینو ادامه بده.', 'داری خواب باثبات‌تری می‌سازی، بهت افتخار می‌کنم.']
+  },
+  procrastination: {
+    comfort: ['نترس، با هم یاد می‌گیریم کارارو عقب ننداری؛ فقط از یه قدم کوچیک شروع کن.', 'امروز عقب افتاد؟ اشکالی نداره، فردا از همون کار شروع کن.'],
+    praise: ['امروز کار مهمتو عقب ننداختی، همینه دقیقاً.', 'شروع کردن دیگه برات اونقدر سخت نیست که بود.']
+  },
+  shopping: {
+    comfort: ['نگران نباش، خرید وسواسی رو با هم قدم‌به‌قدم کنترلش می‌کنیم.', 'یه خرید اضافه امروز، پایان مسیر نیست.'],
+    praise: ['امروز جلوی یه خرید غیرضروری ایستادی، آفرین.', 'داری واقعاً پول و وقتتو بهتر کنترل می‌کنی.']
+  },
+  nailbiting: {
+    comfort: ['دستات کم‌کم عادت می‌کنن؛ من کمکت می‌کنم.', 'یه لغزش امروز مهم نیست، فردا دوباره حواستو جمع کن.'],
+    praise: ['امروز دستات سمت دهنت نرفت، عالی بود.', 'داری واقعاً این عادتو کنترل می‌کنی.']
+  },
+  anxiety: {
+    comfort: ['اضطراب یهو از بین نمی‌ره، من قدم‌به‌قدم کنارتم.', 'امروز سخت بود؟ اشکالی نداره، فردا دوباره تکنیکتو امتحان کن.'],
+    praise: ['امروز اضطرابتو خیلی خوب مدیریت کردی.', 'داری آروم‌تر با این حس کنار میای، بهت افتخار می‌کنم.']
+  },
+  aggression: {
+    comfort: ['کنترل خشم زمان می‌بره، من کمکت می‌کنم یاد بگیریش.', 'امروز از کوره در رفتی؟ اشکالی نداره، فردا یه مکث کوچیک قبل از واکنش امتحان کن.'],
+    praise: ['امروز آرامشتو حفظ کردی، این خیلی مهمه.', 'داری واقعاً رو کنترل خشمت کار می‌کنی.']
+  },
+  other: {
+    comfort: ['نگران «{X}» نباش، من قدم‌به‌قدم کمکت می‌کنم کنترلش کنی.', 'یه لغزش امروز رو «{X}»، پایان مسیر نیست؛ فردا دوباره ادامه می‌دیم.'],
+    praise: ['امروز رو «{X}» خیلی خوب عمل کردی، آفرین.', 'کنترل امروزت رو «{X}» دقیقاً همون چیزیه که این مسیرو می‌سازه.']
+  }
+};
+/* ---- SOS category id → ADDICTION_LABELS id, so today's real urge-log events (the SOS
+   screen's own category set: masturbation/porn/fastfood/phone/smoking/procrastination/other)
+   can speak to the exit-cloud in the same voice as the habit the user actually picked at
+   onboarding, instead of a generic line. ---- */
+const SOS_CAT_TO_ADDICTION = {
+  masturbation:'porn', porn:'porn', fastfood:'binge', phone:'phone',
+  smoking:'smoking', procrastination:'procrastination', other:'other'
+};
+/* ---- Stable "which habit does the exit-cloud speak about today" pick, for the cases
+   where nothing urge-specific happened today but a habit-aware line still fits (e.g. the
+   unfinished-plan nudge). Seeded off today's date, same pattern as seededPick everywhere
+   else, so it doesn't reshuffle every time the exit screen re-opens the same day. ---- */
+function primaryAddictionOfDay(){
+  const list = (storeData.profile && storeData.profile.addictions) || [];
+  if(!list.length) return null;
+  return seededPick(list, todayKey()+'-primaryaddiction');
+}
+
 /* ---- phone now gets its own evolving item like every other habit ---- */
 ADDICTION_ITEMS.phone = ["امروز قبل از خواب گوشی رو دور از تخت گذاشتم",
   "یه اپ حواس‌پرت‌کننده رو محدود یا موقتاً حذف کردم",
@@ -1694,7 +1774,7 @@ function defaultStoreData(){
     theme:"brand", programLength:90, intensity:"medium", customItems:[], customAvoidItems:[], customTasks:[], customTaskNotifSeq:0, badges:{}, maxStreak:0, maxPhaseIndex:0, selfieCount:0,
     meditationLog:{}, maxMeditationStreak:0,
     reminder:{enabled:false, morning:"08:00", night:"22:30"}, smartReminder:{enabled:false, offsetMinutes:20}, streakMilestonesHit:{}, libraryDeepDive:{}, libraryWeekly:{}, courseProgress:{}, chatHistory:[],
-    customCounters:[], customCounterMilestonesHit:{},
+    customCounters:[], customCounterMilestonesHit:{}, counterNotifSeq:0,
     supportContact:{name:"", phone:""}, lastModified:null,
     premium:false, premiumPhone:"", aiUsage:{}, firstDayCompleteShown:false,
     lifeJournal:{}, lifeAnalyzerReport:null, inviteNudge:{lastShownAt:null, count:0},
@@ -1837,13 +1917,6 @@ function updatePlanBadge(){
   const iconEl = document.getElementById('planBadgeIcon');
   const textEl = document.getElementById('planBadgeText');
   const isPremiumNow = !!(storeData.premium || isInTrial());
-  // Pre-paint cache: mirrors the 'checklistApp:lastTheme' pattern used by applyTheme().
-  // storeData.premium loads async, so without this a returning premium user's very first
-  // frame (before this function ever runs) paints the hardcoded free-plan/open-lock badge
-  // that's in the raw HTML. The inline script right after #planBadge in index-45.html reads
-  // this synchronously, before first paint, and flips the badge to premium immediately —
-  // so a premium user can never see the lock badge, not even for a single frame.
-  try{ localStorage.setItem('checklistApp:lastPremium', isPremiumNow ? '1' : '0'); }catch(e){}
   badge.classList.toggle('is-premium', isPremiumNow);
   badge.classList.toggle('is-free', !isPremiumNow);
   if(isPremiumNow){
@@ -1965,17 +2038,6 @@ async function resolveTrialStart(){
   // به Supabase (جدول device_trials) سر بزنه — فقط برای سازگاری با جاهایی از کد که
   // صداش می‌زنن نگه داشته شده.
   effectiveTrialStartMs = null;
-}
-/* ==================== گزارش روزانه در چت عمومی: هفته‌ی اول اکانت رایگانه ====================
-   بر پایه‌ی publicChatUser.created_at (زمان واقعی ساختِ اکانت رو سرور Supabase Auth، نه
-   داده‌ی محلی) — پس با پاک کردن داده‌ی برنامه ریست نمی‌شه. بعد از این ۷ روز، محدودیتِ
-   قدیمی (یک‌بار در کل، مگر پرمیوم) دوباره برقرار می‌شه. */
-const FREE_REPORT_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-function isInFirstReportWeek(){
-  if(!publicChatUser || !publicChatUser.created_at) return false;
-  const createdMs = new Date(publicChatUser.created_at).getTime();
-  if(isNaN(createdMs)) return false;
-  return (Date.now() - createdMs) < FREE_REPORT_WEEK_MS;
 }
 function isInTrial(){
   // طبق درخواست: بازه‌ی آزمایشی رایگان کاملاً و برای همیشه غیرفعاله. همه‌ی بخش‌های
@@ -2183,7 +2245,7 @@ function openSOS(){
   const overlay=document.getElementById('sosOverlay');
   pendingCategory = null;
   document.getElementById('sosCatStep').style.display='block';
-  ['sosWhyBox','sosContactBox','sosMaritalBox','sosMyPlanBox','sosChecklist','sosTimerWrap','sosOutcomeRow'].forEach(id=>{
+  ['sosWhyBox','sosContactBox','sosMaritalBox','sosChecklist','sosTimerWrap','sosOutcomeRow'].forEach(id=>{
     document.getElementById(id).style.display='none';
   });
   document.getElementById('sosHaltStep').style.display='none';
@@ -2270,16 +2332,14 @@ function selectTemptationCategory(catId){
   if(maritalTip){ maritalBox.style.display='block'; maritalBox.textContent = maritalTip; }
   else { maritalBox.style.display='none'; maritalBox.textContent=''; }
 
-  // چک‌لیستِ اقدامِ فوری: از استخرِ activities همون دسته‌بندی تصادفی انتخاب می‌شه — هربار
-  // بازکردنِ SOS، ترکیبِ متفاوتی می‌بینه. اگه برنامه‌ی خودِ کاربر (if-then) هم وجود داشته
-  // باشه، جدا و برجسته بالای چک‌لیست نشون داده می‌شه (نه قاطی موردهای عمومی) — همون
-  // یادآوریِ شخصی‌ای که موقعِ آنبوردینگ نوشته.
+  // چک‌لیستِ اقدامِ فوری: اگه برنامه‌ی خودِ کاربر (if-then) وجود داشته باشه، اون همیشه
+  // موردِ اوله (چون دقیقاً مالِ خودشه)، بقیه از استخرِ activities همون دسته‌بندی تصادفی
+  // انتخاب می‌شن — هربار بازکردنِ SOS، ترکیبِ متفاوتی می‌بینه، نه یه خط ثابت.
   const myPlan = storeData.profile && storeData.profile.ifThenPlan && storeData.profile.ifThenPlan.trim();
-  const myPlanBox = document.getElementById('sosMyPlanBox');
-  if(myPlan){ myPlanBox.style.display='block'; myPlanBox.textContent = 'برنامه‌ی خودت: ' + myPlan; }
-  else { myPlanBox.style.display='none'; myPlanBox.textContent=''; }
   const pool = cat.activities && cat.activities.length ? cat.activities : SOS_ACTIVITIES;
-  const checklistItems = sosPickN(pool, Math.min(3, pool.length));
+  const checklistItems = myPlan
+    ? [myPlan, ...sosPickN(pool, Math.min(2, pool.length))]
+    : sosPickN(pool, Math.min(3, pool.length));
   renderSosChecklist(checklistItems);
   document.getElementById('sosChecklist').style.display='flex';
   document.getElementById('sosTimerWrap').style.display='block';
@@ -3318,8 +3378,6 @@ function updateLiveCounter(){
     if(!storeData.startTimestamp || isNaN(startMs)){
       grid.style.display = 'none';
       empty.style.display = 'block';
-      const overviewBadgeEmpty = document.getElementById('overviewLiveBadge');
-      if(overviewBadgeEmpty) overviewBadgeEmpty.textContent = '';
       return;
     }
     grid.style.display = 'flex';
@@ -3333,11 +3391,6 @@ function updateLiveCounter(){
     document.getElementById('slHours').textContent = toFaNum2(hours);
     document.getElementById('slMinutes').textContent = toFaNum2(minutes);
     document.getElementById('slSeconds').textContent = toFaNum2(seconds);
-    // خلاصه‌ی کوچولوی همین روز/ساعت رو خودِ دکمه‌ی زیرتبِ «نمای کلی» هم می‌نویسیم — چون
-    // دیفالتِ اپ رو تب «برنامه‌ی روزانه»ست، این تنها جایی می‌مونه که بدون سوییچ زیرتب
-    // بشه یه نگاه به روزشمار انداخت.
-    const overviewBadge = document.getElementById('overviewLiveBadge');
-    if(overviewBadge) overviewBadge.textContent = toFa(days) + ' روز، ' + toFa(hours) + ' ساعت';
     try{ updateCustomCountersLive(); }catch(err2){}
   }catch(err){ console.error('Live counter error', err); }
 }
@@ -3347,6 +3400,224 @@ function startLiveCounter(){
   clearInterval(liveCounterInterval);
   liveCounterInterval = setInterval(updateLiveCounter, 1000);
 }
+
+/* ================= Jalali (Shamsi) calendar conversion + date-picker widget =================
+   Pure-math Gregorian<->Jalali conversion (no external library — the app has no CDN access at
+   runtime), based on the standard 33-year-break algorithm for Jalali leap years. Exposed as
+   gregorianToJalali/jalaliToGregorian; everything else (jcDiv/jcMod/jcCal/jcG2d/jcD2g/jcJ2d/jcD2j)
+   is an internal step of that conversion. Used below by openJalaliDatePicker, the shared Shamsi
+   calendar-grid modal that any feature (e.g. the countdown counters) can call to let the user
+   pick a target date on a real Jalali calendar instead of a Gregorian <input type=date>. */
+function jcDiv(a,b){ return ~~(a/b); }
+function jcMod(a,b){ return a - ~~(a/b)*b; }
+function jcCal(jy){
+  const breaks = [-61,9,38,199,426,686,756,818,1111,1181,1210,1635,2060,2097,2192,2262,2324,2394,2456,3178];
+  const bl = breaks.length;
+  const gy = jy + 621;
+  let leapJ = -14, jp = breaks[0], jm, jump = 0, leap, n, i;
+  for(i=1;i<bl;i++){
+    jm = breaks[i];
+    jump = jm - jp;
+    if(jy < jm) break;
+    leapJ = leapJ + jcDiv(jump,33)*8 + jcDiv(jcMod(jump,33),4);
+    jp = jm;
+  }
+  n = jy - jp;
+  leapJ = leapJ + jcDiv(n,33)*8 + jcDiv(jcMod(n,33)+3,4);
+  if(jcMod(jump,33)===4 && jump-n===4) leapJ += 1;
+  const leapG = jcDiv(gy,4) - jcDiv((jcDiv(gy,100)+1)*3,4) - 150;
+  const march = 20 + leapJ - leapG;
+  if(jump-n < 6) n = n - jump + jcDiv(jump+4,33)*33;
+  leap = jcMod(jcMod(n+1,33)-1,4);
+  if(leap===-1) leap = 4;
+  return {leap, gy, march};
+}
+function jcG2d(gy,gm,gd){
+  let d = jcDiv((gy + jcDiv(gm-8,6) + 100100)*1461,4)
+        + jcDiv(153*jcMod(gm+9,12)+2,5)
+        + gd - 34840408;
+  d = d - jcDiv(jcDiv(gy+100100+jcDiv(gm-8,6),100)*3,4) + 752;
+  return d;
+}
+function jcD2g(jdn){
+  let j = 4*jdn + 139361631;
+  j = j + jcDiv(jcDiv(4*jdn+183187720,146097)*3,4)*4 - 3908;
+  const i = jcDiv(jcMod(j,1461),4)*5 + 308;
+  const gd = jcDiv(jcMod(i,153),5) + 1;
+  const gm = jcMod(jcDiv(i,153),12) + 1;
+  const gy = jcDiv(j,1461) - 100100 + jcDiv(8-gm,6);
+  return [gy,gm,gd];
+}
+function jcJ2d(jy,jm,jd){
+  const r = jcCal(jy);
+  return jcG2d(r.gy,3,r.march) + (jm-1)*31 - jcDiv(jm,7)*(jm-7) + jd - 1;
+}
+function jcD2j(jdn){
+  let gy = jcD2g(jdn)[0], jy = gy - 621;
+  let r = jcCal(jy);
+  let jdn1f = jcG2d(gy,3,r.march);
+  let k = jdn - jdn1f, jm, jd;
+  if(k >= 0){
+    if(k <= 185){
+      jm = 1 + jcDiv(k,31);
+      jd = jcMod(k,31) + 1;
+      return [jy,jm,jd];
+    }
+    k -= 186;
+  } else {
+    jy -= 1;
+    k += 179;
+    if(r.leap===1) k += 1;
+  }
+  jm = 7 + jcDiv(k,30);
+  jd = jcMod(k,30) + 1;
+  return [jy,jm,jd];
+}
+function isLeapJalaliYear(jy){ return jcCal(jy).leap === 0; }
+function jalaliMonthLength(jy,jm){
+  if(jm <= 6) return 31;
+  if(jm <= 11) return 30;
+  return isLeapJalaliYear(jy) ? 30 : 29;
+}
+// Public entry points: gy/gm/gd and jy/jm/jd are all 1-based month/day, plain numbers.
+function gregorianToJalali(gy,gm,gd){ return jcD2j(jcG2d(gy,gm,gd)); }
+function jalaliToGregorian(jy,jm,jd){ return jcD2g(jcJ2d(jy,jm,jd)); }
+
+const JALALI_MONTH_NAMES = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
+const JALALI_WEEKDAY_SHORT = ['ش','ی','د','س','چ','پ','ج']; // starts Saturday, matches Date#getDay() rotated below
+
+function gregorianDateToISO(gy,gm,gd){
+  return gy+'-'+String(gm).padStart(2,'0')+'-'+String(gd).padStart(2,'0');
+}
+// JS Date#getDay(): 0=Sunday..6=Saturday. Our week starts Saturday, so rotate by +1 mod 7.
+function jcWeekdayIndex(gy,gm,gd){
+  return (new Date(gy, gm-1, gd).getDay() + 1) % 7;
+}
+
+/* ---------------- Shared Jalali date-picker modal ----------------
+   openJalaliDatePicker({ initialISO, minISO, title, onConfirm }) renders a real Shamsi
+   calendar grid into #jalaliPickerOverlay (markup added near addCounterOverlay in index.html)
+   and calls onConfirm({iso, jy, jm, jd, label}) once the user taps «تأیید». iso/gy/gm/gd are
+   always plain Gregorian (matches how every date is already stored elsewhere in storeData) —
+   only the picker UI itself is Jalali, per how this feature was scoped. minISO (optional)
+   disables any day before it (e.g. "today" for a future-only target-date picker). */
+let jalaliPickerState = { jy:0, jm:0, selectedISO:null, minISO:null, onConfirm:null };
+function jcToday(){
+  const d = new Date();
+  return gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
+}
+function jalaliLabel(jy,jm,jd,gy,gm,gd){
+  const wd = JALALI_WEEKDAY_LONG[jcWeekdayIndex(gy,gm,gd)];
+  return wd+'، '+toFa(jd)+' '+JALALI_MONTH_NAMES[jm-1]+' '+toFa(jy);
+}
+// Compact variant for tight spaces (the countdown-counter card's target-date chip) — no
+// weekday, and no year unless the target isn't in the current Jalali year (otherwise every
+// near-term target would carry a redundant "۱۴۰۴" on it).
+function jalaliShortLabel(jy,jm,jd){
+  const [ty] = jcToday();
+  return toFa(jd)+' '+JALALI_MONTH_NAMES[jm-1]+(jy!==ty ? ' '+toFa(jy) : '');
+}
+const JALALI_WEEKDAY_LONG = ['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه'];
+
+function openJalaliDatePicker(opts){
+  opts = opts || {};
+  const overlay = document.getElementById('jalaliPickerOverlay');
+  if(!overlay) return;
+  const [ty,tm] = jcToday();
+  let startJY = ty, startJM = tm, startJD = null;
+  if(opts.initialISO){
+    const d = new Date(opts.initialISO);
+    if(!isNaN(d.getTime())){
+      const [jy,jm,jd] = gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
+      startJY = jy; startJM = jm; startJD = jd;
+    }
+  }
+  jalaliPickerState = {
+    jy: startJY, jm: startJM,
+    selectedISO: opts.initialISO || null,
+    minISO: opts.minISO || null,
+    onConfirm: typeof opts.onConfirm==='function' ? opts.onConfirm : null
+  };
+  const titleEl = document.getElementById('jalaliPickerTitle');
+  if(titleEl) titleEl.textContent = opts.title || 'انتخاب تاریخ';
+  renderJalaliPickerGrid();
+  overlay.classList.add('show');
+}
+function closeJalaliDatePicker(){
+  const overlay = document.getElementById('jalaliPickerOverlay');
+  if(overlay) overlay.classList.remove('show');
+}
+function renderJalaliPickerGrid(){
+  const { jy, jm } = jalaliPickerState;
+  const headEl = document.getElementById('jalaliPickerMonthLabel');
+  if(headEl) headEl.textContent = JALALI_MONTH_NAMES[jm-1]+' '+toFa(jy);
+  const gridEl = document.getElementById('jalaliPickerGrid');
+  if(!gridEl) return;
+
+  const [firstGY, firstGM, firstGD] = jalaliToGregorian(jy, jm, 1);
+  const leadEmpty = jcWeekdayIndex(firstGY, firstGM, firstGD);
+  const monthLen = jalaliMonthLength(jy, jm);
+  const [todayJY, todayJM, todayJD] = jcToday();
+
+  let minJalali = null;
+  if(jalaliPickerState.minISO){
+    const d = new Date(jalaliPickerState.minISO);
+    if(!isNaN(d.getTime())) minJalali = gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
+  }
+  let selJalali = null;
+  if(jalaliPickerState.selectedISO){
+    const d = new Date(jalaliPickerState.selectedISO);
+    if(!isNaN(d.getTime())) selJalali = gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
+  }
+  const cmpJalali = (ay,am,ad,by,bm,bd) => (ay-by) || (am-bm) || (ad-bd);
+
+  let cells = '';
+  for(let i=0;i<leadEmpty;i++) cells += '<div class="jp-day jp-day-empty"></div>';
+  for(let d=1; d<=monthLen; d++){
+    const isToday = cmpJalali(jy,jm,d, todayJY,todayJM,todayJD) === 0;
+    const isSelected = selJalali && cmpJalali(jy,jm,d, selJalali[0],selJalali[1],selJalali[2]) === 0;
+    const isDisabled = minJalali && cmpJalali(jy,jm,d, minJalali[0],minJalali[1],minJalali[2]) < 0;
+    const cls = ['jp-day'];
+    if(isToday) cls.push('jp-day-today');
+    if(isSelected) cls.push('jp-day-selected');
+    if(isDisabled) cls.push('jp-day-disabled');
+    cells += `<button type="button" class="${cls.join(' ')}" data-jd="${d}" ${isDisabled?'disabled':''}>${toFa(d)}</button>`;
+  }
+  gridEl.innerHTML = cells;
+  gridEl.querySelectorAll('.jp-day:not(.jp-day-empty):not(.jp-day-disabled)').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const jd = parseInt(btn.getAttribute('data-jd'),10);
+      const [gy,gm,gd] = jalaliToGregorian(jalaliPickerState.jy, jalaliPickerState.jm, jd);
+      jalaliPickerState.selectedISO = gregorianDateToISO(gy,gm,gd);
+      renderJalaliPickerGrid();
+    });
+  });
+}
+function jalaliPickerShiftMonth(delta){
+  let { jy, jm } = jalaliPickerState;
+  jm += delta;
+  if(jm < 1){ jm = 12; jy -= 1; }
+  else if(jm > 12){ jm = 1; jy += 1; }
+  jalaliPickerState.jy = jy; jalaliPickerState.jm = jm;
+  renderJalaliPickerGrid();
+}
+document.getElementById('jalaliPickerPrevBtn') && document.getElementById('jalaliPickerPrevBtn').addEventListener('click', ()=>jalaliPickerShiftMonth(-1));
+document.getElementById('jalaliPickerNextBtn') && document.getElementById('jalaliPickerNextBtn').addEventListener('click', ()=>jalaliPickerShiftMonth(1));
+document.getElementById('jalaliPickerTodayBtn') && document.getElementById('jalaliPickerTodayBtn').addEventListener('click', ()=>{
+  const [ty,tm] = jcToday();
+  jalaliPickerState.jy = ty; jalaliPickerState.jm = tm;
+  renderJalaliPickerGrid();
+});
+document.getElementById('jalaliPickerCloseBtn') && document.getElementById('jalaliPickerCloseBtn').addEventListener('click', closeJalaliDatePicker);
+document.getElementById('jalaliPickerConfirmBtn') && document.getElementById('jalaliPickerConfirmBtn').addEventListener('click', ()=>{
+  if(!jalaliPickerState.selectedISO) return; // یه روز باید انتخاب شده باشه
+  const d = new Date(jalaliPickerState.selectedISO);
+  const [jy,jm,jd] = gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
+  const label = jalaliLabel(jy,jm,jd, d.getFullYear(), d.getMonth()+1, d.getDate());
+  const cb = jalaliPickerState.onConfirm;
+  closeJalaliDatePicker();
+  if(cb) cb({ iso: jalaliPickerState.selectedISO, jy, jm, jd, label });
+});
 
 /* ================= Custom day-counters (user-defined, private, no rewards) =================
    The main streak-live-card above stays exactly as-is. Users can additionally create their own
@@ -3358,12 +3629,57 @@ const CUSTOM_COUNTER_MILESTONES = [3,7,14,21,30,45,60,90,120,180,270,365];
 function daysSince(startMs){
   return Math.floor(Math.max(0, Date.now() - startMs) / 86400000);
 }
+/* Calendar-day (not raw-ms) difference to "today" for countdown-mode counters — zeroing both
+   sides to local midnight first so the result only moves once a day (at midnight), instead of
+   drifting by the time-of-day the counter happened to be created at. Positive = days left,
+   0 = target is today, negative = target has passed (abs value = days since it passed). */
+function daysUntilTarget(targetISO){
+  const target = new Date(targetISO);
+  target.setHours(0,0,0,0);
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  return Math.round((target - today) / 86400000);
+}
 
 function renderCustomCounters(){
   const slot = document.getElementById('customCountersSlot');
   if(!slot) return;
   const list = storeData.customCounters || [];
   slot.innerHTML = list.map(c=>{
+    const editBtn = `<button class="counter-edit-btn" data-edit-id="${c.id}" title="ویرایش"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 4.5l4 4-11 11H4.5v-4z"/><path d="M13.5 6.5l4 4"/></svg></button>`;
+    const delBtn = `<button class="counter-del-btn" data-del-id="${c.id}" title="حذف"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+
+    if(c.mode === 'down' && c.target){
+      // Dedicated countdown card: name + target-date chip on top, big remaining/passed count
+      // and the edit/delete actions on the bottom row.
+      const remaining = daysUntilTarget(c.target);
+      const d = new Date(c.target);
+      const [jy,jm,jd] = gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
+      const chip = jalaliShortLabel(jy,jm,jd);
+      let daysHtml, daysLabel, extraCls = '';
+      if(remaining > 0){
+        daysHtml = `<span class="custom-counter-days">${toFa(remaining)}</span>`; daysLabel = 'روز مونده';
+      } else if(remaining === 0){
+        daysHtml = ''; daysLabel = 'امروزه! 🎉'; extraCls = ' custom-counter-reached';
+      } else {
+        daysHtml = `<span class="custom-counter-days">${toFa(Math.abs(remaining))}</span>`; daysLabel = 'روز گذشت'; extraCls = ' custom-counter-passed';
+      }
+      return `<div class="custom-counter-card custom-counter-down${extraCls}" data-id="${c.id}">
+        <div class="ccd-top">
+          <span class="ccd-name">${escapeHtml(c.name)}</span>
+          <span class="ccd-target-chip">${chip}</span>
+        </div>
+        <div class="ccd-bottom">
+          <div class="custom-counter-days-wrap">
+            ${daysHtml}
+            <span class="custom-counter-days-label">${daysLabel}</span>
+          </div>
+          <div class="ccd-actions">${editBtn}${delBtn}</div>
+        </div>
+      </div>`;
+    }
+
+    // Plain count-up card (unchanged layout, just gained the edit button).
     const days = daysSince(new Date(c.start).getTime());
     return `<div class="custom-counter-card" data-id="${c.id}">
       <div class="custom-counter-name">${escapeHtml(c.name)}</div>
@@ -3371,15 +3687,22 @@ function renderCustomCounters(){
         <span class="custom-counter-days">${toFa(days)}</span>
         <span class="custom-counter-days-label">روز</span>
       </div>
-      <button class="counter-del-btn" data-del-id="${c.id}" title="حذف"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      ${editBtn}${delBtn}
     </div>`;
   }).join('');
+  slot.querySelectorAll('.counter-edit-btn').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      openEditCounterModal(btn.getAttribute('data-edit-id'));
+    });
+  });
   slot.querySelectorAll('.counter-del-btn').forEach(btn=>{
     btn.addEventListener('click', (e)=>{
       e.stopPropagation();
       const id = btn.getAttribute('data-del-id');
       const c = (storeData.customCounters||[]).find(x=>x.id===id);
       if(c && confirm('روزشمار «'+c.name+'» حذف بشه؟')){
+        cancelCounterReminder(c);
         storeData.customCounters = storeData.customCounters.filter(x=>x.id!==id);
         delete storeData.customCounterMilestonesHit[id];
         saveData();
@@ -3393,30 +3716,182 @@ function updateCustomCountersLive(){
   if(!slot) return;
   const list = storeData.customCounters || [];
   list.forEach(c=>{
-    const card = slot.querySelector('.custom-counter-card[data-id="'+c.id+'"] .custom-counter-days');
-    if(card) card.textContent = toFa(daysSince(new Date(c.start).getTime()));
+    const cardEl = slot.querySelector('.custom-counter-card[data-id="'+c.id+'"]');
+    if(!cardEl) return;
+    if(c.mode === 'down' && c.target){
+      // Countdown counters only actually change once a day (at local midnight), but this
+      // still runs every second — cheap enough, and it's what catches the rare case of the
+      // app staying open across that midnight rollover (remaining/reached/passed switch).
+      const remaining = daysUntilTarget(c.target);
+      const wrap = cardEl.querySelector('.custom-counter-days-wrap');
+      const labelEl = cardEl.querySelector('.custom-counter-days-label');
+      let daysEl = cardEl.querySelector('.custom-counter-days');
+      if(remaining > 0){
+        if(!daysEl && wrap){ wrap.insertAdjacentHTML('afterbegin', '<span class="custom-counter-days"></span>'); daysEl = cardEl.querySelector('.custom-counter-days'); }
+        if(daysEl) daysEl.textContent = toFa(remaining);
+        if(labelEl) labelEl.textContent = 'روز مونده';
+        cardEl.classList.remove('custom-counter-reached','custom-counter-passed');
+      } else if(remaining === 0){
+        if(daysEl) daysEl.remove();
+        if(labelEl) labelEl.textContent = 'امروزه! 🎉';
+        cardEl.classList.add('custom-counter-reached');
+        cardEl.classList.remove('custom-counter-passed');
+      } else {
+        if(!daysEl && wrap){ wrap.insertAdjacentHTML('afterbegin', '<span class="custom-counter-days"></span>'); daysEl = cardEl.querySelector('.custom-counter-days'); }
+        if(daysEl) daysEl.textContent = toFa(Math.abs(remaining));
+        if(labelEl) labelEl.textContent = 'روز گذشت';
+        cardEl.classList.add('custom-counter-passed');
+        cardEl.classList.remove('custom-counter-reached');
+      }
+    } else {
+      const daysEl = cardEl.querySelector('.custom-counter-days');
+      if(daysEl) daysEl.textContent = toFa(daysSince(new Date(c.start).getTime()));
+    }
+  });
+}
+/* Add/edit-counter modal state: which mode tab is active, the target date picked via the
+   shared Jalali picker (for "down" mode), and — new in this piece — which counter (if any)
+   is being edited. The same overlay markup now serves both "add" and "edit"; editingCounterId
+   is what tells addCustomCounter() (and the modal chrome/title/button label) which mode it's
+   in. Plain module state since the modal only ever has one instance open at a time. */
+let addCounterMode = 'up';
+let addCounterPendingTarget = null; // {iso, jy, jm, jd, label} once picked, else null
+// Piece 4 — how many days before a countdown counter's target date to fire a reminder.
+// 'off' = no reminder (default); otherwise a string matching one of the chip offsets
+// ('0','1','3','7') that gets parsed to a number when the counter is saved.
+let addCounterReminderOffset = 'off';
+let editingCounterId = null;
+
+function resetAddCounterFields(){
+  addCounterMode = 'up';
+  addCounterPendingTarget = null;
+  addCounterReminderOffset = 'off';
+  document.querySelectorAll('#addCounterModeTabs .mode-switch-tab').forEach(b=>{
+    b.classList.toggle('active', b.getAttribute('data-mode') === 'up');
+  });
+  const targetField = document.getElementById('addCounterTargetField');
+  if(targetField) targetField.style.display = 'none';
+  const targetBtn = document.getElementById('addCounterTargetBtn');
+  if(targetBtn) targetBtn.classList.remove('picked');
+  const targetLabel = document.getElementById('addCounterTargetLabel');
+  if(targetLabel) targetLabel.textContent = 'انتخاب تاریخ';
+  const reminderField = document.getElementById('addCounterReminderField');
+  if(reminderField) reminderField.style.display = 'none';
+  document.querySelectorAll('#addCounterReminderChips .halt-chip').forEach(b=>{
+    b.classList.toggle('active', b.getAttribute('data-offset') === 'off');
   });
 }
 function openAddCounterModal(){
+  editingCounterId = null;
   const input = document.getElementById('addCounterNameInput');
   if(input) input.value = '';
+  resetAddCounterFields();
+  const titleEl = document.getElementById('addCounterModalTitle');
+  if(titleEl) titleEl.textContent = '➕ روزشمار جدید';
+  const submitBtn = document.getElementById('addCounterSubmitBtn');
+  if(submitBtn) submitBtn.textContent = 'شروع کن';
+  document.getElementById('addCounterOverlay').classList.add('show');
+  setTimeout(()=>{ if(input) input.focus(); }, 200);
+}
+function openEditCounterModal(id){
+  const c = (storeData.customCounters||[]).find(x=>x.id===id);
+  if(!c) return;
+  editingCounterId = id;
+  const input = document.getElementById('addCounterNameInput');
+  if(input) input.value = c.name;
+  resetAddCounterFields();
+  addCounterMode = c.mode === 'down' ? 'down' : 'up';
+  document.querySelectorAll('#addCounterModeTabs .mode-switch-tab').forEach(b=>{
+    b.classList.toggle('active', b.getAttribute('data-mode') === addCounterMode);
+  });
+  const targetField = document.getElementById('addCounterTargetField');
+  if(addCounterMode === 'down' && c.target){
+    const d = new Date(c.target);
+    const [jy,jm,jd] = gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
+    const label = jalaliLabel(jy,jm,jd, d.getFullYear(), d.getMonth()+1, d.getDate());
+    addCounterPendingTarget = { iso: c.target, jy, jm, jd, label };
+    if(targetField) targetField.style.display = '';
+    const targetBtn = document.getElementById('addCounterTargetBtn');
+    if(targetBtn) targetBtn.classList.add('picked');
+    const targetLabel = document.getElementById('addCounterTargetLabel');
+    if(targetLabel) targetLabel.textContent = label;
+    const reminderField = document.getElementById('addCounterReminderField');
+    if(reminderField) reminderField.style.display = '';
+    addCounterReminderOffset = (c.reminderDays!=null) ? String(c.reminderDays) : 'off';
+    document.querySelectorAll('#addCounterReminderChips .halt-chip').forEach(b=>{
+      b.classList.toggle('active', b.getAttribute('data-offset') === addCounterReminderOffset);
+    });
+  }
+  const titleEl = document.getElementById('addCounterModalTitle');
+  if(titleEl) titleEl.textContent = '✏️ ویرایش روزشمار';
+  const submitBtn = document.getElementById('addCounterSubmitBtn');
+  if(submitBtn) submitBtn.textContent = 'ذخیره تغییرات';
   document.getElementById('addCounterOverlay').classList.add('show');
   setTimeout(()=>{ if(input) input.focus(); }, 200);
 }
 function closeAddCounterModal(){
   document.getElementById('addCounterOverlay').classList.remove('show');
 }
-function addCustomCounter(){
+async function addCustomCounter(){
   const input = document.getElementById('addCounterNameInput');
   const name = (input && input.value || '').trim();
   if(!name){ if(input) input.focus(); return; }
-  const c = { id: 'cc_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), name, start: new Date().toISOString() };
+  if(addCounterMode === 'down' && !addCounterPendingTarget){
+    try{ showToast('یه تاریخ برای شمارش‌معکوس انتخاب کن'); }catch(err){}
+    return;
+  }
+  // 'off' → no reminder (null); otherwise the chip's day-offset, parsed to a number.
+  const newReminderDays = (addCounterMode === 'down' && addCounterReminderOffset !== 'off')
+    ? parseInt(addCounterReminderOffset, 10) : null;
+  if(newReminderDays!=null && 'Notification' in window && Notification.permission==='default'){
+    try{ await Notification.requestPermission(); }catch(err){}
+  }
   if(!storeData.customCounters) storeData.customCounters = [];
+
+  if(editingCounterId){
+    const c = storeData.customCounters.find(x=>x.id===editingCounterId);
+    if(!c){ closeAddCounterModal(); return; }
+    // Only wipe this counter's milestone history when mode or target actually changed — a
+    // plain rename shouldn't make already-celebrated milestones (e.g. "۷ روز!") fire again.
+    const modeChanged = c.mode !== addCounterMode;
+    const targetChanged = addCounterMode === 'down' && c.target !== addCounterPendingTarget.iso;
+    const reminderChanged = addCounterMode === 'down' && (c.reminderDays ?? null) !== newReminderDays;
+    c.name = name;
+    c.mode = addCounterMode;
+    if(addCounterMode === 'down'){
+      c.target = addCounterPendingTarget.iso;
+      c.reminderDays = newReminderDays;
+    } else {
+      delete c.target;
+      delete c.reminderDays;
+    }
+    if((modeChanged || targetChanged) && storeData.customCounterMilestonesHit){
+      delete storeData.customCounterMilestonesHit[c.id];
+    }
+    // Same idea as the milestone wipe above, but for the reminder's own one-shot "already
+    // fired" flag — a rename shouldn't re-arm it, but a new target/offset should.
+    if(modeChanged || targetChanged || reminderChanged){
+      c.reminderNotified = false;
+      scheduleCounterReminder(c);
+    }
+    saveData();
+    renderCustomCounters();
+    closeAddCounterModal();
+    try{ showToast('روزشمار «'+name+'» ذخیره شد ✅'); }catch(err){}
+    return;
+  }
+
+  const c = { id: 'cc_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), name, start: new Date().toISOString(), mode: addCounterMode };
+  if(addCounterMode === 'down'){
+    c.target = addCounterPendingTarget.iso;
+    if(newReminderDays!=null) c.reminderDays = newReminderDays;
+  }
   storeData.customCounters.push(c);
   saveData();
   renderCustomCounters();
   closeAddCounterModal();
   try{ showToast('روزشمار «'+name+'» ساخته شد 🎯'); }catch(err){}
+  if(c.reminderDays!=null) scheduleCounterReminder(c);
   setTimeout(()=>{
     const scroller = document.getElementById('countersScroll');
     if(scroller) scroller.scrollTo({top: scroller.scrollHeight, behavior:'smooth'});
@@ -3430,6 +3905,40 @@ document.getElementById('addCounterOverlay') && document.getElementById('addCoun
 });
 document.getElementById('addCounterNameInput') && document.getElementById('addCounterNameInput').addEventListener('keydown', (e)=>{
   if(e.key === 'Enter') addCustomCounter();
+});
+document.querySelectorAll('#addCounterModeTabs .mode-switch-tab').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#addCounterModeTabs .mode-switch-tab').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    addCounterMode = btn.getAttribute('data-mode') || 'up';
+    const targetField = document.getElementById('addCounterTargetField');
+    if(targetField) targetField.style.display = addCounterMode === 'down' ? '' : 'none';
+    const reminderField = document.getElementById('addCounterReminderField');
+    if(reminderField) reminderField.style.display = addCounterMode === 'down' ? '' : 'none';
+  });
+});
+document.querySelectorAll('#addCounterReminderChips .halt-chip').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#addCounterReminderChips .halt-chip').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    addCounterReminderOffset = btn.getAttribute('data-offset') || 'off';
+  });
+});
+document.getElementById('addCounterTargetBtn') && document.getElementById('addCounterTargetBtn').addEventListener('click', ()=>{
+  const now = new Date();
+  const todayISO = gregorianDateToISO(now.getFullYear(), now.getMonth()+1, now.getDate());
+  openJalaliDatePicker({
+    title: 'تا چه تاریخی؟',
+    initialISO: addCounterPendingTarget ? addCounterPendingTarget.iso : null,
+    minISO: todayISO, // a countdown target can't be in the past
+    onConfirm: (res)=>{
+      addCounterPendingTarget = res;
+      const label = document.getElementById('addCounterTargetLabel');
+      const btn = document.getElementById('addCounterTargetBtn');
+      if(label) label.textContent = res.label;
+      if(btn) btn.classList.add('picked');
+    }
+  });
 });
 
 /* Small celebration queue so several milestones hit on the same app-open (rare, but
@@ -3448,8 +3957,18 @@ function showNextQueuedCelebration(){
 function checkCustomCounterMilestones(){
   if(!storeData.customCounterMilestonesHit) storeData.customCounterMilestonesHit = {};
   (storeData.customCounters||[]).forEach(c=>{
-    const days = daysSince(new Date(c.start).getTime());
     if(!storeData.customCounterMilestonesHit[c.id]) storeData.customCounterMilestonesHit[c.id] = {};
+    if(c.mode === 'down' && c.target){
+      // Day-count milestones (3/7/14روز...) don't mean anything for a "days left" counter —
+      // instead, celebrate once, the day the target date itself arrives.
+      if(daysUntilTarget(c.target) <= 0 && !storeData.customCounterMilestonesHit[c.id].reached){
+        storeData.customCounterMilestonesHit[c.id].reached = true;
+        queueCelebration({emoji:'🎉', title:'رسید!',
+          text: 'روزشمار «'+c.name+'» به تاریخش رسید 🎉'});
+      }
+      return;
+    }
+    const days = daysSince(new Date(c.start).getTime());
     CUSTOM_COUNTER_MILESTONES.forEach(m=>{
       if(days >= m && !storeData.customCounterMilestonesHit[c.id][m]){
         storeData.customCounterMilestonesHit[c.id][m] = true;
@@ -4583,6 +5102,7 @@ function normalizeAndRenderStoreData(){
   if(!storeData.entries) storeData.entries={};
   if(!storeData.customCounters) storeData.customCounters = [];
   if(!storeData.customCounterMilestonesHit) storeData.customCounterMilestonesHit = {};
+  if(storeData.counterNotifSeq===undefined) storeData.counterNotifSeq = 0;
   storeData.profile = Object.assign(defaultProfile(), storeData.profile||{});
   if(storeData.whyText===undefined) storeData.whyText = "";
   if(!storeData.urgeLog) storeData.urgeLog = [];
@@ -4683,6 +5203,7 @@ function normalizeAndRenderStoreData(){
   try{ render(); }catch(err){ console.error('render failed', err); }
   try{ renderCustomCounters(); }catch(err){ console.error('renderCustomCounters failed', err); }
   try{ checkCustomCounterMilestones(); }catch(err){ console.error('checkCustomCounterMilestones failed', err); }
+  try{ checkCounterReminders(); }catch(err){ console.error('checkCounterReminders failed', err); }
 
   const safeRun = (fn, label)=>{ try{ fn(); }catch(err){ console.error(label+' failed', err); } };
 
@@ -4754,6 +5275,7 @@ function normalizeAndRenderStoreData(){
   safeRun(initWorkoutTab, 'initWorkoutTab');
   safeRun(checkCustomTaskReminders, 'checkCustomTaskReminders');
   safeRun(scheduleAllCustomTaskNotifs, 'scheduleAllCustomTaskNotifs');
+  safeRun(scheduleAllCounterReminders, 'scheduleAllCounterReminders');
   safeRun(initCoachCheckin, 'initCoachCheckin');
   safeRun(initCoachLongPress, 'initCoachLongPress');
   safeRun(render, 'render (final)');
@@ -5044,19 +5566,8 @@ async function performJourneyReset(reasonKey, customStartDate){
 /* ---------------- Confetti ---------------- */
 const canvas=document.getElementById('confettiCanvas');
 const ctx=canvas.getContext('2d');
-function resizeCanvas(){
-  // اگه اندازه واقعاً تغییر نکرده (مثلاً فقط نوار آدرس موبایل موقع اسکرول جمع/باز شده)
-  // canvas رو دوباره alloc نکن؛ همین realloc بی‌مورد وسط اسکرول باعث بریدگی می‌شه.
-  const w = window.innerWidth, h = window.innerHeight;
-  if(canvas.width !== w) canvas.width = w;
-  if(canvas.height !== h) canvas.height = h;
-}
-resizeCanvas();
-let __resizeCanvasRAF = null;
-window.addEventListener('resize', ()=>{
-  if(__resizeCanvasRAF) return; // چند رویداد resize پشت‌هم رو به یک فریم فشرده می‌کنیم
-  __resizeCanvasRAF = requestAnimationFrame(()=>{ __resizeCanvasRAF = null; resizeCanvas(); });
-}, {passive:true});
+function resizeCanvas(){ canvas.width=window.innerWidth; canvas.height=window.innerHeight; }
+resizeCanvas(); window.addEventListener('resize', resizeCanvas);
 function launchConfetti(){
   const colors=['#ff9a3d','#ffb347','#3fb87f','#e2665a','#ffd166'];
   const pieces=[];
@@ -6326,6 +6837,7 @@ function firstTabOfCat(cat, preferredTab){
    حالت‌های جدید همینجا به FOCUS_MODES اضافه می‌شن. */
 // آیکون‌های SVG حرفه‌ای برای تب «حالت‌ها» — جایگزین ایموجی‌های قبلی
 const FM_ICON = {
+  gym: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12h1.8M19.7 12h1.8"/><path d="M4.3 9.2v5.6M19.7 9.2v5.6"/><path d="M6.4 12h11.2"/><rect x="6.1" y="8.3" width="2.2" height="7.4" rx="0.8"/><rect x="15.7" y="8.3" width="2.2" height="7.4" rx="0.8"/></svg>',
   sleep: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-5.2a3 3 0 0 1 3-3h9.4a3.6 3.6 0 0 1 3.6 3.6V18"/><path d="M3 18.5h18"/><path d="M5.6 9.8V7.4a1.4 1.4 0 0 1 1.4-1.4h3.4a1.4 1.4 0 0 1 1.4 1.4v2"/></svg>',
   morning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13.2" r="3.6"/><path d="M12 4.5v2M4.6 8.4l1.4 1.4M19.4 8.4l-1.4 1.4"/><path d="M2.5 19h19"/></svg>',
   walk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.6" cy="4.6" r="1.7" fill="currentColor" stroke="none"/><path d="M11.8 8.2l-2.6 3 1.8 2 -0.9 5.4"/><path d="M11.8 8.2l3.7 1.4 1.9 3.4"/><path d="M10.2 13.2l-3.4 2 -1.4 3.6"/><path d="M10.1 18.6l3.4-1.2 2.9 2.6"/></svg>',
@@ -6389,6 +6901,24 @@ const FM_ICON = {
   knitting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4"/><path d="M6.3 6.4c1.7 1 2.9 2.6 3.4 4.5M9.6 5.6c-1.4 1.4-2.1 3.2-2.1 5.2"/><path d="M14.5 12.5l6-1.7M14.5 17l6.5.6"/></svg>',
 };
 const FOCUS_MODES = {
+  gym: {
+    title: 'حالت باشگاه',
+    free: true,
+    icon: FM_ICON.gym,
+    subtitle: 'رو فرم درست تمرکز کن، نه فقط عدد وزنه',
+    color: ['#f97316','#ef4444'],
+    timerLabel: 'زمان تمرکز',
+    tip: 'گوشیتو بذار تو کیف یا حالت مزاحم نشو؛ فقط بین ست‌ها بهش نگاه کن. رو فرم درست حرکات تمرکز کن، نه فقط عدد وزنه — یه ست تمیز خیلی بهتر از یه ست سنگین با فرم غلطه.',
+    checklist: [
+      'گرم کردن (۵ تا ۱۰ دقیقه) قبل از شروع',
+      'یه بطری آب همراهمه',
+      'می‌دونم برنامه‌ی امروز رو کدوم عضله/حرکته',
+      'گوشی رو بی‌صدا یا دور از دسترس گذاشتم',
+      'بین ست‌ها فقط به‌اندازه استراحت می‌کنم، نه بیشتر',
+      'آخر تمرین چند دقیقه کشش و سرد کردن'
+    ],
+    endMessage: (min)=> min>0 ? `آفرین! ${min} دقیقه تمرکز داشتی 💪` : 'حالت باشگاه پایان یافت'
+  },
   sleep: {
     title: 'حالت خواب',
     free: true,
@@ -7428,7 +7958,7 @@ const FOCUS_MODES = {
    simply won't show up in the picker, so keep this in sync when adding a
    new mode above). ---- */
 const FOCUS_MODE_CATEGORIES = [
-  { id:'health', label:'💪 سلامت و بدن', keys:['walk','football','pool','nap','sleep','morning','massage'] },
+  { id:'health', label:'💪 سلامت و بدن', keys:['gym','walk','football','pool','nap','sleep','morning','massage'] },
   { id:'home', label:'🏠 خونه و کارهای روزمره', keys:['cleaning','driving','gardening','cooking'] },
   { id:'shopping', label:'🛍️ خرید', keys:['clothesShopping','supermarket','onlineShopping'] },
   { id:'social', label:'🎉 اجتماعی، خانواده و مناسبت‌ها', keys:['friendHangout','party','date','meeting','familyTime','wedding'] },
@@ -7618,7 +8148,7 @@ const fqSkipBtn = document.getElementById('fqSkipBtn');
 if(fqSkipBtn) fqSkipBtn.addEventListener('click', ()=> finalizeFocusSession(null));
 
 // How many sessions of this mode happened in the last N days — powers the weekly-frequency
-// identity badges (e.g. 3x/week of حالت پیاده‌روی => «ورزشکار هوازی»).
+// identity badges (e.g. 3x/week of حالت باشگاه => «ورزشکار»).
 function focusModeSessionsInDays(mode, days){
   const fs = (storeData.focusSessions||{})[mode];
   if(!fs || !fs.history || !fs.history.length) return 0;
@@ -7638,10 +8168,11 @@ function focusStarsHtml(avg){
 }
 
 /* Derived "identity" titles: use a mode regularly enough (checked via recent-session
-   history above) and the app recognizes you as that kind of person, e.g. حالت پیاده‌روی
-   ۳ بار در هفته → «ورزشکار هوازی». These are plugged into the existing BADGES/XP system
+   history above) and the app recognizes you as that kind of person, e.g. حالت باشگاه
+   ۳ بار در هفته → «ورزشکار». These are plugged into the existing BADGES/XP system
    further down, right after BADGES is defined. */
 const FOCUS_IDENTITIES = [
+  {mode:'gym', id:'identity_athlete', emoji:'🏋️', title:'ورزشکار', weeklyNeeded:3},
   {mode:'painting', id:'identity_painter', emoji:'🎨', title:'نقاش', weeklyNeeded:2},
   {mode:'calligraphy', id:'identity_calligrapher', emoji:'🖋️', title:'خوشنویس', weeklyNeeded:2},
   {mode:'instrumentPractice', id:'identity_musician', emoji:'🎸', title:'نوازنده', weeklyNeeded:3},
@@ -10582,7 +11113,11 @@ if (typeof window !== 'undefined') {
         if(scaleWrap) scaleWrap.innerHTML = scaleHtml.join('');
 
         if(countEl) countEl.textContent = toFa(total) + ' نماد';
-        card.style.display = '';
+        // dobble_all_migrations.sql (STAGE 3-5) is live now — this dev-only showcase card
+        // should never surface to real users again. Deliberately NOT doing
+        // card.style.display = '' anymore; injectSymbolDefs() above still ran (the real
+        // game's <use href="#sym-N"> cards depend on those SVG defs being in the DOM), we
+        // just stop revealing this diagnostic container itself.
         _dblIconsRendered = true;
       }catch(e){
         console.error('Dobble stage2a icons render error', e);
@@ -10636,7 +11171,9 @@ if (typeof window !== 'undefined') {
         row.innerHTML = itemsHtml.join('');
 
         if(countEl) countEl.textContent = toFa(sampleIdxs.length) + ' نمونه از ' + toFa(cards.length) + ' کارت';
-        card.style.display = '';
+        // Same reasoning as dblRenderStage2aIcons above: keep computing (harmless, and
+        // exercises the same DobbleCard/DobbleIconBank code path the real game uses), just
+        // stop unhiding this dev-only showcase card now that the real lobby/game exists.
         _dblCardsRendered = true;
       }catch(e){
         console.error('Dobble stage2b cards render error', e);
@@ -11719,6 +12256,66 @@ document.getElementById('telegramMenuItem').addEventListener('click', ()=>{
   openTelegramGroup();
 });
 
+/* ---------------- تماس با ما: مودال کوچیک از منوی همبرگری، درست بالای «انجمن» ----------------
+   کنار هم تو یه side-menu-group قرار گرفتن (بدون فاصله‌ی هرکدوم به‌عنوان کارت جدا) چون هر دو
+   یه راه ارتباطی‌ان: این یکی مستقیم به خودم، اون یکی به کل انجمن. کلاینت فقط متن پیام رو با
+   هدر Authorization به /contact می‌فرسته؛ خودِ Worker با service role هویت کاربر رو از توکن
+   سوپابیس می‌گیره (دقیقاً مثل referral/apply و wheel/spin) تا کسی بدون لاگین اسپم نفرسته. */
+function openContactModal(){
+  const input = document.getElementById('contactMessageInput');
+  if(input) input.value = '';
+  document.getElementById('contactOverlay').classList.add('show');
+  setTimeout(()=>{ if(input) input.focus(); }, 200);
+}
+function closeContactModal(){
+  document.getElementById('contactOverlay').classList.remove('show');
+}
+async function sendContactMessage(){
+  if(!sb || !publicChatUser){ showToast('اول باید تو تب چت وارد حساب بشی', 'error'); return; }
+  const input = document.getElementById('contactMessageInput');
+  const message = (input && input.value || '').trim();
+  if(message.length < 5){ if(input) input.focus(); showToast('یه توضیح کمی بیشتر بنویس', 'error'); return; }
+  if(message.length > 2000){ showToast('پیام خیلی طولانیه؛ یکم کوتاهش کن', 'error'); return; }
+
+  const btn = document.getElementById('contactSendBtn');
+  const originalLabel = btn.textContent;
+  btn.disabled = true; btn.textContent = 'در حال ارسال...';
+  try{
+    const __auth = await authHeaders();
+    const res = await fetch(WORKER_BASE + '/contact', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, __auth),
+      body: JSON.stringify({ message })
+    });
+    const result = await res.json().catch(()=>null);
+    if(!res.ok || !result || !result.ok){
+      const msg = result && result.error === 'rate_limited'
+        ? 'همین الان یه پیام فرستادی؛ چند دقیقه دیگه دوباره امتحان کن'
+        : 'ارسال ناموفق بود، دوباره امتحان کن';
+      showToast(msg, 'error');
+      btn.disabled = false; btn.textContent = originalLabel;
+      return;
+    }
+    showToast('پیامت ارسال شد ✅', 'success');
+    btn.disabled = false; btn.textContent = originalLabel;
+    closeContactModal();
+  }catch(err){
+    showToast('ارسال ناموفق بود، دوباره امتحان کن', 'error');
+    btn.disabled = false; btn.textContent = originalLabel;
+  }
+}
+document.getElementById('contactUsMenuItem').addEventListener('click', ()=>{
+  if(!sb || !publicChatUser){ closeSideMenu(); goToAuthPage('chat'); return; }
+  closeSideMenu();
+  openContactModal();
+});
+document.getElementById('contactCloseBtn').addEventListener('click', closeContactModal);
+document.getElementById('contactSendBtn').addEventListener('click', sendContactMessage);
+document.getElementById('contactOverlay').addEventListener('click', (e)=>{
+  if(e.target.id === 'contactOverlay') closeContactModal();
+});
+
+
 /* ================= Settings accordion (collapsed by default) ================= */
 document.addEventListener('click', (e)=>{
   const head = e.target.closest('.settings-group-head');
@@ -12582,6 +13179,71 @@ function checkCustomTaskReminders(){
   if(changed) saveData();
 }
 setInterval(checkCustomTaskReminders, 60000);
+
+/* ================= Custom day-counter reminders (piece 4) =================
+   Countdown-mode counters (see the "Custom day-counters" section above) can optionally get
+   a reminder as their target date approaches — 1 week / 3 days / 1 day before, or the day it
+   arrives (c.reminderDays, set from the chip row in the add/edit modal; null/undefined =
+   off). This mirrors the custom-task reminder pattern just above: a native one-shot alarm at
+   9 AM via Capacitor LocalNotifications (works even with the app closed), reusing the same
+   getLN()/dateOnly() helpers, plus a web-tab/in-app fallback for browser use. */
+// Native (Capacitor) one-time alarm at 9 AM, reminderDays days before the counter's target.
+// Cancels any previously-scheduled alarm for this counter first — safe to call any time a
+// counter's mode/target/reminderDays might have changed, or just to re-sync at app start.
+async function scheduleCounterReminder(c){
+  const plugin = getLN();
+  if(!plugin) return; // native-only; the web-tab fallback below covers browser use
+  if(c.notifId){ try{ await plugin.cancel({ notifications:[{id:c.notifId}] }); }catch(err){} }
+  if(c.mode !== 'down' || !c.target || c.reminderDays==null) return;
+  try{
+    const perm = await plugin.requestPermissions();
+    if(perm.display !== 'granted') return;
+    if(!c.notifId){
+      if(storeData.counterNotifSeq===undefined) storeData.counterNotifSeq = 0;
+      c.notifId = 9900 + (storeData.counterNotifSeq % 80);
+      storeData.counterNotifSeq += 1;
+    }
+    const at = dateOnly(c.target);
+    at.setDate(at.getDate() - c.reminderDays);
+    at.setHours(9,0,0,0);
+    if(at.getTime() < Date.now()) return; // reminder moment already passed — skip, don't fire late
+    const body = c.reminderDays===0
+      ? `امروز روزیه که «${c.name}» بهش می‌رسه! 🎯`
+      : `${toFa(c.reminderDays)} روز مونده به «${c.name}» 🔔`;
+    await plugin.schedule({ notifications:[{ id:c.notifId, title:'🔔 یادآوری روزشمار', body, schedule:{ at } }] });
+  }catch(err){ console.error('scheduleCounterReminder failed', err); }
+}
+async function cancelCounterReminder(c){
+  const plugin = getLN();
+  if(!plugin || !c.notifId) return;
+  try{ await plugin.cancel({ notifications:[{id:c.notifId}] }); }catch(err){}
+}
+async function scheduleAllCounterReminders(){
+  for(const c of (storeData.customCounters||[])) await scheduleCounterReminder(c);
+}
+// Web-tab / in-app fallback: fires once per counter, the first time the app is open on or
+// after its reminder date (and the counter hasn't already been notified for it). Runs on
+// load and every minute while the app stays open, mirroring checkCustomTaskReminders above.
+function checkCounterReminders(){
+  const list = storeData.customCounters || [];
+  let changed = false;
+  list.forEach(c=>{
+    if(c.mode!=='down' || !c.target || c.reminderDays==null || c.reminderNotified) return;
+    const remaining = daysUntilTarget(c.target);
+    if(remaining <= c.reminderDays){
+      c.reminderNotified = true; changed = true;
+      const msg = remaining<=0
+        ? `امروز روزیه که «${c.name}» بهش می‌رسه! 🎯`
+        : `${toFa(remaining)} روز مونده به «${c.name}» 🔔`;
+      try{ showToast(msg); }catch(err){}
+      if('Notification' in window && Notification.permission==='granted'){
+        try{ new Notification('🔔 یادآوری روزشمار', {body:msg}); }catch(err){}
+      }
+    }
+  });
+  if(changed) saveData();
+}
+setInterval(checkCounterReminders, 60000);
 
 /* ================= Theme ================= */
 /* small color helpers used to compute each theme's own "nearby shade" for the
@@ -16389,22 +17051,22 @@ function chatMsgHasAvatar(m){
 
    v2 rewrite: the original ring was built out of discrete teardrop "petals" spaced
    evenly around the circle — readable, but it read as a flower/sun icon, not fire.
-   A second attempt used one continuous SVG-turbulence-distorted band, which fixed the
-   "petals" look but still visually read as a soft glowing outline rather than actual
-   fire once shipped (see conversation history) and never made it to production intact.
+   This version instead renders one continuous flame BAND (an SVG stroked arc) and
+   distorts its edges with SVG turbulence (feTurbulence + feDisplacementMap), the
+   same technique real fire/smoke generators use — it's what breaks a smooth stroke
+   into the jagged, organic, never-quite-symmetric silhouette that actually reads as
+   flame instead of a vector shape. Four stacked layers per ring, thickest/coolest to
+   thinnest/hottest:
+     1. cmFireBlur  — a soft blurred bloom behind everything (the outer glow/halo)
+     2. cmFireTurbSpiky — a wider, more violently distorted layer (bigger displacement
+        scale) that supplies the ragged outer "tips" reaching past the main band
+     3. cmFireTurb (main band) — the primary flame ring, gradient from c1 (base) to
+        c3 (hot tip), gently distorted
+     4. cmFireTurb (thin core) — a slim, brighter c3-only inner line for the hottest-
+        looking edge closest to the avatar
 
-   v3 — "fire fern" rendering (current): reverse-engineered from the actual reference
-   art rather than guessed. Structure is one bright, slightly organic "spine" (a wobbly
-   circular arc built from smoothed random radius offsets, drawn in avatarFlameRingSvg)
-   with small flame leaflets (avatarFlameLeafletPath) flicking off it on alternating
-   sides — like a fern frond — each pair layered front+back for density so there are no
-   gaps down to the avatar's rim, plus a soft blurred glow halo and fine ember
-   particles. No shared page-level SVG defs anymore — each ring carries its own small
-   uid-scoped <defs>, so there's no ensureAvatarFireDefs equivalent to call before
-   rendering.
-
-   Two-phase day law (see "قانون اصلی شعله"): growth, then color-only.
-   Phase 1, day 0→40 (AVATAR_FLAME_GROWTH): the ring is not yet complete. `arc`
+   v3 — two-phase day law (see "قانون اصلی شعله"): growth, then color-only.
+     Phase 1, day 0→40 (AVATAR_FLAME_GROWTH): the ring is not yet complete. `arc`
      climbs from 0% to 100% of the circumference through the exact day→percent
      checkpoints product gave us (1%@1, 5%@3, 10%@7, 20%@14, 30%@21, 60%@30, 85%@35,
      95%@39, 100%@40), linearly interpolated day-to-day between checkpoints so it
@@ -16413,23 +17075,18 @@ function chatMsgHasAvatar(m){
      hue exists before the ring first closes. Day 0 itself is a special "unlit" case:
      no flame at all, just a faint, cold, un-textured placeholder stroke (see the
      `unlit` branch in avatarFlameRingSvg) so progress has a visible starting point.
-   Phase 2, day 40→365 (AVATAR_FLAME_COLORS): `arc` is permanently pinned at 360°
+     Phase 2, day 40→365 (AVATAR_FLAME_COLORS): `arc` is permanently pinned at 360°
      and never again shrinks — only color moves, gradually, through the 9 milestones
      in order (orange → red → purple → blue → yellow → green → gold → dark/smoky →
      royal gold), interpolated day-to-day the same way so the shift feels alive
      instead of snapping only on the milestone day. Day 365+ holds forever at the
      final royal-gold stage and additionally turns on `epic` mode — a soft radial
      halo behind the ring plus a few twinkling gold spark particles riding its outer
-     edge — the "قوی‌ترین و زیباترین حالت ممکن" state. Day 320's dark/smoky stage
-     (rendered pale and ash-like, not literally black — a true black flame would just
-     vanish against the app's dark background) carries a boosted `glow` value and a
-     few warm ember flecks mixed into its embers so it still visibly reads as lit
-     rather than looking like an extinguished ring.
-   The flicker itself is animated two ways: each leaflet layer and the spine's opacity
-   pulse via SMIL <animate> (an actual organic flicker, which CSS alone can't do), while
-   a light CSS scale "breathe" on the whole ring (@keyframes cmFireBreathe, in the html
-   file) adds a slow ambient pulse. Both are skipped when the visitor has
-   prefers-reduced-motion on.
+     edge (avatarFlameEpicSparksSvg) — the "قوی‌ترین و زیباترین حالت ممکن" state. Day
+     320's dark/smoky stage carries a boosted `glow` value so an almost-black flame
+     still visibly reads as lit rather than looking like an extinguished ring.
+   The flicker itself is animated two ways: the SVG turbulence's own seed is animated
+   via SMIL (the actual organic distortion moving, which CSS alone can't do), while a
    light CSS scale "breathe" on the whole ring (@keyframes cmFireBreathe) adds a slow
    ambient pulse. Both are skipped when the visitor has prefers-reduced-motion on. */
 // Phase 1 (day 0–40): how much of the ring's circumference is lit, in percent —
@@ -16458,7 +17115,7 @@ const AVATAR_FLAME_COLORS = [
   {d:200, c1:'#7a5a0a', c2:'#f2c40c', c3:'#fff6b0', glow:0.30},                // زرد
   {d:240, c1:'#0d3a1a', c2:'#22c25c', c3:'#aaffc8', glow:0.34},                // سبز
   {d:280, c1:'#6b4a0a', c2:'#e6ac16', c3:'#fff2b0', glow:0.32},                // طلایی
-  {d:320, c1:'#3a3a40', c2:'#8f8fa0', c3:'#f5f5fa', glow:0.40, smoky:true},   // مشکی/خاکستری تیره — pale ash/smoke, pixel-sampled off the reference art (a literal black flame would just vanish against the app's dark background); `smoky` also thins the leaflets and mixes in a few warm ember flecks so it still reads as lit
+  {d:320, c1:'#141416', c2:'#48474e', c3:'#d8d2c8', glow:0.46},                // مشکی/خاکستری تیره
   {d:365, c1:'#8a5a00', c2:'#ffb400', c3:'#fffbe6', glow:0.42, epic:true}      // طلایی سلطنتی
 ];
 // Dim ember tone the growth phase (day 0–40) warms up FROM, landing exactly on
@@ -16510,157 +17167,106 @@ function avatarFlameDataFor(streak){
         c1: avatarFlameHexLerp(a.c1, b.c1, t),
         c2: avatarFlameHexLerp(a.c2, b.c2, t),
         c3: avatarFlameHexLerp(a.c3, b.c3, t),
-        glow: a.glow + (b.glow-a.glow)*t, unlit:false, epic:false, smoky: t<0.5 ? !!a.smoky : !!b.smoky
+        glow: a.glow + (b.glow-a.glow)*t, unlit:false, epic:false
       };
     }
   }
   return { arc:360, c1:last.c1, c2:last.c2, c3:last.c3, glow:last.glow, unlit:false, epic:true };
 }
-// ---- Avatar flame ring v3 rendering: "fire fern" ----------------------------------
-// Replaces the old turbulence-filter petal ring (which read as a flower/starburst, not
-// fire — see prior comment history) with a structure reverse-engineered from the actual
-// reference art: one bright, slightly organic "spine" (a wobbly circular arc) with small
-// flame leaflets flicking off it on alternating sides — like a fern frond — plus a soft
-// blurred glow halo and fine ember particles. No shared page-level SVG defs needed
-// anymore (each ring carries its own small, uid-scoped <defs>), so ensureAvatarFireDefs
-// and the old cmFireTurb/cmFireBlur/cmFireTurbSpiky filters are gone entirely.
-// R=16 and the 56x56 viewBox are chosen so the ring's own inner radius lands exactly on
-// the real 30px avatar's edge once the CSS box (30px avatar + 13px inset on each side =
-// 56px, see #tab-chat .cm-avatar-flame-ring) scales this SVG to fit — no CSS changes
-// needed. Tall outlier flame licks are allowed to render past the nominal 56x56 box
-// (the CSS already sets overflow:visible on this svg for exactly that reason).
-function avatarFlameLeafletPath(rnd, h, w){
-  const lean = (rnd()-0.5)*0.35, curl = (rnd()-0.5)*0.5;
-  return `M 0,0
-    C ${(-0.66+lean)*w},${-0.18*h} ${(-0.7+lean)*w},${-0.48*h} ${(-0.4+lean)*w},${-0.78*h}
-    C ${(-0.52+lean+curl)*w},${-0.98*h} ${(-0.3+lean+curl)*w},${-1.08*h} ${(-0.34+lean+curl)*w},${-1.28*h}
-    C ${(-0.36+lean+curl)*w},${-1.44*h} ${(-0.16+lean+curl*1.3)*w},${-1.5*h} ${(0.0+lean+curl*1.4)*w},${-1.34*h}
-    C ${(0.06+lean)*w},${-1.5*h} ${(0.1+lean)*w},${-1.66*h} ${(0.02+lean)*w},${-1.78*h}
-    C ${(0.18+lean)*w},${-1.55*h} ${(0.34+lean)*w},${-1.2*h} ${(0.27+lean)*w},${-0.86*h}
-    C ${(0.5+lean)*w},${-0.56*h} ${(0.5+lean)*w},${-0.22*h} ${0.24*w},0
-    Z`;
-}
-function avatarFlameMulberry32(seed){
-  return function(){
-    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
-    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
+// One-time (per page load) injection of the shared SVG <filter> defs the fire rings
+// reference via url(#cmFire...). Kept out of every individual ring's markup since the
+// filter definitions themselves never change — only the gradient stops and the arc
+// length differ per avatar. Idempotent; safe to call on every render.
+let avatarFireDefsInjected = false;
+function ensureAvatarFireDefs(){
+  if(avatarFireDefsInjected || typeof document==='undefined') return;
+  avatarFireDefsInjected = true;
+  const seedAnim1 = AVATAR_FIRE_REDUCE_MOTION ? '' : '<animate attributeName="seed" values="1;9;4;12;6;1" dur="1.8s" repeatCount="indefinite"/>';
+  const seedAnim2 = AVATAR_FIRE_REDUCE_MOTION ? '' : '<animate attributeName="seed" values="2;15;7;20;9;2" dur="1.3s" repeatCount="indefinite"/>';
+  const host = document.createElement('div');
+  host.setAttribute('aria-hidden','true');
+  host.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;';
+  host.innerHTML = `<svg width="0" height="0"><defs>
+    <filter id="cmFireTurb" x="-60%" y="-60%" width="220%" height="220%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.018 0.05" numOctaves="2" seed="3" result="n">${seedAnim1}</feTurbulence>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="7" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="cmFireBlur" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+    <filter id="cmFireTurbSpiky" x="-90%" y="-90%" width="280%" height="280%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.035 0.11" numOctaves="2" seed="7" result="n2">${seedAnim2}</feTurbulence>
+      <feDisplacementMap in="SourceGraphic" in2="n2" scale="16" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs></svg>`;
+  document.body.appendChild(host);
 }
 let avatarFlameGradSeq = 0;
-function avatarFlameRingSvg(fd, seed){
-  const R = 16, CX = 28, CY = 28, size = 56;
+// Day-365 "royal gold" epic state gets a few twinkling particles riding just outside
+// the ring, on top of its own soft halo (drawn separately in avatarFlameRingSvg) — the
+// "هاله‌ی نور، جرقه و ذرات طلایی" called for at that final milestone. Positions are
+// fixed angles (not random) so the sparkle is stable frame-to-frame; only opacity/size
+// animate, and that animation is skipped under prefers-reduced-motion like the rest of
+// this ring's motion.
+function avatarFlameEpicSparksSvg(cx, cy, r){
+  const angles = [18, 72, 140, 205, 260, 320];
+  return angles.map((ang, i)=>{
+    const rad = ang*Math.PI/180;
+    const sr = r + 4 + (i%3)*1.4;
+    const sx = (cx + sr*Math.cos(rad)).toFixed(1), sy = (cy + sr*Math.sin(rad)).toFixed(1);
+    const dur = (1.3 + (i%3)*0.35).toFixed(2), delay = (i*0.18).toFixed(2);
+    const anim = AVATAR_FIRE_REDUCE_MOTION ? '' : `
+        <animate attributeName="opacity" values="0;1;0" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>
+        <animate attributeName="r" values="0.4;1.3;0.4" dur="${dur}s" begin="${delay}s" repeatCount="indefinite"/>`;
+    return `<circle cx="${sx}" cy="${sy}" r="0.8" fill="#fffae0">${anim}</circle>`;
+  }).join('');
+}
+// Builds the actual <svg> for one ring: four stacked stroked-arc layers (see the big
+// comment above) sharing one gradient (base→mid→hot-tip) and the page-wide turbulence
+// filters from ensureAvatarFireDefs. `rotDeg` rotates the whole ring so different
+// senders' fire doesn't all start at the same point (see the hash below). Viewbox/
+// radii are tuned for the 30px-ish avatar this sits over; because it's all vector it
+// scales cleanly with --chat-zoom via the wrapper's own calc()'d size in CSS, not by
+// anything in here.
+function avatarFlameRingSvg(fd, rotDeg){
+  const R = 17, CX = 28, CY = 28;
   // Day 0: nothing lit yet — a single faint, cold, un-textured ring outline marking
   // where the flame will eventually fill in, without reading as fire at all.
   if(fd.unlit){
-    return `<svg viewBox="0 0 ${size} ${size}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-      <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="#7a7a86" stroke-width="1.4" opacity="0.24"/>
+    return `<svg viewBox="0 0 56 56" preserveAspectRatio="xMidYMid meet">
+      <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${fd.c2}" stroke-width="2" opacity="0.22"/>
     </svg>`;
   }
-  const uid = 'avfr'+(avatarFlameGradSeq++);
-  const rnd = avatarFlameMulberry32((seed>>>0)*10007+13);
-  const arcPct = Math.max(0, Math.min(100, fd.arc/3.6));
-  const full = arcPct>=99.95;
-  const arcDeg = 360*Math.min(1,arcPct/100);
-  const startDeg = 180-arcDeg/2, endDeg = 180+arcDeg/2;
-  const smoky = !!fd.smoky, epic = !!fd.epic;
-  const bs = R/24;
-
-  const nCtrl = 18;
-  const ctrlOffsets = Array.from({length:nCtrl}, ()=> (rnd()-0.5)*R*0.05);
-  function spineR(ang){
-    const f = ((ang%360+360)%360/360)*nCtrl;
-    const i0=Math.floor(f)%nCtrl, i1=(i0+1)%nCtrl, t=f-Math.floor(f), sm=t*t*(3-2*t);
-    return R + ctrlOffsets[i0]*(1-sm)+ctrlOffsets[i1]*sm;
-  }
-  function polar(ang, r){ const a=ang*Math.PI/180; return [CX+r*Math.sin(a), CY-r*Math.cos(a)]; }
-  function spinePt(a){ return polar(a, spineR(a)); }
-  function spinePathD(a0,a1,closeCircle){
-    const N = closeCircle?90:Math.max(8,Math.round((a1-a0)/2.5));
-    let d='';
-    for(let i=0;i<=N;i++){ const ang=a0+(a1-a0)*i/N; const [x,y]=spinePt(ang); d+=(i===0?'M ':'L ')+x.toFixed(2)+','+y.toFixed(2)+' '; }
-    return d;
-  }
-  function taper(ang){
-    if(full) return 1;
-    const edge = Math.min(ang-startDeg, endDeg-ang);
-    return Math.max(0, Math.min(1, edge/14));
-  }
-  const globalFade = full ? 1 : Math.max(0.35, Math.min(1, arcDeg/26));
-
-  const gradId = uid+'g';
-  let defs = `<linearGradient id="${gradId}" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0%" stop-color="${fd.c1}"/><stop offset="55%" stop-color="${fd.c2}"/><stop offset="100%" stop-color="${fd.c3}"/>
-    </linearGradient>
-    <radialGradient id="${uid}halo" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="${fd.c3}" stop-opacity="0"/>
-      <stop offset="48%" stop-color="${fd.c2}" stop-opacity="${((fd.glow!=null?fd.glow:0.3)*globalFade).toFixed(3)}"/>
-      <stop offset="100%" stop-color="${fd.c2}" stop-opacity="0"/>
-    </radialGradient>`;
-  if(epic) defs += `<radialGradient id="${uid}halo2" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${fd.c3}" stop-opacity="0.5"/><stop offset="100%" stop-color="${fd.c3}" stop-opacity="0"/></radialGradient>`;
-
-  let leaflets='', leafletsBack='', embers='';
-  {
-    let a = full?0:startDeg;
-    const limit = full?360:endDeg;
-    let side = rnd()<0.5?-1:1;
-    const density = smoky?1.35:1;
-    while(a<limit){
-      const [x,y] = spinePt(a);
-      side=-side;
-      const t = taper(a);
-      const r1 = rnd();
-      const hMul = (r1<0.55?(0.55+r1*0.7):(1.05+(r1-0.55)*2.6)) * (smoky?0.72:1);
-      const tilt = side*(9+rnd()*16);
-      const h = 32*bs*hMul*Math.max(0.32,t), w = 17*bs*(0.95+rnd()*0.45)*Math.sqrt(Math.max(0.3,t))*(smoky?0.75:1);
-      const op = (0.85+rnd()*0.15)*Math.max(0.4,t)*globalFade;
-      leaflets += `<path d="${avatarFlameLeafletPath(rnd,h,w)}" fill="url(#${gradId})" opacity="${op.toFixed(2)}" transform="translate(${x.toFixed(2)},${y.toFixed(2)}) rotate(${(a+tilt).toFixed(1)})"/>`;
-      if(rnd()<0.85){
-        const a2=a+(rnd()-0.5)*3.2, [x2,y2]=spinePt(a2);
-        const h2=h*(0.6+rnd()*0.3), w2=w*(0.8+rnd()*0.3);
-        leafletsBack += `<path d="${avatarFlameLeafletPath(rnd,h2,w2)}" fill="url(#${gradId})" opacity="${(op*0.85).toFixed(2)}" transform="translate(${x2.toFixed(2)},${y2.toFixed(2)}) rotate(${(a2+tilt*0.8+side*8).toFixed(1)})"/>`;
-      }
-      if(rnd()<(smoky?0.3:0.4)){
-        const er = R+(8+rnd()*22)*bs*Math.max(0.3,t);
-        const [ex,ey]=polar(a+(rnd()-0.5)*10, er);
-        const emberCol = smoky && rnd()<0.32 ? '#ff9a4d' : (rnd()<0.5?fd.c3:fd.c2);
-        embers += `<circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="${((0.5+rnd()*1.0)*bs).toFixed(2)}" fill="${emberCol}" opacity="${(0.3+rnd()*0.5*t*globalFade).toFixed(2)}"/>`;
-      }
-      a += (4.2+rnd()*3.4)/density;
-    }
-  }
-
-  const spineD = spinePathD(full?0:startDeg, full?360:endDeg, full);
-  const SPW = 4.4*bs*(smoky?0.8:1);
-  const spineOp = 0.98*globalFade;
-  const flicker = AVATAR_FIRE_REDUCE_MOTION ? '' : `<animate attributeName="opacity" values="1;0.88;1;0.93;1" dur="${(2.2+rnd()*0.8).toFixed(2)}s" repeatCount="indefinite"/>`;
-  const spineFlicker = AVATAR_FIRE_REDUCE_MOTION ? '' : `<animate attributeName="opacity" values="${spineOp};${(spineOp*0.82).toFixed(2)};${spineOp}" dur="${(1.5+rnd()*0.6).toFixed(2)}s" repeatCount="indefinite"/>`;
-
-  return `<svg viewBox="0 0 ${size} ${size}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+  const gid = 'avfg' + (avatarFlameGradSeq++);
+  const SW = 8;
+  const circ = 2*Math.PI*R;
+  const arcLen = circ * (Math.max(0, Math.min(360, fd.arc))/360);
+  const gap = circ - arcLen;
+  const glowOp = fd.glow!=null ? fd.glow : 0.3;
+  return `<svg viewBox="0 0 56 56" preserveAspectRatio="xMidYMid meet">
     <defs>
-      ${defs}
-      <filter id="${uid}bxs" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="${0.5*bs}"/></filter>
-      <filter id="${uid}bm" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="${2.4*bs}"/></filter>
-      <filter id="${uid}bl" x="-150%" y="-150%" width="400%" height="400%"><feGaussianBlur stdDeviation="${8.5*bs}"/></filter>
+      <linearGradient id="${gid}" x1="0" y1="1" x2="0" y2="0">
+        <stop offset="0%" stop-color="${fd.c1}"/>
+        <stop offset="55%" stop-color="${fd.c2}"/>
+        <stop offset="100%" stop-color="${fd.c3}"/>
+      </linearGradient>
+      ${fd.epic ? `<radialGradient id="${gid}h" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="${fd.c3}" stop-opacity="0.5"/>
+        <stop offset="100%" stop-color="${fd.c3}" stop-opacity="0"/>
+      </radialGradient>` : ''}
     </defs>
-    <circle cx="${CX}" cy="${CY}" r="${R*1.75}" fill="url(#${uid}halo)"/>
-    ${epic?`<circle cx="${CX}" cy="${CY}" r="${R*1.35}" fill="url(#${uid}halo2)"/>`:''}
-    <g filter="url(#${uid}bl)" opacity="${(0.5*globalFade).toFixed(2)}">
-      <path d="${spineD}" fill="none" stroke="${fd.c2}" stroke-width="${SPW*3.6}" stroke-linecap="round"/>
-      ${leaflets}${leafletsBack}
+    ${fd.epic ? `<circle cx="${CX}" cy="${CY}" r="${R+7}" fill="url(#${gid}h)"/>` : ''}
+    <g transform="rotate(${rotDeg} ${CX} ${CY})">
+      <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${fd.c2}" stroke-width="${SW+7}"
+        stroke-dasharray="${arcLen} ${gap}" stroke-linecap="round" opacity="${glowOp}" filter="url(#cmFireBlur)"/>
+      <circle cx="${CX}" cy="${CY}" r="${R+2.5}" fill="none" stroke="${fd.c2}" stroke-width="${SW*0.6}"
+        stroke-dasharray="${arcLen*0.85} ${circ}" stroke-linecap="round" opacity="0.55" filter="url(#cmFireTurbSpiky)"/>
+      <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="url(#${gid})" stroke-width="${SW}"
+        stroke-dasharray="${arcLen} ${gap}" stroke-linecap="round" filter="url(#cmFireTurb)"/>
+      <circle cx="${CX}" cy="${CY}" r="${R-1.5}" fill="none" stroke="${fd.c3}" stroke-width="${SW*0.4}"
+        stroke-dasharray="${arcLen*0.92} ${circ}" stroke-linecap="round" opacity="0.85" filter="url(#cmFireTurb)"/>
+      ${fd.epic ? avatarFlameEpicSparksSvg(CX, CY, R) : ''}
     </g>
-    <path d="${spineD}" fill="none" stroke="url(#${gradId})" stroke-width="${SPW*1.9}" stroke-linecap="round" opacity="${(0.98*globalFade).toFixed(2)}" filter="url(#${uid}bxs)"/>
-    <g filter="url(#${uid}bxs)">${flicker}
-      ${leafletsBack}
-      ${leaflets}
-    </g>
-    <g filter="url(#${uid}bm)" opacity="0.98">
-      <path d="${spineD}" fill="none" stroke="${fd.c3}" stroke-width="${SPW*1.3}" stroke-linecap="round"/>
-    </g>
-    <path d="${spineD}" fill="none" stroke="${fd.c3}" stroke-width="${SPW*0.62}" stroke-linecap="round" opacity="${spineOp.toFixed(2)}">${spineFlicker}</path>
-    <path d="${spineD}" fill="none" stroke="#fff8e8" stroke-width="${SPW*0.22}" stroke-linecap="round" opacity="${(0.85*globalFade).toFixed(2)}"/>
-    <g>${embers}</g>
   </svg>`;
 }
 // Builds the flame-ring + day-count badge markup for one avatar wrapper. `seedStr`
@@ -16674,11 +17280,13 @@ function avatarFlameOverlayHtml(streak, seedStr){
   const s = Number(streak)||0;
   const fd = avatarFlameDataFor(s);
   if(!fd) return { flameHtml:'', badgeHtml:'', styleAttr:'', hasFlame:false };
+  ensureAvatarFireDefs();
   const styleAttr = `--flame-c1:${fd.c1};--flame-c2:${fd.c2};`;
   let hash = 0;
   const seed = String(seedStr||'');
   for(let i=0;i<seed.length;i++) hash = (hash*31 + seed.charCodeAt(i)) >>> 0;
-  const flameHtml = `<span class="cm-avatar-flame-ring" aria-hidden="true">${avatarFlameRingSvg(fd, hash)}</span>`;
+  const rotDeg = hash % 360;
+  const flameHtml = `<span class="cm-avatar-flame-ring" aria-hidden="true">${avatarFlameRingSvg(fd, rotDeg)}</span>`;
   const badgeHtml = `<span class="cm-avatar-daycount" title="${toFa(s)} روز پشت‌سرهم">${toFa(s)}</span>`;
   return { flameHtml, badgeHtml, styleAttr, hasFlame:true };
 }
@@ -16689,11 +17297,11 @@ function avatarFlameOverlayHtml(streak, seedStr){
 // wrapper within the group column, unchanged from before.
 function chatGroupAvatarHtml(m){
   const streak = Number(m.streak);
-  // Was gated to streak>0 && premium — now shows for every sender: premium or not,
-  // and even a 0-day streak gets the faint "unlit" placeholder ring (see the `unlit`
-  // branch in avatarFlameDataFor/avatarFlameRingSvg) instead of nothing at all.
-  const ov = avatarFlameOverlayHtml(streak, m.user_id);
-  return `<div class="cm-group-avatar"><div class="cm-avatar-wrap${ov.hasFlame?' has-flame':''}"${ov.hasFlame?` style="${ov.styleAttr}"`:''}>${ov.flameHtml}${chatAvatarHtml(m.username, m.user_id)}${ov.badgeHtml}</div></div>`;
+  const eligible = !!(streak && streak>0 && m.premium);
+  const ov = eligible ? avatarFlameOverlayHtml(streak, m.user_id) : { flameHtml:'', badgeHtml:'', styleAttr:'', hasFlame:false };
+  // data-avatar-open-* lets the tap-to-open-profile listener (see openChatUserProfile
+  // below) know who this avatar belongs to, without re-deriving it from the DOM.
+  return `<div class="cm-group-avatar" data-avatar-open-uid="${escapeHtml(String(m.user_id||''))}" data-avatar-open-name="${escapeHtml(displayName(m.username))}"><div class="cm-avatar-wrap${ov.hasFlame?' has-flame':''}"${ov.hasFlame?` style="${ov.styleAttr}"`:''}>${ov.flameHtml}${chatAvatarHtml(m.username, m.user_id)}${ov.badgeHtml}</div></div>`;
 }
 // Wraps a run of same-sender bubble HTML (already built via publicChatMsgHtml) in the
 // avatar+messages group shell. Own runs get the .own modifier so the CSS mirrors the
@@ -17763,6 +18371,106 @@ document.getElementById('chatMessages').addEventListener('click', (e)=>{
   const editCancelBtn = e.target.closest('.cm-edit-cancel');
   if(editCancelBtn){ cancelEditChatMessage(editCancelBtn.closest('.chat-msg')); return; }
 });
+
+/* ---------------- Tap an avatar in public chat → profile popup ----------------
+   Telegram/Instagram-style card that slides up from the bottom when someone taps
+   the floating avatar beside a run of messages (see .cm-group-avatar in
+   chatGroupAvatarHtml). Reuses the exact same public fields + privacy toggles as
+   the leaderboard cards (lbCardBackHtml/lbBuddyBtnHtml above) — whatever a person
+   opted into showing there is exactly what shows here, nothing more. The buddy
+   button and "فقط پیام‌های این کاربر" filter live right in the popup so people can
+   act on it immediately instead of hunting for the long-press menu. */
+let chatProfileOpenUserId = null;
+function closeChatUserProfile(){
+  const backdrop = document.getElementById('chatProfileBackdrop');
+  const sheet = document.getElementById('chatProfileSheet');
+  if(backdrop) backdrop.classList.remove('show');
+  if(sheet) sheet.classList.remove('show');
+  chatProfileOpenUserId = null;
+}
+function chatProfileStatusHtml(user){
+  return isOnlineNow(user.last_active_at)
+    ? '<span class="cpf-status online"><span class="cpf-status-dot"></span>آنلاین</span>'
+    : `<span class="cpf-status">${escapeHtml(lbLastSeenLabel(user.last_active_at))}</span>`;
+}
+// Buddy button (reused as-is from the leaderboard) + the same user-filter action
+// already offered in the long-press menu — kept here too since tapping the
+// avatar is the more natural place to reach for it while browsing the chat.
+function chatProfileActionsHtml(user){
+  const buddyBtn = lbBuddyBtnHtml(user);
+  const isMe = publicChatUser && user.id === publicChatUser.id;
+  const filterBtn = isMe ? '' : `<button type="button" class="cpf-filter-btn" data-filter-uid="${escapeHtml(user.id)}" data-filter-name="${escapeHtml(displayName(user.username))}">${ci('search')} فقط پیام‌های این کاربر</button>`;
+  if(!buddyBtn && !filterBtn) return '';
+  return `<div class="cpf-actions">${buddyBtn}${filterBtn}</div>`;
+}
+function renderChatUserProfile(user){
+  const body = document.getElementById('chatProfileBody');
+  if(!body) return;
+  if(!user){
+    body.innerHTML = `<div class="cpf-empty">${LB_SVG_EYE_OFF} این کاربر دیگه در دسترس نیست</div>`;
+    return;
+  }
+  const name = displayName(user.username);
+  const color = lbColorFor(user.id || name);
+  const levelIdx = lbLevelIndexFor(user);
+  body.innerHTML = `
+    <div class="cpf-banner"></div>
+    <div class="cpf-avatar-wrap">
+      <div class="cpf-avatar" style="background:${user.avatar_url?'transparent':color}">${lbAvatarInnerHtml(user, name)}</div>
+      ${lbGenderBadge(user.gender)}
+      ${lbLevelBadgeHtml(levelIdx)}
+    </div>
+    <div class="cpf-name">${escapeHtml(name)}</div>
+    <div class="cpf-status-row">${chatProfileStatusHtml(user)}<span class="cpf-dot">·</span><span class="cpf-days">${toFa(user.day_count||0)} روز</span></div>
+    <div class="cpf-back">${lbCardBackHtml(user)}</div>
+    ${chatProfileActionsHtml(user)}
+  `;
+}
+async function openChatUserProfile(userId, username){
+  if(!userId) return;
+  chatProfileOpenUserId = userId;
+  const backdrop = document.getElementById('chatProfileBackdrop');
+  const sheet = document.getElementById('chatProfileSheet');
+  const body = document.getElementById('chatProfileBody');
+  if(!backdrop || !sheet || !body) return;
+  body.innerHTML = '<div class="cpf-loading">در حال بارگذاری...</div>';
+  backdrop.classList.add('show');
+  sheet.classList.add('show');
+  if(!sb){ renderChatUserProfile(null); return; }
+  try{
+    const [profRes] = await Promise.all([
+      sb.from('profiles').select('id,username,gender,avatar_url,age_range,habit_icon,program_length,identity_titles,day_count,last_active_at').eq('id', userId).single(),
+      loadMyBuddyRelations()
+    ]);
+    if(chatProfileOpenUserId !== userId) return; // تا موقع لود، پاپ‌آپ برای یه نفر دیگه باز شده
+    if(profRes.error || !profRes.data){ renderChatUserProfile(null); return; }
+    renderChatUserProfile(profRes.data);
+  }catch(err){
+    console.error('Load chat user profile failed', err);
+    if(chatProfileOpenUserId === userId) renderChatUserProfile(null);
+  }
+}
+document.getElementById('chatMessages').addEventListener('click', e=>{
+  const avatarEl = e.target.closest('.cm-group-avatar');
+  if(!avatarEl) return;
+  const uid = avatarEl.dataset.avatarOpenUid;
+  if(!uid) return;
+  openChatUserProfile(uid, avatarEl.dataset.avatarOpenName);
+});
+const chatProfileBodyEl = document.getElementById('chatProfileBody');
+if(chatProfileBodyEl) chatProfileBodyEl.addEventListener('click', e=>{
+  const reqBtn = e.target.closest('[data-request-uid]');
+  if(reqBtn){ sendDirectBuddyRequest(reqBtn.dataset.requestUid).then(()=>{ if(chatProfileOpenUserId) openChatUserProfile(chatProfileOpenUserId); }); return; }
+  const accBtn = e.target.closest('[data-accept-req]');
+  if(accBtn){ acceptBuddyRequest(accBtn.dataset.acceptReq).then(()=>{ if(chatProfileOpenUserId) openChatUserProfile(chatProfileOpenUserId); }); return; }
+  const filterBtn = e.target.closest('[data-filter-uid]');
+  if(filterBtn){ setChatUserFilter(filterBtn.dataset.filterUid, filterBtn.dataset.filterName); closeChatUserProfile(); }
+});
+const chatProfileBackdropEl = document.getElementById('chatProfileBackdrop');
+if(chatProfileBackdropEl) chatProfileBackdropEl.addEventListener('click', closeChatUserProfile);
+const chatProfileCloseBtnEl = document.getElementById('chatProfileCloseBtn');
+if(chatProfileCloseBtnEl) chatProfileCloseBtnEl.addEventListener('click', closeChatUserProfile);
+
 /* ---------------- Group features: collective streak, weekly card ----------------
    The bot user_id below MUST match the fixed system profile row created by the SQL migration
    (group-features.sql). It's what lets the client tell a real automatic group message apart
@@ -18389,7 +19097,7 @@ function openChatMsgMenu(el){
   // Editing is only offered for the sender's own plain messages — not daily-report cards,
   // which are structured/generated content rather than free text.
   const canEdit = own && el.dataset.report !== '1';
-  let html = `<button type="button" data-act="copy">${ci('copy')} کپی متن پیام</button>`;
+  let html = `<button type="button" data-act="copy">${ci('copy')} کپی متن پیام${(storeData.premium || isInTrial()) ? '' : ' '+ci('lock')}</button>`;
   html += `<button type="button" data-act="filter">${ci('search')} فقط پیام‌های ${escapeHtml(username)}</button>`;
   if(canEdit) html += `<button type="button" data-act="edit">${ci('edit')} ویرایش پیام</button>`;
   if(isChatAdmin){
@@ -18441,7 +19149,7 @@ if(cmActionMenu) cmActionMenu.addEventListener('click', e=>{
   const msgId = el.dataset.msgId;
   const userId = el.dataset.userId;
   const username = el.dataset.username;
-  if(btn.dataset.act === 'copy'){ copyChatMessageText(el); }
+  if(btn.dataset.act === 'copy'){ if(requirePremium()) copyChatMessageText(el); }
   else if(btn.dataset.act === 'edit') startEditChatMessage(el);
   else if(btn.dataset.act === 'filter') setChatUserFilter(userId, username);
   else if(btn.dataset.act === 'pin') pinChatMessage(el);
@@ -19085,7 +19793,7 @@ function chatMediaPublicUrl(path){
   if(!path || !sb) return '';
   try{ return sb.storage.from(CHAT_MEDIA_BUCKET).getPublicUrl(path).data.publicUrl; }catch(err){ return ''; }
 }
-const FREE_CHAT_DAILY_LIMIT = 30;
+const FREE_CHAT_DAILY_LIMIT = 10;
 function getFreeChatMsgCountToday(){
   const rec = storeData.chatDailyCount;
   if(!rec || rec.date !== todayKeyLocal()) return 0;
@@ -19192,6 +19900,7 @@ async function sendPublicChatMessage(){
         pendingEl.classList.remove('cm-pending');
       }
       if(!isPremiumNow) registerFreeChatMsgSent();
+      try{ logDailyFeatureUse('chat'); }catch(e){}
       startChatCooldownIfNeeded();
     }
   }catch(err){
@@ -19306,6 +20015,7 @@ async function sendPublicChatMedia(file){
       addGifPickerRecent(chatMediaPublicUrl(path), chatMediaPublicUrl(path), mediaType);
     }
     if(!isPremiumNow) registerFreeChatMsgSent();
+    try{ logDailyFeatureUse('chat'); }catch(e){}
     startChatCooldownIfNeeded();
   }catch(err){
     console.error('Chat media send error', err);
@@ -19585,6 +20295,7 @@ async function sendPublicChatGif(gifUrl, gifThumbUrl, mediaType){
       pendingEl.classList.remove('cm-pending');
     }
     if(!isPremiumNow) registerFreeChatMsgSent();
+    try{ logDailyFeatureUse('chat'); }catch(e){}
     startChatCooldownIfNeeded();
   }catch(err){
     console.error('Giphy gif send error', err);
@@ -19647,9 +20358,9 @@ function updateReportBtnState(){
     if(hint) hint.textContent = 'ارسال گزارش کار فقط از ساعت ۲۰ تا ۲۴ فعاله';
     return;
   }
-  if(!(storeData.premium || isInTrial() || isInFirstReportWeek()) && storeData.taskReportSentOnce){
+  if(!(storeData.premium || isInTrial()) && storeData.taskReportSentOnce){
     btn.disabled = true;
-    if(hint) hint.textContent = 'هفته‌ی اولِ رایگانت برای گزارش کار تموم شده — برای ارسال نامحدود، پرمیوم شو';
+    if(hint) hint.textContent = 'ارسال گزارش کار تو نسخه‌ی رایگان فقط یک‌بار امکان‌پذیره — برای ارسال نامحدود، پرمیوم شو';
     return;
   }
   const { doneCount, total } = getTaskReportData();
@@ -19664,8 +20375,8 @@ async function sendTaskReport(){
   if(isCurrentlyMuted()){ showToast('فعلاً ساکتت کرده‌ن — نمی‌تونی گزارش کار بفرستی', 'error'); return; }
   if(isChatLockedForMe()){ showToast('چت عمومی فعلاً توسط مالک بسته شده', 'error'); return; }
   if(!isReportModeActive() && !isAppOwner){ showToast('ارسال گزارش کار فقط از ساعت ۲۰ تا ۲۴ فعاله', 'error'); return; }
-  if(!(storeData.premium || isInTrial() || isInFirstReportWeek()) && storeData.taskReportSentOnce){
-    showToast('هفته‌ی اولِ رایگانت برای گزارش کار تموم شده', 'error');
+  if(!(storeData.premium || isInTrial()) && storeData.taskReportSentOnce){
+    showToast('ارسال گزارش کار تو نسخه‌ی رایگان فقط یک‌بار امکان‌پذیره', 'error');
     openPremiumOverlay();
     return;
   }
@@ -24209,9 +24920,151 @@ const EXIT_MESSAGES = [
   "باشه، ولی یادت نمونه این مسیر رو خودت انتخاب کردی 💪"
 ];
 function pickExitMessage(){ return EXIT_MESSAGES[Math.floor(Math.random()*EXIT_MESSAGES.length)]; }
+
+/* ---- Exit-cloud: a second, personalized speech-cloud above the mascot's head on the
+   exit-confirm screen — separate from the generic exitBubble line below it (pickExitMessage
+   above, untouched). Instead of a random line, this one reacts to what the user actually did
+   *today* (and this week for the workout check): checks a short list of conditions in
+   priority order and returns the first match, each with its own coach mood so the mascot's
+   face matches the tone. Falls back to a warm generic line when nothing specific stands out.
+   Every condition is seeded off todayKey() (same pattern as getCoachData/seededPick elsewhere)
+   so the line stays stable across re-opens the same day instead of reshuffling every tap.
+
+   Beyond the original day-level signals (chat time, discipline, workout, unfinished plan,
+   streak), this also reacts to the SPECIFIC habit the person is fighting — not just "how'd
+   today go" in general but "how'd today go with the exact thing you told us about" — using
+   storeData.urgeLog (the SOS screen's per-moment log of resisted:true/false + category) for
+   what actually happened TODAY with a real urge, and storeData.profile.addictions (picked at
+   onboarding, via ADDICTION_EXIT_PERSONA above) as a fallback voice for the unfinished-plan
+   nudge when nothing urge-specific happened today — e.g. someone working on پرخوری hears
+   something like "نترس، کمکت می‌کنم شکمو بودنو کم‌کم بذاری کنار" instead of a one-size-
+   fits-all line. ---- */
+function pickExitCloudMessage(){
+  const name = (storeData.profile && storeData.profile.firstName) ? storeData.profile.firstName.trim() : '';
+  const namePart = name ? (name+'، ') : '';
+  const tk = todayKey();
+  const seed = tk+'-exitcloud';
+
+  // ۱) امروز خیلی تو چت عمومی وقت گذاشته
+  const chatToday = (storeData.dailyFeatureLog && storeData.dailyFeatureLog[tk] && storeData.dailyFeatureLog[tk].chat) || 0;
+  if(chatToday >= 15){
+    return { mood:'concerned', text: seededPick([
+      namePart+'خیلی داری وقتتو با چت‌کردن هدر می‌دی، حس می‌کنم.',
+      namePart+'امروز بیشتر وقتت رفت رو چت؛ یه‌کم هم برای بقیه‌ی برنامه‌ت بذار.',
+      namePart+'چت جای خوبیه برای هم‌مسیر شدن، ولی زیادیش وقتتو می‌گیره‌ها.'
+    ], seed+'-chat') };
+  }
+
+  // ۲) لغزش امروز: اگه امروز از دکمه‌ی SOS استفاده کرده و مقاومت نکرده، نه سرزنش که دلگرمی —
+  //    دقیقاً روی همون عادتی که باهاش درگیره، نه یه پیام یکسان برای همه.
+  const todaysUrges = (storeData.urgeLog||[]).filter(u=> u && u.ts && woDayKeyOf(u.ts) === tk);
+  const todaysSlip = todaysUrges.find(u=> !u.resisted);
+  if(todaysSlip){
+    const addId = SOS_CAT_TO_ADDICTION[todaysSlip.category] || 'other';
+    const persona = ADDICTION_EXIT_PERSONA[addId];
+    if(persona){
+      return { mood:'gentle', text: namePart+fillX(seededPick(persona.comfort, seed+'-slip-'+addId)) };
+    }
+  }
+
+  // ۳) مقاومت امروز: اگه امروز جلوی یه وسوسه‌ی مشخص ایستاده، دقیقاً همونو تشویقش کن.
+  const todaysWin = todaysUrges.find(u=> u.resisted);
+  if(todaysWin){
+    const addId = SOS_CAT_TO_ADDICTION[todaysWin.category] || 'other';
+    const persona = ADDICTION_EXIT_PERSONA[addId];
+    if(persona){
+      return { mood:'cheer', text: namePart+fillX(seededPick(persona.praise, seed+'-win-'+addId)) };
+    }
+  }
+
+  // ۴) نظم امروز: هم مدیتیشن کرده هم کل برنامه‌ی امروز رو تیک زده
+  const doItems = getDoItems(), avoidItems = getAvoidItems();
+  const doneCount = doItems.filter((_,i)=> entry.done[i]).length + avoidItems.filter((_,i)=> entry.avoidDone[i]).length;
+  const totalToday_ = doItems.length + avoidItems.length;
+  const meditatedToday = !!(storeData.meditationLog && storeData.meditationLog[tk]);
+  if(meditatedToday && totalToday_>0 && doneCount>=totalToday_){
+    return { mood:'proud', text: seededPick([
+      namePart+'تو یه آدم منظمی، بهت افتخار می‌کنم.',
+      namePart+'هم مدیتیشن، هم برنامه‌ی امروز کامل — دقیقاً همینه که فرق می‌کنه.',
+      namePart+'امروزتو کامل بردی. همینطوری ادامه بده.'
+    ], seed+'-disciplined') };
+  }
+
+  // ۵) ورزشکاری: امروز تمرین کرده یا این هفته منظم رفته
+  const woHist = (storeData.woHistory && storeData.woHistory.history) || [];
+  const didWorkoutToday = woHist.some(h=> woDayKeyOf(h.ts) === tk);
+  const recentWorkoutDays = new Set();
+  woHist.forEach(h=>{
+    const k = woDayKeyOf(h.ts);
+    const diff = Math.round((new Date(tk+'T00:00:00') - new Date(k+'T00:00:00'))/86400000);
+    if(diff>=0 && diff<7) recentWorkoutDays.add(k);
+  });
+  if(didWorkoutToday || recentWorkoutDays.size>=4){
+    return { mood:'cheer', text: seededPick([
+      namePart+'ایول بابا ورزشکار! بهت افتخار می‌کنم.',
+      namePart+'بدنسازی رو جدی گرفتی‌ها، همینطوری ادامه بده.',
+      namePart+'داری واقعاً رو بدنت کار می‌کنی. آفرین.'
+    ], seed+'-athlete') };
+  }
+
+  // ۶) عنوان هویتی جدید امروز: اگه امروز یه عنوان مثل «نقاش» یا «نویسنده» تازه باز شده،
+  //    دقیقاً همونو تبریک بگه، نه یه پیام کلی.
+  const newIdentityToday = FOCUS_IDENTITIES.find(fi=>{
+    const at = storeData.badges && storeData.badges[fi.id];
+    return typeof at === 'string' && woDayKeyOf(at) === tk;
+  });
+  if(newIdentityToday){
+    return { mood:'proud', text: seededPick([
+      namePart+'امروز رسماً «'+newIdentityToday.title+'» شدی '+newIdentityToday.emoji+' بهت افتخار می‌کنم.',
+      namePart+'از امروز یه «'+newIdentityToday.title+'» هستی '+newIdentityToday.emoji+' همینطوری ادامه بده.'
+    ], seed+'-newidentity') };
+  }
+
+  // ۷) برنامه‌ی امروز هنوز کامل نشده — اگه یه عادت مشخص داره روش کار می‌کنه، گاهی دقیقاً
+  //    روی همون تمرکز کن، نه فقط یه یادآوری یکسان برای همه.
+  if(totalToday_>0 && doneCount<totalToday_){
+    const pool = [
+      namePart+'حواست هست برنامه‌ی امروزو کامل کنی دیگه؟',
+      namePart+'هنوز چندتا کار از امروز مونده؛ قبل رفتن یه نگاه بنداز.',
+      namePart+'برنامه‌ی امروزت هنوز تموم نشده‌ها.'
+    ];
+    const dailyAddId = primaryAddictionOfDay();
+    const dailyPersona = dailyAddId && ADDICTION_EXIT_PERSONA[dailyAddId];
+    if(dailyPersona) dailyPersona.comfort.forEach(t=> pool.push(namePart+fillX(t)));
+    return { mood:'concerned', text: seededPick(pool, seed+'-unfinished') };
+  }
+
+  // ۸) استریک بلند و پیوسته
+  const streak = computeStreak();
+  if(streak>=7){
+    return { mood:'excited', text: seededPick([
+      namePart+toFa(streak)+' روزه داری ادامه می‌دی، واقعاً بهت افتخار می‌کنم.',
+      namePart+'این استریک '+toFa(streak)+' روزه یعنی داره عادت می‌شه. عالیه.'
+    ], seed+'-streak') };
+  }
+
+  // ۹) پیش‌فرض، وقتی هیچ‌کدوم از موارد بالا صدق نمی‌کنه
+  return { mood:'gentle', text: seededPick([
+    namePart+'همین امروز رو از دست نده، هنوز وقت داری.',
+    namePart+'هر روز که کنارتم، یه قدم جلوتری.',
+    namePart+'قبل رفتن، یه نگاه به برنامه‌ت بنداز.'
+  ], seed+'-default') };
+}
+
 function showExitConfirm(){
+  const cloud = pickExitCloudMessage();
   const coachEl = document.getElementById('exitCoachAvatar');
-  if(coachEl) coachEl.innerHTML = buildCoachSVG('concerned', 'exitconfirm');
+  if(coachEl) coachEl.innerHTML = buildCoachSVG(cloud.mood, 'exitconfirm');
+  const cloudBox = document.getElementById('exitCloudBubble');
+  const cloudText = document.getElementById('exitCloudText');
+  if(cloudBox && cloudText){
+    cloudText.textContent = cloud.text;
+    cloudBox.style.display = '';
+    // re-trigger the pop-in animation every time the screen opens, not just the first time
+    cloudBox.classList.remove('exit-cloud-pop');
+    void cloudBox.offsetWidth;
+    cloudBox.classList.add('exit-cloud-pop');
+  }
   document.getElementById('exitMsgText').textContent = pickExitMessage();
   const ov = document.getElementById('exitOverlay');
   ov.classList.remove('leaving');
@@ -24545,20 +25398,6 @@ loadData().then(()=>{
   syncTaskWidget();
   applyPendingWidgetToggles();
   applyPendingOpenChat();
-  // با باز شدنِ عادیِ اپ (یعنی «حالت بدون‌برنامه» خاموش باشه)، همیشه مستقیم می‌ریم رو
-  // تبِ «برنامه‌ریزی» > زیرتبِ «برنامه‌ی روزانه»، تا کاربر بدون رد شدن از «نمای کلی»
-  // بلافاصله بتونه شروع کنه به تیک‌زدن. اگه «حالت بدون‌برنامه» روشن باشه دست نمی‌زنیم،
-  // چون applyNoProgramModeUI (که خودِ loadData صداش زده) از قبل عمداً این کاربرها رو
-  // رو «نمای کلی» نگه داشته. فقط همین یه‌بار، تو بوتِ اولیه — نه هر بار که
-  // normalizeAndRenderStoreData دوباره صدا زده می‌شه (مثلاً بعد از لاگین/سینک) — چون
-  // اون‌جا کاربر ممکنه وسط کار تو یه تبِ دیگه باشه و نباید بی‌دلیل پرت بشه.
-  try{
-    if(!(storeData.profile && storeData.profile.noProgramMode)){
-      setAppMode('private', 'today');
-      const programSubBtn = document.querySelector('#tab-today .subseg button[data-sub="program"]');
-      if(programSubBtn) programSubBtn.click();
-    }
-  }catch(err){ console.error('default planning tab on boot failed', err); }
 });
 
 if ('serviceWorker' in navigator) {
