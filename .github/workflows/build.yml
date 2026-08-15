@@ -27,7 +27,7 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
 
       - name: Install dependencies
         run: npm install
@@ -4442,7 +4442,7 @@ jobs:
           ./gradlew assembleRelease
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: dreamlife-apk-release
           path: android/app/build/outputs/apk/release/app-release.apk
