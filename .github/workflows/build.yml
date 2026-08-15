@@ -4363,19 +4363,41 @@ jobs:
           with open(path, encoding='utf-8') as f:
               src = f.read()
 
-          if 'minifyEnabled' not in src:
-              new_src, n = re.subn(
-                  r'(buildTypes\s*\{\s*release\s*\{)',
-                  r'\1\n            minifyEnabled true'
-                  r'\n            shrinkResources true'
-                  r'\n            debuggable false'
-                  r"\n            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'",
+          if 'minifyEnabled true' not in src:
+              if re.search(r'minifyEnabled\s+false', src):
+                  # Capacitor's generated build.gradle already ships this line
+                  # (defaulted to false) inside buildTypes { release { ... } } —
+                  # flip it instead of inserting a duplicate.
+                  src = re.sub(r'minifyEnabled\s+false', 'minifyEnabled true', src, count=1)
+              else:
+                  new_src, n = re.subn(
+                      r'(buildTypes\s*\{\s*release\s*\{)',
+                      r'\1\n            minifyEnabled true',
+                      src, count=1
+                  )
+                  if n == 0:
+                      print("::error::could not find buildTypes { release { } } block in android/app/build.gradle")
+                      sys.exit(1)
+                  src = new_src
+
+          if 'shrinkResources true' not in src:
+              if re.search(r'shrinkResources\s+false', src):
+                  src = re.sub(r'shrinkResources\s+false', 'shrinkResources true', src, count=1)
+              else:
+                  src = re.sub(r'(minifyEnabled\s+true)', r'\1\n            shrinkResources true', src, count=1)
+
+          if 'debuggable false' not in src:
+              if re.search(r'debuggable\s+true', src):
+                  src = re.sub(r'debuggable\s+true', 'debuggable false', src, count=1)
+              else:
+                  src = re.sub(r'(minifyEnabled\s+true)', r'\1\n            debuggable false', src, count=1)
+
+          if 'proguard-android-optimize.txt' not in src:
+              src = re.sub(
+                  r'(minifyEnabled\s+true)',
+                  r"\1\n            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'",
                   src, count=1
               )
-              if n == 0:
-                  print("::error::could not find buildTypes { release { } } block in android/app/build.gradle")
-                  sys.exit(1)
-              src = new_src
 
           with open(path, 'w', encoding='utf-8') as f:
               f.write(src)
