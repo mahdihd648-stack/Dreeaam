@@ -1,64 +1,37 @@
-// Service worker — app-shell caching (stale-while-revalidate).
-// __SW_CACHE_VERSION__ is replaced at build time (from the repo's VERSION file)
-// by the "Prepare web assets (www/)" step in build.yml — every version bump
-// automatically invalidates the old cache, so this file never needs manual edits.
-const CACHE_NAME = 'dreamlife-shell-__SW_CACHE_VERSION__';
+// Service worker — کاملاً یک‌بارمصرف (self-unregistering).
+//
+// این اپ یه اپِ نیتیوِ Capacitorـه: index.html/app.js از قبل داخلِ خودِ APK باندل شدن و
+// بدونِ هیچ کشی هم آفلاین در دسترسن. کشِ app-shell که این فایل قبلاً انجام می‌داد
+// (stale-while-revalidate رویِ index.html/app.js/manifest/آیکون‌ها) هیچ فایده‌ی
+// اضافه‌ای نداشت — و چون Service Worker registration + Cache Storage با آپدیتِ
+// این‌جاییِ APK (نصبِ نسخه‌ی جدید رویِ قدیم، بدونِ حذف/کلیردیتا) پاک نمی‌شه، این کش
+// نسخه‌ی قدیمیِ app.js رو به‌جایِ فایلِ تازه‌ی نیتیو سرو می‌کرد و باعثِ به‌هم‌ریختنِ
+// لِی‌اوت/اسکرولِ بعدِ هر آپدیت می‌شد.
+//
+// این نسخه دیگه هیچی کش نمی‌کنه: فقط یه‌بار خودشو (و هر کشِ قدیمی‌ای که از نسخه‌های
+// قبل مونده) پاک می‌کنه، صفحه‌ی بازِ فعلی رو یه‌بار رفرش می‌کنه تا از دستِ نسخه‌ی
+// استیل خلاص بشه، و بعدش دیگه کاری به کارِ هیچ fetchـی نداره. __SW_CACHE_VERSION__
+// فقط برایِ اینه که هر ریلیز، بایتِ این فایل عوض بشه تا مرورگر/وب‌ویو حتماً
+// آپدیتش رو تشخیص بده.
+// build: __SW_CACHE_VERSION__
 
-// Only the app shell — static, same-origin files needed to boot the UI offline.
-// Deliberately NOT included: Supabase requests, CDN fonts/scripts (cross-origin,
-// must stay live), and any user data — none of that belongs in this cache.
-const PRECACHE_URLS = [
-  '/',
-  '/index.html',
-  '/app.js',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png'
-];
-
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
-      .catch((err) => console.warn('SW precache failed', err))
-  );
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-      ))
-      .then(() => self.clients.claim())
+      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then(() => self.registration.unregister())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((clientsList) => {
+        clientsList.forEach((client) => {
+          try { client.navigate(client.url); } catch (e) { /* بی‌خیال، دفعه‌ی بعد خودش درست می‌شه */ }
+        });
+      })
   );
 });
 
-self.addEventListener('fetch', (event) => {
-  const req = event.request;
-
-  // Only ever intercept same-origin GETs. Everything else (Supabase API calls,
-  // jsdelivr/Google Fonts, POST/PUT, etc.) goes straight to the network untouched.
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) {
-    return;
-  }
-
-  // Stale-while-revalidate: serve the cached shell instantly (fast + works
-  // offline), and in the background fetch a fresh copy for next time.
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      const network = fetch(req)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-          }
-          return res;
-        })
-        .catch(() => cached); // offline and not cached: nothing we can do
-
-      return cached || network;
-    })
-  );
-});
+// دیگه هیچ fetch handler ای نداریم — هر درخواستی مستقیم و بدون واسطه به شبکه/فایلِ
+// نیتیو می‌ره، دقیقاً همون چیزی که یه اپِ Capacitorـی از اول لازم داشت.
