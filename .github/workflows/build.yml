@@ -437,6 +437,31 @@ jobs:
           print(f"Set versionName={version_name!r}, versionCode={version_code}")
           PYEOF
 
+      - name: Sync APP_VERSION constant in app.js with VERSION file
+        # APP_VERSION تو app.js قبلاً یه رشته‌ی دستی/هاردکد بود و کاملاً جدا از فایل
+        # VERSION آپدیت می‌شد — همون چیزی که بالا فقط رو versionCode/versionName گرادل
+        # اثر می‌ذاره. نتیجه‌ش این بود که صفحه‌ی «بررسی آخرین نسخه» تو اپ، حتی بعد از
+        # بیلد نسخه‌های جدید، همچنان عدد قدیمی رو نشون می‌داد چون هیچ‌کس این ثابت رو
+        # واقعاً به‌روز نمی‌کرد. از این به بعد همین‌جا، از رو همون VERSION، مقدارش ست
+        # می‌شه — دیگه لازم نیست دستی تو app.js عوضش کنی.
+        run: |
+          APP_JS="www/app.js"
+          python3 - "$APP_JS" <<'PYEOF'
+          import sys, re
+          path = sys.argv[1]
+          with open('VERSION', encoding='utf-8') as f:
+              version_name = f.read().strip()
+          with open(path, encoding='utf-8') as f:
+              src = f.read()
+          new_src, n = re.subn(r"const APP_VERSION = '[^']*'", f"const APP_VERSION = '{version_name}'", src, count=1)
+          if n == 0:
+              print(f"::error::could not find 'const APP_VERSION' line in {path}")
+              sys.exit(1)
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(new_src)
+          print(f"Set APP_VERSION={version_name!r} in {path}")
+          PYEOF
+
       - name: Generate app icon manually (legacy + adaptive, from repo-root icon)
         # Builds every launcher icon file by hand with ImageMagick instead of relying on
         # @capacitor/assets' own file discovery. Produces:
