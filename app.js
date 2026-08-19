@@ -1,8 +1,21 @@
-/* پنل تشخیصی موقت (که برای تست خرید پرمیوم اضافه شده بود) حذف شد.
-   iabDebugStep/iabDebugReset به‌صورت no-op نگه داشته شدن تا فراخوانی‌هاشون
-   تو بخش خرید (پایین‌تر تو همین فایل) بدون تغییر اون بخش، بی‌خطر باقی بمونه. */
-function iabDebugStep(){}
-function iabDebugReset(){}
+/* پنل تشخیصی خرید پرمیوم — iabDebugStep/iabDebugReset دوباره فعال شدن و به
+   پنل دیباگِ عمومی (تعریف‌شده در index.html، قبل از لود این فایل) وصل شدن.
+   window.__debugLog/__debugLogMark ممکنه هنوز تعریف نشده باشن (اگه این فایل
+   جدا از اون index.html اجرا بشه)، برای همین همه‌جا با optional chaining-style
+   چک صدا زده می‌شن تا اگه نبودن، فقط no-op بشه و چیزی نشکنه. */
+function iabDebugStep(name, ok, detail){
+  try{
+    var type = (ok === true) ? 'plugin' : (ok === false ? 'error' : 'suspicious');
+    var icon = (ok === true) ? '✅' : (ok === false ? '❌' : '…');
+    var detailStr;
+    if (typeof detail === 'string') detailStr = detail;
+    else { try{ detailStr = JSON.stringify(detail); }catch(e){ detailStr = String(detail); } }
+    if (window.__debugLog) window.__debugLog(type, 'IAB', icon + ' ' + name, detailStr);
+  }catch(e){}
+}
+function iabDebugReset(){
+  try{ if (window.__debugLogMark) window.__debugLogMark('🔄 شروع تلاش جدید خرید'); }catch(e){}
+}
 
 /* ================= window.storage compatibility shim =================
    window.storage.get/set/delete/list is an API that only exists inside
@@ -6557,6 +6570,32 @@ function renderMonthlyResult(){
 }
 
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+// Escapes chat text like escapeHtml, then turns any http(s)/www. link and any Iranian
+// phone number (mobile format, with or without +98/0098/0 prefix and optional dashes/
+// spaces between groups) into a clickable <a>. Runs as ONE regex pass (links and phones
+// combined via alternation) so a match is only ever wrapped once — doing two separate
+// .replace() passes risks the second pass re-matching digits that already ended up inside
+// an <a> tag from the first pass. Trailing punctuation right after a URL (a period ending
+// the sentence, a closing paren, Persian ، ؛ ؟ etc.) is peeled off the link and put back
+// outside it, since it's almost never actually part of the URL.
+function linkifyChatText(raw){
+  const escaped = escapeHtml(raw);
+  const urlPart = '(?:https?:\\/\\/|www\\.)[^\\s<]+';
+  const phonePart = '(?:\\+98|0098|0)?9\\d{2}[-\\s]?\\d{3}[-\\s]?\\d{4}\\b';
+  const combined = new RegExp(urlPart + '|' + phonePart, 'gi');
+  return escaped.replace(combined, (match) => {
+    if(/^(https?:\/\/|www\.)/i.test(match)){
+      const trailing = match.match(/[.,;:!?)\]}»"'”’،؛؟]+$/);
+      let core = match, suffix = '';
+      if(trailing){ core = match.slice(0, -trailing[0].length); suffix = trailing[0]; }
+      if(!core) return match; // whole match was punctuation somehow — leave untouched
+      const href = /^https?:\/\//i.test(core) ? core : 'http://' + core;
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="cm-link">${core}</a>${suffix}`;
+    }
+    const digits = match.replace(/[-\s]/g, '').replace(/^(\+98|0098|0)/, '');
+    return `<a href="tel:+98${digits}" class="cm-link">${match}</a>`;
+  });
+}
 // Names shown in the public chat (message author, replies, block list, leaderboard) must
 // always be a display name — never someone's raw email. If what we have looks like an
 // email address (old data, a missing profile row, etc.) only the part before "@" is shown.
@@ -9812,7 +9851,12 @@ document.getElementById('deleteAccountBtn').addEventListener('click', async ()=>
     const { data: sessionData } = await sb.auth.getSession();
     const token = sessionData && sessionData.session ? sessionData.session.access_token : null;
     if(!token){ showToast('اول باید وارد اکانتت باشی', 'error'); return; }
-    const res = await fetch('/api/delete-account', {
+    // نکته: قبلاً اینجا '/api/delete-account' (یه مسیر نسبی به آدرس خودِ اپ) بود، در حالی که
+    // این endpoint اصلاً تو خودِ اپ وجود نداره — همه‌ی endpointهای بک‌اند مثل بقیه‌ی این فایل
+    // باید به WORKER_BASE بره. یعنی این fetch همیشه با 404 (یا صفحه‌ی html خودِ اپ به‌جای
+    // JSON) جواب می‌گرفت و پیام «حذف حساب انجام نشد، دوباره امتحان کن» رو نشون می‌داد —
+    // برای هر حسابی، نه فقط پرمیوم/غیراونر.
+    const res = await fetch(WORKER_BASE + '/delete-account', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token }
     });
@@ -10021,6 +10065,54 @@ document.addEventListener('touchend', (e)=>{
     : document.querySelector('.tab-btn[data-tab="'+order[nextIdx]+'"]');
   if(targetBtn) targetBtn.click();
 }, {passive:true});
+
+/* ================= کیبورد چت (رفع باگ دوبار-ضربه / دکمه‌ی ارسالِ قفل تا کیبورد بسته بشه) =================
+   پنل چت (.chat-premium-panel تو حالت chat-fullscreen) یه position:fixed با bottom
+   ثابته. رو خیلی از WebViewهای اندروید، باز شدن کیبورد فقط visual viewport رو کوچیک
+   می‌کنه، نه layout viewport رو — پس مختصات لمسِ کاربر (که نسبت به چیزیه که واقعاً
+   می‌بینه) با موقعیت واقعیِ عنصر fixed (که هنوز نسبت به viewport قبل از باز شدن
+   کیبورده) جفت نمی‌شن؛ همین باعث می‌شد ضربه‌ی اول رو اینپوت گم بشه (باید دوباره
+   می‌زدی) و دکمه‌ی ارسال هم تا کیبورد بسته نمی‌شد کار نکنه. راه‌حل: با
+   window.visualViewport هر تغییر (باز/بسته شدن کیبورد) رو گوش می‌دیم و ارتفاع واقعیِ
+   کیبورد رو تو یه متغیر CSS می‌ذاریم؛ پنل با همون متغیر (بالا تو CSS) دقیقاً بالای
+   کیبوردِ واقعی می‌شینه، نه بالای یه فرض قدیمی. */
+function syncChatKeyboardOffset(){
+  if(!window.visualViewport) return;
+  const vv = window.visualViewport;
+  const overlap = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+  document.documentElement.style.setProperty('--chat-kb-offset', overlap + 'px');
+}
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', syncChatKeyboardOffset);
+  window.visualViewport.addEventListener('scroll', syncChatKeyboardOffset);
+  syncChatKeyboardOffset();
+}
+
+/* ================= اطلاع‌رسانی «الان تو تب چتم» به نیتیو (رفع باگ نوتیف حتی داخل چت) =================
+   قبلاً یه لیسنر pushNotificationReceived رو پلاگین استاندارد Push Notifications
+   کاپاسیتور اضافه کرده بودیم، ولی معلوم شد بی‌فایده‌ست: تو build.yml سرویسِ خودِ اون
+   پلاگین صریحاً از مانیفست حذف شده (tools:node="remove") و با یه
+   FirebaseMessagingService سفارشی به اسم ChatReplyMessagingService جایگزین شده که
+   کاملاً مستقل از لایه‌ی JS/کاپاسیتور نوتیف رو می‌سازه — یعنی اون ایونت اصلاً صدا زده
+   نمی‌شه. راه‌حل واقعی: از طریق پلاگین AuthBridge (که همین الان هم برای کپیِ توکنِ
+   سشن استفاده می‌شه)، هر بار وضعیت «الان تو تب چتم و اپ جلوعه یا نه» عوض می‌شه، یه
+   پرچم boolean رو تو SharedPreferences سمت native می‌نویسیم. ChatReplyMessagingService
+   (پایین‌تر، سمت native) قبل از ساختنِ نوتیف همین پرچم رو چک می‌کنه؛ اگه true بود
+   (کاربر همون لحظه داره پیام رو زنده تو چت می‌بینه)، اصلاً نوتیف نمی‌سازه.
+   MutationObserver رو کلاس body (نه صدا زدن دستی تو هر جایی که chat-fullscreen عوض
+   می‌شه) عمداً انتخاب شده تا هر سه جای فعلیِ toggle این کلاس، و هر جای جدیدی که تو
+   آینده اضافه بشه، بدون نیاز به یادآوری دستی خودکار پوشش داده بشن. */
+let lastChatVisibleSynced = null;
+function syncChatVisibleToNativeIfChanged(){
+  const plugin = authBridgePlugin();
+  if(!plugin) return;
+  const visible = document.visibilityState === 'visible' && document.body.classList.contains('chat-fullscreen');
+  if(visible === lastChatVisibleSynced) return;
+  lastChatVisibleSynced = visible;
+  try{ plugin.setChatVisible({ visible }).catch(()=>{}); }catch(e){}
+}
+new MutationObserver(syncChatVisibleToNativeIfChanged).observe(document.body, { attributes:true, attributeFilter:['class'] });
+document.addEventListener('visibilitychange', syncChatVisibleToNativeIfChanged);
 
 /* ================= Side menu (chat + settings) ================= */
 function closeSideMenu(){ document.getElementById('sideMenuOverlay').classList.remove('show'); }
@@ -11483,10 +11575,16 @@ if (typeof window !== 'undefined') {
           }
           dblRenderPlayScreen(); // STAGE 3، نیمه‌ی دوم — خودش تصمیم می‌گیره waiting/playing کدوم دیده بشه
         } else {
-          if(form) form.style.display = 'none';
+          // باگ قبلی: اینجا همیشه form.style.display='none' ست می‌شد، یعنی هر بار این تابع
+          // دوباره اجرا می‌شد (مثلاً با broadcastِ لابی از یه بازیکنِ دیگه که هیچ ربطی به
+          // خودِ من نداره) فرمِ «ساخت میز» که کاربر همین الان با دکمه‌ی dblCreateRoomBtn باز
+          // کرده بود رو دوباره می‌بست — چون این broadcast هر چند ثانیه ممکنه برسه، فرم عملاً
+          // هیچ‌وقت باز نمی‌موند. دقیقاً هم‌الگو با efRenderLobby: به‌جای بستنِ اجباری، وضعیتِ
+          // فعلیِ فرم رو می‌خونیم و browse رو بر اساسِ همون تنظیم می‌کنیم.
           myCard.style.display = 'none';
-          browse.style.display = 'block';
-          dblRenderOpenRoomsList();
+          const formOpen = !!(form && form.style.display === 'block');
+          browse.style.display = formOpen ? 'none' : 'block';
+          if(!formOpen) dblRenderOpenRoomsList();
         }
       }catch(e){ console.warn('dblRenderLobby failed', e); }
     }
@@ -14949,7 +15047,7 @@ function chatConfigured(){
    actually hosted (e.g. a public Supabase Storage bucket, a GitHub release
    asset, or your own domain) — once it's live on Myket you can just swap
    this to open the Myket page instead. */
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '2.1';
 function cmpVersions(a, b){
   const pa = String(a).split('.').map(n=>parseInt(n,10)||0);
   const pb = String(b).split('.').map(n=>parseInt(n,10)||0);
@@ -15059,6 +15157,16 @@ function initChatAuth(){
   }
   try{
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    try{
+      if (window.__debugLog) {
+        sb.auth.onAuthStateChange(function(event, session){
+          var detail = session
+            ? ('user=' + (session.user && session.user.email) + ' | expires_at=' + session.expires_at)
+            : 'بدون سشن';
+          window.__debugLog('plugin', 'supabase.auth', 'رویداد auth: ' + event, detail);
+        });
+      }
+    }catch(e){}
     applyRememberedAuthToLoginForms();
     watchLifetimeCapacity();
     // قبل از هرگونه درخواستِ شبکه‌ای، هم‌زمان و فوری چک می‌کنیم: اگه یه سشنِ ذخیره‌شده رو
@@ -15398,6 +15506,11 @@ async function initPushNotifications(){
     plugin.addListener('pushNotificationActionPerformed', ()=>{
       try{ enterSubPage('chat'); }catch(e){}
     });
+    // نکته: دیگه اینجا لیسنر pushNotificationReceived نمی‌ذاریم — چون سرویسِ نیتیوِ خودِ
+    // این پلاگین (که این ایونت رو صدا می‌زنه) تو build.yml عمداً از مانیفست حذف و با
+    // ChatReplyMessagingService سفارشی جایگزین شده؛ یعنی این ایونت اصلاً fire نمی‌شه.
+    // جلوگیری از نوتیفِ مزاحم حین بودن تو تب چت الان سمتِ native انجام می‌شه (پرچمِ
+    // setChatVisible رو AuthBridge — بخش «اطلاع‌رسانی الان تو تب چتم» بالاتر همین فایل).
   }catch(err){ console.error('initPushNotifications error', err); }
 }
 async function savePushToken(fcmToken){
@@ -16956,7 +17069,7 @@ function chatMsgContentParts(m){
   if(isReport) reportTag = `<div class="cm-report-tag">${ci('clipboard')} گزارش روزانه</div>`;
   else if(isGroupStreak) reportTag = `<div class="cm-report-tag">${ci('fire')} زنجیره‌ی جمعی گروه</div>`;
   else if(isGroupWeekly) reportTag = `<div class="cm-report-tag">${ci('calendar')} کارت هفتگی گروه</div>`;
-  const textHtml = isReport ? formatReportBody(rawContent) : ((isGroupStreak||isGroupWeekly) ? escapeHtml(rawContent).replace(/\n/g, '<br>') : escapeHtml(rawContent));
+  const textHtml = isReport ? formatReportBody(rawContent) : ((isGroupStreak||isGroupWeekly) ? linkifyChatText(rawContent).replace(/\n/g, '<br>') : linkifyChatText(rawContent));
   const replyQuoteHtml = replyInfo ? `<div class="cm-reply-quote" data-reply-target-id="${escapeHtml(replyInfo.replyId)}">
       <div class="crq-bar"></div>
       <div class="crq-body"><div class="crq-name">${escapeHtml(displayName(replyInfo.replyUsername))}</div><div class="crq-text">${escapeHtml(replyInfo.replyText)}</div></div>
@@ -16976,9 +17089,15 @@ function chatMsgContentParts(m){
   const saveBtnHtml = (isGifLike && m.media_path)
     ? `<button type="button" class="cm-gif-save-btn" data-save-url="${escapeHtml(mediaSrc)}" data-save-type="${escapeHtml(m.media_type)}" title="ذخیره در گیف‌های من">${ci('star')}</button>`
     : '';
+  // Cover thumbnail (video editor stage 3) — same local-vs-permanent pattern as mediaSrc above:
+  // media_thumb_localUrl is the optimistic blob: preview, media_thumb_path is the permanent one.
+  // Only relevant to plain 'video' messages — 'gifvideo' autoplays muted/looping immediately, so
+  // there's never a static poster frame to actually see.
+  const posterSrc = m.media_thumb_localUrl || (m.media_thumb_path ? chatMediaPublicUrl(m.media_thumb_path) : '');
+  const posterAttr = posterSrc ? ` poster="${escapeHtml(posterSrc)}"` : '';
   const mediaHtml = hasMedia
     ? (m.media_type === 'video'
-        ? `<div class="cm-media"><video src="${escapeHtml(mediaSrc)}" controls playsinline preload="metadata" onerror="${mediaExpiredJs}"></video></div>`
+        ? `<div class="cm-media"><video src="${escapeHtml(mediaSrc)}"${posterAttr} controls playsinline preload="metadata" onerror="${mediaExpiredJs}"></video></div>`
         : m.media_type === 'gifvideo'
         ? `<div class="cm-media cm-gifvideo"><video src="${escapeHtml(mediaSrc)}" autoplay loop muted playsinline preload="auto" onerror="${mediaExpiredJs}"></video><span class="cm-gif-badge">GIF</span>${saveBtnHtml}</div>`
         : m.media_type === 'voice'
@@ -17944,7 +18063,7 @@ function sosThreadMsgHtml(m, grouped){
   const head = grouped ? '' : `<div class="cm-head"><div class="cm-name">${own?'تو':escapeHtml(m.username||'کاربر')}</div></div>`;
   return `<div class="chat-msg${own?' own':''}${grouped?' grouped':''}" data-msg-id="${m.id}">
     ${head}
-    <div class="cm-text">${escapeHtml(m.content)}</div>
+    <div class="cm-text">${linkifyChatText(m.content)}</div>
     <div class="cm-bottom-row"><span class="cm-time">${time}</span></div>
   </div>`;
 }
@@ -18097,6 +18216,10 @@ document.getElementById('chatMembersBackBtn').addEventListener('click', closeCha
    messages instead bump a small unread counter on a floating arrow button until they tap it
    (or scroll back down themselves) to jump to the newest message. */
 let chatUnseenCount = 0;
+// Newest message's created_at currently loaded in #chatMessages — kept up to date from both
+// full renders and live inserts, so that "the user scrolled/tapped down to the bottom" (see
+// updateChatScrollDownBtn) can stamp last-read all the way to it without re-querying anything.
+let chatLatestMsgCreatedAt = null;
 function isChatListNearBottom(){
   const wrap = document.getElementById('chatMessages');
   if(!wrap) return true;
@@ -18118,6 +18241,7 @@ function updateChatScrollDownBtn(){
   if(isChatListNearBottom()){
     btn.classList.remove('show');
     if(chatUnseenCount !== 0){ chatUnseenCount = 0; updateChatScrollDownBadge(); }
+    if(chatLatestMsgCreatedAt) setChatLastReadAt(chatLatestMsgCreatedAt);
   } else {
     btn.classList.add('show');
   }
@@ -18258,16 +18382,63 @@ function closeChatSearchBar(){
   if(nextBtn) nextBtn.addEventListener('click', ()=> chatSearchGoTo(chatSearchActiveIdx + 1));
 })();
 
+/* ---------------- Telegram-style "unread messages" divider ----------------
+   We keep a per-user "last read" timestamp in localStorage (cross-tab-open, not cross-
+   device — same tradeoff the rest of this chat's client-only state already makes). On
+   every full render we compare against it to find the first message the user hasn't
+   seen yet, drop a divider right above it, and land the initial scroll there instead of
+   always jumping to the bottom. Right after rendering we stamp "read" up through the
+   newest loaded message, so the divider only shows once — reopening the tab later won't
+   re-flag the same messages, exactly like Telegram's behavior. */
+function chatLastReadKey(){
+  return publicChatUser ? ('dl_chat_last_read_' + publicChatUser.id) : null;
+}
+function getChatLastReadAt(){
+  const key = chatLastReadKey();
+  if(!key) return null;
+  try{ return localStorage.getItem(key); }catch(e){ return null; }
+}
+function setChatLastReadAt(iso){
+  const key = chatLastReadKey();
+  if(!key || !iso) return;
+  try{
+    const prev = localStorage.getItem(key);
+    if(!prev || iso > prev) localStorage.setItem(key, iso);
+  }catch(e){}
+}
+function chatMarkAllRead(visible){
+  if(!visible || !visible.length) return;
+  setChatLastReadAt(visible[visible.length - 1].created_at);
+}
+function chatUnreadDividerHtml(count){
+  const label = count === 1 ? 'یک پیام خوانده‌نشده' : (toFa(count) + ' پیام خوانده‌نشده');
+  return `<div class="cm-unread-divider" data-count="${count}"><span class="cmud-line"></span><span class="cmud-label">${label}</span><span class="cmud-line"></span></div>`;
+}
 function renderPublicChatMessages(rows){
   const wrap = document.getElementById('chatMessages');
   const blockedIds = new Set(getBlockedChatUsers().map(u=>u.id));
   const visible = (rows||[]).filter(m=> !blockedIds.has(m.user_id));
   updateChatPresenceIndicator(rows);
-  if(visible.length===0){ wrap.innerHTML = '<div class="chat-empty-msg">هنوز پیامی نیست، اولین نفر باش!</div>'; lastChatMsgUserId = null; chatUnseenCount = 0; updateChatScrollDownBadge(); updateChatScrollDownBtn(); return; }
+  if(visible.length===0){ wrap.innerHTML = '<div class="chat-empty-msg">هنوز پیامی نیست، اولین نفر باش!</div>'; lastChatMsgUserId = null; chatUnseenCount = 0; chatLatestMsgCreatedAt = null; updateChatScrollDownBadge(); updateChatScrollDownBtn(); return; }
+  // اگه هیچ‌وقت این کاربر چت رو باز نکرده (اولین بازدید)، مبنایی برای "نخونده" وجود نداره —
+  // بجای اینکه همه‌ی ۱۵۰ پیامِ تاریخچه رو یهو "نخونده" نشون بدیم، فقط از همینجا به بعد رو
+  // پیگیری می‌کنیم (پایین هم مثل قبل می‌ره، دقیقاً رفتار فعلی).
+  const lastReadAt = getChatLastReadAt();
+  const firstUnreadIdx = lastReadAt
+    ? visible.findIndex(m => m.created_at > lastReadAt && !(publicChatUser && m.user_id === publicChatUser.id))
+    : -1;
+  const unreadDividerHtml = firstUnreadIdx >= 0 ? chatUnreadDividerHtml(visible.length - firstUnreadIdx) : '';
   let html = '';
   let prevUserId = null;
   let i = 0;
   while(i < visible.length){
+    if(i === firstUnreadIdx){
+      // خط جداکننده رو دقیقاً همینجا می‌ذاریم و گروه‌بندیِ آواتار رو از نو شروع می‌کنیم —
+      // حتی اگه فرستنده‌ی پیامِ بعد از خط، همونیه که قبل از خط هم پیام داده، تلگرام هم
+      // بعد از این خط همیشه هدر/آواتار رو دوباره نشون می‌ده، نه چسبیده به پیام‌های قبلی.
+      html += unreadDividerHtml;
+      prevUserId = null;
+    }
     const m = visible[i];
     const grouped = prevUserId === m.user_id;
     if(!chatMsgHasAvatar(m)){
@@ -18278,10 +18449,13 @@ function renderPublicChatMessages(rows){
       i++;
       continue;
     }
-    // Collect the whole consecutive run from this sender into one avatar group.
+    // Collect the whole consecutive run from this sender into one avatar group — but stop
+    // early (without swallowing the boundary message) if the unread divider needs to land
+    // in the middle of this run, so the divider doesn't end up trapped inside one group's
+    // flex row.
     let inner = '';
     let j = i;
-    while(j < visible.length && visible[j].user_id === m.user_id){
+    while(j < visible.length && visible[j].user_id === m.user_id && !(j > i && j === firstUnreadIdx)){
       inner += publicChatMsgHtml(visible[j], j > i);
       j++;
     }
@@ -18298,10 +18472,25 @@ function renderPublicChatMessages(rows){
   // های‌لایت‌ها با پیام‌هایِ تازه‌رندرشده هماهنگ بمونن.
   const chatSearchBarEl = document.getElementById('chatSearchBar');
   if(chatSearchBarEl && chatSearchBarEl.classList.contains('show')) chatSearchRun();
-  wrap.scrollTop = wrap.scrollHeight;
+  if(firstUnreadIdx >= 0){
+    // درست مثل تلگرام: به‌جای رفتن به ته چت، دقیقاً روی خطِ "پیام‌های نخونده" می‌ایستیم تا
+    // کاربر از همونجایی که مونده بود ادامه بده. rAF چون باید بعد از اینکه innerHTML واقعاً
+    // توی DOM چیده شد اجرا بشه، وگرنه ارتفاعِ لازم برای اسکرول هنوز حساب نشده.
+    requestAnimationFrame(()=>{
+      const dividerEl = wrap.querySelector('.cm-unread-divider');
+      if(dividerEl) dividerEl.scrollIntoView({block:'center'});
+      else wrap.scrollTop = wrap.scrollHeight;
+    });
+  } else {
+    wrap.scrollTop = wrap.scrollHeight;
+  }
   chatUnseenCount = 0;
+  chatLatestMsgCreatedAt = visible[visible.length - 1].created_at;
   updateChatScrollDownBadge();
   updateChatScrollDownBtn();
+  // همین که چت باز و رندر شد، تا جدیدترین پیامِ لود شده رو "خونده‌شده" علامت می‌زنیم —
+  // برای همین دفعه‌ی بعد که این تب باز بشه، همین دسته دوباره به‌عنوانِ نخونده نشون داده نمی‌شه.
+  chatMarkAllRead(visible);
   // Real profile photos load in a second pass (like reactions below) so the first paint
   // isn't blocked on it — avatars just upgrade in place from initials once resolved.
   const avatarUserIds = visible.filter(chatMsgHasAvatar).map(m=>m.user_id);
@@ -18705,14 +18894,20 @@ async function loadPublicChatMessages(){
           const isOwnMsg = publicChatUser && payload.new.user_id === publicChatUser.id;
           if(wrap.querySelector('.chat-empty-msg')) wrap.innerHTML = '';
           appendPublicChatMessage(payload.new);
+          chatLatestMsgCreatedAt = payload.new.created_at;
           applyChatUserFilter();
           applyChatGenderFilter();
           if(isOwnMsg || wasNearBottom){
             // Already at the bottom (or it's our own message going out): keep the classic
-            // auto-scroll feel, exactly like before.
+            // auto-scroll feel, exactly like before. Since it just landed in front of the
+            // user's eyes, count it as read right away — no need to wait for the next tab
+            // open before the cursor catches up to it.
             scrollChatToBottom(false);
+            setChatLastReadAt(payload.new.created_at);
           } else {
-            // User is reading up in the history — don't yank them down; just count it.
+            // User is reading up in the history — don't yank them down, don't mark it read
+            // either; it'll show up under the unread divider next time they scroll down or
+            // reopen this tab, exactly like the ones already counted there.
             chatUnseenCount++;
             updateChatScrollDownBadge();
             updateChatScrollDownBtn();
@@ -19307,11 +19502,24 @@ if(cmActionMenuBackdrop){
 // mode: only the app owner can send regular messages, everyone else can only
 // send their daily task report. Outside that window it's normal chat for
 // everyone and the report button is fully disabled.
+// Exception (from 22:00 onward): anyone who has already sent today's report
+// gets normal chat back too — reportSentDates[todayKey()] is the same flag
+// sendTaskReport() sets when the report goes through.
 const REPORT_MODE_START_HOUR = 20; // 8pm
 const REPORT_MODE_END_HOUR = 24;   // midnight
+const CHAT_REOPEN_AFTER_REPORT_HOUR = 22; // 10pm
 function isReportModeActive(){
   const h = new Date().getHours();
   return h >= REPORT_MODE_START_HOUR && h < REPORT_MODE_END_HOUR;
+}
+function hasSentReportToday(){
+  return !!(storeData.reportSentDates && storeData.reportSentDates[todayKey()]);
+}
+// True only during the late slice of report mode (22:00–24:00) for a user
+// who already reported today — this is what lifts the chat restriction early.
+function isChatReopenedForReport(){
+  const h = new Date().getHours();
+  return h >= CHAT_REOPEN_AFTER_REPORT_HOUR && h < REPORT_MODE_END_HOUR && hasSentReportToday();
 }
 function isChatLockedForMe(){
   // Owner is always exempt — same convention as the report-mode window above
@@ -19328,10 +19536,11 @@ function updateChatModeUI(){
   const sendBtn = document.getElementById('chatSendBtn');
   const attachBtn = document.getElementById('chatAttachBtn');
   const active = isReportModeActive();
+  const reopenedForReport = isChatReopenedForReport();
   const muted = isCurrentlyMuted(); // sees the whole chat fine — only the composer locks
   const locked = isChatLockedForMe();
-  if(panel) panel.classList.toggle('report-mode-active', active);
-  const reportRestricted = active && !isAppOwner;
+  if(panel) panel.classList.toggle('report-mode-active', active && !reopenedForReport);
+  const reportRestricted = active && !isAppOwner && !reopenedForReport;
   const restricted = reportRestricted || muted || locked;
   if(input){
     input.disabled = restricted;
@@ -19342,10 +19551,13 @@ function updateChatModeUI(){
   if(sendBtn) sendBtn.disabled = restricted;
   if(attachBtn) attachBtn.disabled = muted || locked;
   if(banner){
-    if(active){
+    if(active && !reopenedForReport){
       banner.textContent = isAppOwner
         ? '⏰ حالت گزارش کار فعاله — فقط تو می‌تونی همچنان پیام عادی بفرستی، بقیه فقط گزارش کار می‌فرستن.'
         : '⏰ از الان تا نیمه‌شب فقط می‌تونی گزارش تسک‌های امروزتو بفرستی؛ ارسال پیام عادی موقتاً بسته‌ست.';
+      banner.classList.add('show');
+    } else if(active && reopenedForReport){
+      banner.textContent = '✅ گزارش امروزتو فرستادی، پس می‌تونی از الان تا نیمه‌شب هم چت عادی کنی.';
       banner.classList.add('show');
     } else {
       banner.classList.remove('show');
@@ -19475,7 +19687,7 @@ function updateChatCooldownUI(){
   const input = document.getElementById('chatInput');
   const sendBtn = document.getElementById('chatSendBtn');
   if(!input || !sendBtn) return;
-  if(isCurrentlyMuted() || isChatLockedForMe() || (isReportModeActive() && !isAppOwner)) return; // another lock already owns the composer
+  if(isCurrentlyMuted() || isChatLockedForMe() || (isReportModeActive() && !isAppOwner && !isChatReopenedForReport())) return; // another lock already owns the composer
   const secondsLeft = chatCooldownSecondsLeft();
   if(secondsLeft > 0){
     input.disabled = true;
@@ -19793,7 +20005,7 @@ function chatMediaPublicUrl(path){
   if(!path || !sb) return '';
   try{ return sb.storage.from(CHAT_MEDIA_BUCKET).getPublicUrl(path).data.publicUrl; }catch(err){ return ''; }
 }
-const FREE_CHAT_DAILY_LIMIT = 10;
+const FREE_CHAT_DAILY_LIMIT = 50;
 function getFreeChatMsgCountToday(){
   const rec = storeData.chatDailyCount;
   if(!rec || rec.date !== todayKeyLocal()) return 0;
@@ -19832,7 +20044,7 @@ async function sendPublicChatMessage(){
     openPremiumOverlay();
     return;
   }
-  if(isReportModeActive() && !isAppOwner){
+  if(isReportModeActive() && !isAppOwner && !isChatReopenedForReport()){
     showToast('الان فقط ارسال گزارش کار امکان‌پذیره 📋', 'error');
     updateChatModeUI();
     return;
@@ -19923,7 +20135,7 @@ document.getElementById('chatInput').addEventListener('keydown', e=>{
    the real upload itself takes a beat) and gets swapped for the permanent Storage URL
    once the upload + insert both succeed. Same suspension/report-mode/daily-limit rules
    as a normal text message apply, since a media message still counts as a chat message. */
-async function sendPublicChatMedia(file){
+async function sendPublicChatMedia(file, thumbBlob){
   if(!file || !publicChatUser) return;
   if(isCurrentlySuspended()){
     showToast('دسترسیت به چت عمومی موقتاً بسته‌ست', 'error');
@@ -19950,7 +20162,7 @@ async function sendPublicChatMedia(file){
     openPremiumOverlay();
     return;
   }
-  if(isReportModeActive() && !isAppOwner){
+  if(isReportModeActive() && !isAppOwner && !isChatReopenedForReport()){
     showToast('الان فقط ارسال گزارش کار امکان‌پذیره 📋', 'error');
     updateChatModeUI();
     return;
@@ -19975,9 +20187,13 @@ async function sendPublicChatMedia(file){
     ? ((await detectVideoHasAudio(file)) ? 'video' : 'gifvideo')
     : (file.type === 'image/gif' ? 'gif' : 'image');
   const localUrl = URL.createObjectURL(file);
+  // Only video messages carry a cover thumbnail (see veCaptureCoverBlob() in the video editor
+  // module) — its object URL is created up front so the optimistic bubble can show it
+  // immediately, same as localUrl above.
+  const thumbLocalUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : '';
 
   const tempId = 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-  const tempMsg = { id: tempId, user_id: publicChatUser.id, username: publicChatUsername, content: '', streak: streakVal, premium: isPremiumNow, created_at: new Date().toISOString(), is_owner: isAppOwner, media_localUrl: localUrl, media_type: mediaType };
+  const tempMsg = { id: tempId, user_id: publicChatUser.id, username: publicChatUsername, content: '', streak: streakVal, premium: isPremiumNow, created_at: new Date().toISOString(), is_owner: isAppOwner, media_localUrl: localUrl, media_type: mediaType, media_thumb_localUrl: thumbLocalUrl };
   const wrap = document.getElementById('chatMessages');
   if(wrap.querySelector('.chat-empty-msg')) wrap.innerHTML = '';
   const grouped = lastChatMsgUserId === publicChatUser.id;
@@ -19995,7 +20211,27 @@ async function sendPublicChatMedia(file){
     const { error: upErr } = await sb.storage.from(CHAT_MEDIA_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
     if(upErr) throw upErr;
 
-    const { data, error } = await sb.from('messages').insert({ user_id: publicChatUser.id, username: publicChatUsername, content: '', streak: streakVal, premium: isPremiumNow, media_path: path, media_type: mediaType }).select().single();
+    // The cover thumbnail (video editor stage 3) uploads as its own small JPEG object next to
+    // the video. A failed thumbnail upload shouldn't block sending the actual video — worst
+    // case the message still goes out, just without a custom poster frame.
+    let thumbPath = null;
+    if(thumbBlob){
+      const thumbPathCandidate = `${publicChatUser.id}/${Date.now()}-${Math.random().toString(36).slice(2)}-thumb.jpg`;
+      const { error: thumbUpErr } = await sb.storage.from(CHAT_MEDIA_BUCKET).upload(thumbPathCandidate, thumbBlob, { contentType: 'image/jpeg', upsert: false });
+      if(!thumbUpErr) thumbPath = thumbPathCandidate;
+      else console.error('Chat media thumbnail upload error', thumbUpErr);
+    }
+
+    const insertPayload = { user_id: publicChatUser.id, username: publicChatUsername, content: '', streak: streakVal, premium: isPremiumNow, media_path: path, media_type: mediaType };
+    if(thumbPath) insertPayload.media_thumb_path = thumbPath;
+    let { data, error } = await sb.from('messages').insert(insertPayload).select().single();
+    if(error && thumbPath && /media_thumb_path/i.test(error.message || '')){
+      // Schema doesn't have the thumbnail column yet — retry once without it rather than losing
+      // the whole message over a nice-to-have poster frame. (Run chat-media-supabase-schema.sql
+      // with a media_thumb_path text column added to pick this up going forward.)
+      delete insertPayload.media_thumb_path;
+      ({ data, error } = await sb.from('messages').insert(insertPayload).select().single());
+    }
     if(error && /media_path|media_type/i.test(error.message || '')){
       // The migration hasn't been run on this Supabase project yet — the file uploaded
       // fine but there's no column to record it against. Surface this clearly instead
@@ -20007,7 +20243,9 @@ async function sendPublicChatMedia(file){
     if(pendingEl && data){
       const mediaEl = pendingEl.querySelector('.cm-media img, .cm-media video');
       if(mediaEl) mediaEl.src = chatMediaPublicUrl(path);
+      if(mediaEl && mediaEl.tagName === 'VIDEO' && thumbPath) mediaEl.poster = chatMediaPublicUrl(thumbPath);
       URL.revokeObjectURL(localUrl);
+      if(thumbLocalUrl) URL.revokeObjectURL(thumbLocalUrl);
       pendingEl.dataset.msgId = data.id;
       pendingEl.classList.remove('cm-pending');
     }
@@ -20026,6 +20264,7 @@ async function sendPublicChatMedia(file){
     showToast(`ارسال مدیا ناموفق بود: ${translateTechError(err && err.message)}`, 'error');
     if(pendingEl) pendingEl.remove();
     URL.revokeObjectURL(localUrl);
+    if(thumbLocalUrl) URL.revokeObjectURL(thumbLocalUrl);
     if(!wrap.querySelector('.chat-msg')) wrap.innerHTML = '<div class="chat-empty-msg">هنوز پیامی نیست، اولین نفر باش!</div>';
   }
 }
@@ -20074,7 +20313,1311 @@ document.getElementById('chatAttachMenu').addEventListener('click', (e)=>{
 document.getElementById('chatMediaInput').addEventListener('change', (e)=>{
   const file = e.target.files && e.target.files[0];
   e.target.value = ''; // reset so picking the exact same file again still fires 'change'
-  if(file) sendPublicChatMedia(file);
+  if(!file) return;
+  if(peShouldEdit(file)) peOpen(file);
+  else if(veShouldEdit(file)) veOpen(file);
+  else {
+    // Stage 5 (edge case: مرورگرهای بدون پشتیبانی) — a real video that veShouldEdit() rejected
+    // (captureStream/MediaRecorder missing) still gets sent, same as before, but now says why
+    // instead of silently skipping the editor in a way that could look like the tap did nothing.
+    // Animated GIFs take this same branch and stay silent — they were never going to open the
+    // video editor in the first place, so there's nothing to explain.
+    if(isVideoFile(file)) showToast('ویرایشگر ویدیو تو این مرورگر پشتیبانی نمی‌شه؛ ویدیو بدون تغییر ارسال شد', 'error');
+    sendPublicChatMedia(file);
+  }
+});
+
+/* ---------------- Pre-send photo editor (crop + adjust) ----------------
+   Opens right after picking a static image (PNG/JPEG/WebP) from the attach menu above, before
+   it ever reaches sendPublicChatMedia(). GIFs and videos skip this entirely, since editing an
+   animated GIF frame-by-frame or a video is a much heavier problem than editing one static photo
+   — they keep going straight through the old path unchanged.
+   Three tools: کراپ (crop, with aspect-ratio presets + 90° rotate), تنظیمات (brightness/
+   contrast/saturation), and نقاشی (freehand draw: color swatches + custom picker, brush size,
+   undo, clear-all).
+   Everything renders through <canvas> at a capped "working resolution" (long side ≤1440px)
+   regardless of the original photo's size, both so live slider previews stay smooth on a phone
+   and so the final upload isn't needlessly huge — chat images never needed camera-native
+   resolution anyway. Once the user hits the checkmark, the edited result is exported to a Blob
+   and handed to the existing sendPublicChatMedia() — every rule that already applies there
+   (mute/lock/report-mode/daily-limit/size-limit) still applies unchanged, since as far as that
+   function's concerned it's just a normal image file. */
+const PE_MAX_WORK_DIM = 1440;
+const PE_ASPECTS = { 'free':null, '1:1':[1,1], '4:5':[4,5], '3:4':[3,4], '16:9':[16,9] };
+const PE_MIN_CROP_PX = 44; // smallest allowed crop box, in displayed CSS px
+let peState = null;
+let peDrag = null; // active pointer-drag info while resizing/moving the crop rect
+const PE_DRAW_COLORS_DEFAULT = '#ffffff';
+const PE_DRAW_HISTORY_MAX = 15;
+let peDrawStroke = null; // {ctx, points, pointerId} while a finger/mouse is actively drawing a stroke
+let peDrawHistory = []; // undo stack of ImageData snapshots, canvas-pixel space
+let peSending = false; // true while peConfirmSend()'s export/upload is in flight
+
+function peShouldEdit(file){
+  // Only static, non-animated raster images go through the editor — an animated image/gif
+  // would lose its animation the moment it touches a single <canvas> frame, and video needs a
+  // completely different (frame-sequence) pipeline, so both are explicitly excluded here.
+  return !!(file && (file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/webp'));
+}
+function peClamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+function peFilterString(){
+  return `brightness(${peState.brightness}%) contrast(${peState.contrast}%) saturate(${peState.saturate}%)`;
+}
+function peLoadImage(file){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    img.onload = ()=>resolve(img);
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function peOpen(file){
+  let img;
+  try{ img = await peLoadImage(file); }
+  catch(e){ sendPublicChatMedia(file); return; } // couldn't decode as an image — just send it as before
+
+  // Pre-scale once onto an offscreen canvas at the capped working resolution, so every later
+  // redraw (rotate, slider drag) works off a small canvas instead of a multi-megapixel photo.
+  const scale = Math.min(1, PE_MAX_WORK_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+  const workW = Math.max(1, Math.round(img.naturalWidth * scale));
+  const workH = Math.max(1, Math.round(img.naturalHeight * scale));
+  const workCanvas = document.createElement('canvas');
+  workCanvas.width = workW; workCanvas.height = workH;
+  workCanvas.getContext('2d').drawImage(img, 0, 0, workW, workH);
+  URL.revokeObjectURL(img.src);
+
+  peState = {
+    file, originalType: file.type,
+    workCanvas, workW, workH,
+    rotation: 0,
+    brightness: 100, contrast: 100, saturate: 100,
+    aspect: 'free',
+    crop: {x:0, y:0, w:1, h:1},
+    activeTab: 'crop',
+    drawColor: PE_DRAW_COLORS_DEFAULT,
+    brushSize: 8,
+  };
+
+  document.getElementById('peBrightness').value = 100;
+  document.getElementById('peContrast').value = 100;
+  document.getElementById('peSaturate').value = 100;
+  document.querySelectorAll('.pe-aspect-btn').forEach(b=>b.classList.toggle('active', b.dataset.aspect==='free'));
+  document.getElementById('peBrushSize').value = 8;
+  document.getElementById('peDrawColorPicker').value = PE_DRAW_COLORS_DEFAULT;
+  document.querySelectorAll('.pe-draw-swatch').forEach(b=>b.classList.toggle('active', b.dataset.color===PE_DRAW_COLORS_DEFAULT));
+  peUpdateBrushPreview();
+  peSwitchTab('crop');
+
+  document.getElementById('photoEditorOverlay').classList.add('show');
+  peRenderBase();
+  // peRenderBase() already resized peDrawCanvas to match this image via peSyncDrawCanvas(), but
+  // resizing alone only clears it when the pixel dimensions happen to differ from whatever was
+  // left over from a previous editing session — force a clean slate every time regardless.
+  peResetDrawLayer();
+}
+function peClose(){
+  document.getElementById('photoEditorOverlay').classList.remove('show');
+  peState = null;
+  peDrag = null;
+  peDrawStroke = null;
+  if(peRenderBaseRAF){ cancelAnimationFrame(peRenderBaseRAF); peRenderBaseRAF = null; }
+}
+function peCancel(){
+  // Guards against the Android hardware back button, which calls peCancel() directly — bypassing
+  // the disabled ✕ button below — and would otherwise let a tap/back-press during an in-flight
+  // send null out peState and hide the overlay while peConfirmSend() is still exporting, only for
+  // the photo to get sent a moment later anyway once that promise resolves.
+  if(peSending) return;
+  if(!peState){ peClose(); return; }
+  const c = peState.crop;
+  const edited = peState.rotation !== 0 || peState.brightness !== 100 || peState.contrast !== 100 ||
+    peState.saturate !== 100 || c.x !== 0 || c.y !== 0 || c.w !== 1 || c.h !== 1 || peDrawCanvasHasContent();
+  if(edited && !confirm('تغییراتی که دادی ذخیره نمی‌شه. مطمئنی می‌خوای بی‌خیالش شی؟')) return;
+  peClose();
+}
+function peSwitchTab(tab){
+  if(!peState) return;
+  peState.activeTab = tab;
+  document.querySelectorAll('.pe-tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  document.getElementById('peCropPanel').style.display = tab==='crop' ? 'flex' : 'none';
+  document.getElementById('peAdjustPanel').style.display = tab==='adjust' ? 'flex' : 'none';
+  document.getElementById('peDrawPanel').style.display = tab==='draw' ? 'flex' : 'none';
+  document.getElementById('peCropLayer').style.visibility = tab==='crop' ? 'visible' : 'hidden';
+  // The draw canvas sits on top of the image in every tab (so marks stay visible while cropping
+  // or adjusting), but only takes pointer input on its own tab — otherwise it'd swallow the crop
+  // handle drags happening right underneath it.
+  document.getElementById('peDrawCanvas').style.pointerEvents = tab==='draw' ? 'auto' : 'none';
+}
+
+/* ---- render the base (rotated + filtered) canvas, then refit + reposition the crop UI ---- */
+function peRenderBase(){
+  const canvas = document.getElementById('peBaseCanvas');
+  const ctx = canvas.getContext('2d');
+  const rot = peState.rotation;
+  const swapped = (rot === 90 || rot === 270);
+  const outW = swapped ? peState.workH : peState.workW;
+  const outH = swapped ? peState.workW : peState.workH;
+  canvas.width = outW; canvas.height = outH;
+  ctx.save();
+  ctx.filter = peFilterString();
+  ctx.translate(outW/2, outH/2);
+  ctx.rotate(rot * Math.PI/180);
+  ctx.drawImage(peState.workCanvas, -peState.workW/2, -peState.workH/2, peState.workW, peState.workH);
+  ctx.restore();
+  peFitCanvasToStage();
+  peRenderCropRect();
+  peSyncDrawCanvas(outW, outH);
+}
+let peRenderBaseRAF = null;
+/* Coalesces bursts of peRenderBase() calls into at most one per animation frame. Each full render
+   redraws the whole (up to 1440px) canvas with a CSS filter applied — cheap once, but a slider
+   drag or a rapid resize (e.g. mid orientation-change animation) can fire many 'input'/'resize'
+   events between two frames, and re-running the full redraw for every one of them is wasted work
+   a slower phone would visibly lag on. The final value is always still applied — this only drops
+   the redundant intermediate frames, never the last one. */
+function peRenderBaseThrottled(){
+  if(peRenderBaseRAF) return;
+  peRenderBaseRAF = requestAnimationFrame(()=>{
+    peRenderBaseRAF = null;
+    if(peState) peRenderBase();
+  });
+}
+function peFitCanvasToStage(){
+  const canvas = document.getElementById('peBaseCanvas');
+  const stage = document.getElementById('peStage');
+  const padding = 16;
+  const availW = Math.max(1, stage.clientWidth - padding*2);
+  const availH = Math.max(1, stage.clientHeight - padding*2);
+  const ratio = Math.min(availW / canvas.width, availH / canvas.height, 1);
+  canvas.style.width = Math.round(canvas.width * ratio) + 'px';
+  canvas.style.height = Math.round(canvas.height * ratio) + 'px';
+}
+
+/* ---- draw layer: a transparent canvas kept pixel-for-pixel the same size as peBaseCanvas, so
+   strokes live in the same coordinate space as the final rotated/filtered image and peExportBlob()
+   can just stamp it straight on top before cropping. Resizing (dc.width=/dc.height=) implicitly
+   clears a canvas's content, which is exactly what should happen when the underlying image
+   dimensions change (new photo, or a rotate) — but NOT on every brightness/contrast/saturate
+   tweak, which also calls peRenderBase() while the dimensions stay identical. Hence the size
+   check below instead of resizing unconditionally. ---- */
+function peSyncDrawCanvas(outW, outH){
+  const dc = document.getElementById('peDrawCanvas');
+  if(dc.width !== outW || dc.height !== outH){
+    dc.width = outW; dc.height = outH;
+    peDrawHistory = [];
+    peUpdateDrawUndoBtn();
+  }
+  peFitDrawCanvasToStage();
+}
+function peFitDrawCanvasToStage(){
+  const canvas = document.getElementById('peBaseCanvas');
+  const dc = document.getElementById('peDrawCanvas');
+  const stage = document.getElementById('peStage');
+  const cRect = canvas.getBoundingClientRect(), sRect = stage.getBoundingClientRect();
+  dc.style.left = (cRect.left - sRect.left) + 'px';
+  dc.style.top = (cRect.top - sRect.top) + 'px';
+  dc.style.width = cRect.width + 'px';
+  dc.style.height = cRect.height + 'px';
+}
+function peResetDrawLayer(){
+  const dc = document.getElementById('peDrawCanvas');
+  dc.getContext('2d').clearRect(0, 0, dc.width, dc.height);
+  peDrawHistory = [];
+  peUpdateDrawUndoBtn();
+}
+/* Authoritative "is there anything drawn" check — reads the canvas itself rather than trailing a
+   separate boolean flag, so it stays correct through undo/redo edge cases a flag would miss: e.g.
+   draw one dot then immediately undo it (flag would still say "edited"), or draw past the
+   PE_DRAW_HISTORY_MAX undo-stack cap (flag could go the other way and undercount real content
+   still baked onto the canvas). Only called from peCancel(), so the pixel scan cost is paid at
+   most once per editing session, not on every stroke. */
+function peDrawCanvasHasContent(){
+  const dc = document.getElementById('peDrawCanvas');
+  if(!dc.width || !dc.height) return false;
+  try{
+    const data = dc.getContext('2d').getImageData(0, 0, dc.width, dc.height).data;
+    for(let i = 3; i < data.length; i += 4){
+      if(data[i] !== 0) return true; // any non-transparent alpha byte means a mark is there
+    }
+  }catch(e){ /* tainted/zero-size canvas — treat as no content rather than block closing */ }
+  return false;
+}
+function peUpdateDrawUndoBtn(){
+  const btn = document.getElementById('peDrawUndoBtn');
+  if(btn) btn.disabled = peDrawHistory.length === 0;
+}
+function pePushDrawHistory(){
+  const dc = document.getElementById('peDrawCanvas');
+  try{
+    const snap = dc.getContext('2d').getImageData(0, 0, dc.width, dc.height);
+    peDrawHistory.push(snap);
+    if(peDrawHistory.length > PE_DRAW_HISTORY_MAX) peDrawHistory.shift();
+    peUpdateDrawUndoBtn();
+  }catch(e){ /* getImageData can throw on a zero-size canvas mid-transition — safe to skip */ }
+}
+function peDrawUndo(){
+  if(!peDrawHistory.length) return;
+  const dc = document.getElementById('peDrawCanvas');
+  const snap = peDrawHistory.pop();
+  dc.getContext('2d').putImageData(snap, 0, 0);
+  peUpdateDrawUndoBtn();
+}
+function peDrawClear(){
+  pePushDrawHistory();
+  const dc = document.getElementById('peDrawCanvas');
+  dc.getContext('2d').clearRect(0, 0, dc.width, dc.height);
+}
+function peCanvasPoint(e, canvas){
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+  return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+}
+function peDrawPointerDown(e){
+  if(!peState || peState.activeTab !== 'draw') return;
+  if(peDrawStroke) return; // a stroke from another finger is already in progress — ignore a second touch point
+  e.preventDefault();
+  const canvas = document.getElementById('peDrawCanvas');
+  canvas.setPointerCapture(e.pointerId);
+  pePushDrawHistory();
+  const ctx = canvas.getContext('2d');
+  const p = peCanvasPoint(e, canvas);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.strokeStyle = peState.drawColor;
+  ctx.fillStyle = peState.drawColor;
+  ctx.lineWidth = peState.brushSize;
+  // A bare tap (no drag at all) wouldn't leave any mark since a stroked path needs at least two
+  // points — fill an immediate dot at the brush's own size so a single tap still shows something.
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, peState.brushSize/2, 0, Math.PI*2);
+  ctx.fill();
+  peDrawStroke = { ctx, points: [p], pointerId: e.pointerId };
+}
+function peDrawPointerMove(e){
+  if(!peDrawStroke || e.pointerId !== peDrawStroke.pointerId) return; // ignore any other pointer
+  e.preventDefault();
+  const canvas = document.getElementById('peDrawCanvas');
+  const p = peCanvasPoint(e, canvas);
+  const pts = peDrawStroke.points;
+  pts.push(p);
+  const ctx = peDrawStroke.ctx;
+  // Curve each new segment through the midpoint of the last two points instead of stroking
+  // straight corner-to-corner lines — this is what makes a fast freehand line look like a single
+  // smooth stroke instead of a faceted zig-zag, especially noticeable at larger brush sizes.
+  const n = pts.length;
+  if(n < 3){
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    return;
+  }
+  const p0 = pts[n-3], p1 = pts[n-2], p2 = pts[n-1];
+  const mid1 = {x:(p0.x+p1.x)/2, y:(p0.y+p1.y)/2};
+  const mid2 = {x:(p1.x+p2.x)/2, y:(p1.y+p2.y)/2};
+  ctx.beginPath();
+  ctx.moveTo(mid1.x, mid1.y);
+  ctx.quadraticCurveTo(p1.x, p1.y, mid2.x, mid2.y);
+  ctx.stroke();
+}
+function peDrawPointerUp(e){ if(peDrawStroke && e.pointerId === peDrawStroke.pointerId) peDrawStroke = null; }
+function peUpdateBrushPreview(){
+  const el = document.getElementById('peBrushPreview');
+  if(!el || !peState) return;
+  const px = peClamp(peState.brushSize, 6, 34); // keep the swatch legible at both slider extremes
+  el.style.width = px + 'px';
+  el.style.height = px + 'px';
+  el.style.background = peState.drawColor;
+}
+
+/* ---- crop rect: stored as fractions (0..1) of the CURRENT base canvas, so rotate/refit don't
+   need any unit conversion beyond re-rendering the DOM box at the new pixel size. ---- */
+function peRenderCropRect(){
+  const canvas = document.getElementById('peBaseCanvas');
+  const layer = document.getElementById('peCropLayer');
+  const rectEl = document.getElementById('peCropRect');
+  const stage = document.getElementById('peStage');
+  const cRect = canvas.getBoundingClientRect(), sRect = stage.getBoundingClientRect();
+  const cw = cRect.width, ch = cRect.height;
+  layer.style.left = (cRect.left - sRect.left) + 'px';
+  layer.style.top = (cRect.top - sRect.top) + 'px';
+  layer.style.width = cw + 'px';
+  layer.style.height = ch + 'px';
+  const c = peState.crop;
+  rectEl.style.left = (c.x*cw) + 'px';
+  rectEl.style.top = (c.y*ch) + 'px';
+  rectEl.style.width = (c.w*cw) + 'px';
+  rectEl.style.height = (c.h*ch) + 'px';
+}
+function peApplyAspect(key){
+  if(!peState) return;
+  peState.aspect = key;
+  document.querySelectorAll('.pe-aspect-btn').forEach(b=>b.classList.toggle('active', b.dataset.aspect===key));
+  const ratioPair = PE_ASPECTS[key];
+  if(!ratioPair){ peRenderCropRect(); return; } // 'free' — leave the current crop selection as-is
+  const canvas = document.getElementById('peBaseCanvas');
+  const outW = canvas.width, outH = canvas.height;
+  const targetRatio = ratioPair[0]/ratioPair[1];
+  let w, h;
+  if(outW/outH > targetRatio){ h = outH; w = h*targetRatio; } else { w = outW; h = w/targetRatio; }
+  const x = (outW - w)/2, y = (outH - h)/2;
+  peState.crop = {x:x/outW, y:y/outH, w:w/outW, h:h/outH};
+  peRenderCropRect();
+}
+function peRotate(){
+  if(!peState) return;
+  peState.rotation = (peState.rotation + 90) % 360;
+  // Rotating swaps width/height, which makes the old crop selection meaningless — restart
+  // from a full-frame, unlocked-aspect selection rather than trying to remap it.
+  peState.crop = {x:0, y:0, w:1, h:1};
+  peState.aspect = 'free';
+  document.querySelectorAll('.pe-aspect-btn').forEach(b=>b.classList.toggle('active', b.dataset.aspect==='free'));
+  // Same reasoning applies to any drawn marks: they're pixel-anchored to the pre-rotation frame,
+  // so leaving them in place would float them at the wrong spot/orientation on the rotated image.
+  // peSyncDrawCanvas() (called from peRenderBase() below) only clears the canvas when its pixel
+  // size actually changes, which a square image wouldn't trigger — so clear explicitly here too.
+  peResetDrawLayer();
+  peRenderBase();
+}
+
+/* ---- crop rect drag/resize (Pointer Events — same code path for touch and mouse) ---- */
+function peCropPointerDown(e){
+  if(!peState || peDrag) return; // no session, or a drag from another finger is already active
+  const handle = e.target.closest('.pe-crop-handle');
+  const rectEl = document.getElementById('peCropRect');
+  if(!handle && e.target !== rectEl) return;
+  e.preventDefault();
+  const canvas = document.getElementById('peBaseCanvas');
+  const cRect = canvas.getBoundingClientRect();
+  peDrag = {
+    pointerId: e.pointerId,
+    mode: handle ? handle.dataset.h : 'move',
+    startX: e.clientX, startY: e.clientY,
+    startCrop: {...peState.crop}, cw: cRect.width, ch: cRect.height,
+    aspectLocked: !!PE_ASPECTS[peState.aspect],
+    ratio: PE_ASPECTS[peState.aspect] ? PE_ASPECTS[peState.aspect][0]/PE_ASPECTS[peState.aspect][1] : null,
+  };
+  (handle || rectEl).setPointerCapture(e.pointerId);
+}
+function peCropPointerMove(e){
+  if(!peDrag || e.pointerId !== peDrag.pointerId) return; // ignore any other pointer (e.g. a palm touch)
+  e.preventDefault();
+  const dx = (e.clientX - peDrag.startX) / peDrag.cw;
+  const dy = (e.clientY - peDrag.startY) / peDrag.ch;
+  let {x,y,w,h} = peDrag.startCrop;
+  const minW = PE_MIN_CROP_PX / peDrag.cw, minH = PE_MIN_CROP_PX / peDrag.ch;
+
+  if(peDrag.mode === 'move'){
+    x = peClamp(x + dx, 0, 1 - w);
+    y = peClamp(y + dy, 0, 1 - h);
+  } else {
+    // Resize from one corner; the opposite corner stays anchored in place.
+    let left = x, top = y, right = x+w, bottom = y+h;
+    if(peDrag.mode.includes('l')) left = peClamp(x + dx, 0, right - minW);
+    if(peDrag.mode.includes('r')) right = peClamp(x + w + dx, left + minW, 1);
+    if(peDrag.mode.includes('t')) top = peClamp(y + dy, 0, bottom - minH);
+    if(peDrag.mode.includes('b')) bottom = peClamp(y + h + dy, top + minH, 1);
+    if(peDrag.aspectLocked){
+      const wPx = (right-left)*peDrag.cw, hFrac = (wPx/peDrag.ratio)/peDrag.ch;
+      if(peDrag.mode.includes('t')) top = peClamp(bottom - hFrac, 0, bottom - minH);
+      else bottom = peClamp(top + hFrac, top + minH, 1);
+    }
+    x = left; y = top; w = right-left; h = bottom-top;
+  }
+  peState.crop = {x,y,w,h};
+  peRenderCropRect();
+}
+function peCropPointerUp(e){ if(peDrag && e.pointerId === peDrag.pointerId) peDrag = null; }
+
+/* ---- export: bake rotation + crop + adjustments into one final canvas → Blob ---- */
+function peExportBlob(){
+  return new Promise((resolve)=>{
+    const base = document.getElementById('peBaseCanvas');
+    const draw = document.getElementById('peDrawCanvas');
+    // Flatten the rotated/filtered base image and the drawn marks onto one canvas first — they're
+    // already the same pixel size (see peSyncDrawCanvas) — then crop out of that merged result.
+    const merged = document.createElement('canvas');
+    merged.width = base.width; merged.height = base.height;
+    const mctx = merged.getContext('2d');
+    mctx.drawImage(base, 0, 0);
+    if(draw.width === base.width && draw.height === base.height){
+      mctx.drawImage(draw, 0, 0);
+    }
+    const c = peState.crop;
+    const sx = Math.round(c.x * merged.width), sy = Math.round(c.y * merged.height);
+    const sw = Math.max(1, Math.round(c.w * merged.width)), sh = Math.max(1, Math.round(c.h * merged.height));
+    const out = document.createElement('canvas');
+    out.width = sw; out.height = sh;
+    out.getContext('2d').drawImage(merged, sx, sy, sw, sh, 0, 0, sw, sh);
+    const wantsPng = peState.originalType === 'image/png';
+    out.toBlob(blob=>resolve(blob), wantsPng ? 'image/png' : 'image/jpeg', wantsPng ? undefined : 0.9);
+  });
+}
+async function peConfirmSend(){
+  const btn = document.getElementById('peSendBtn');
+  const cancelBtn = document.getElementById('peCancelBtn');
+  const tabsEl = document.getElementById('peTabs');
+  const originalFile = peState.file;
+  // toBlob() below is genuinely async (noticeably so for a big PNG on a slow phone) — without
+  // locking these, a tap on ✕ mid-export would call peCancel()/peClose(), null out peState and
+  // hide the overlay, yet this function would still finish and send the photo a moment later as
+  // if nothing had been canceled. Lock the whole header until the export either lands or fails.
+  if(btn) btn.disabled = true;
+  if(cancelBtn) cancelBtn.disabled = true;
+  if(tabsEl) tabsEl.style.pointerEvents = 'none';
+  peSending = true;
+  try{
+    const blob = await peExportBlob();
+    if(!blob) throw new Error('توش کردن عکس ادیت‌شده به فایل ناموفق بود');
+    const ext = peState.originalType === 'image/png' ? 'png' : 'jpg';
+    const outFile = new File([blob], `edited-${Date.now()}.${ext}`, { type: blob.type });
+    peClose();
+    sendPublicChatMedia(outFile);
+  }catch(err){
+    console.error('Photo editor export error', err);
+    showToast('ادیت عکس ناموفق بود، عکس اصلی ارسال می‌شه', 'error');
+    peClose();
+    sendPublicChatMedia(originalFile);
+  }finally{
+    if(btn) btn.disabled = false;
+    if(cancelBtn) cancelBtn.disabled = false;
+    if(tabsEl) tabsEl.style.pointerEvents = '';
+    peSending = false;
+  }
+}
+
+document.getElementById('peCancelBtn').addEventListener('click', peCancel);
+document.getElementById('peSendBtn').addEventListener('click', peConfirmSend);
+document.getElementById('peTabs').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.pe-tab'); if(!btn) return;
+  peSwitchTab(btn.dataset.tab);
+});
+document.getElementById('peAspectRow').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.pe-aspect-btn'); if(!btn) return;
+  peApplyAspect(btn.dataset.aspect);
+});
+document.getElementById('peRotateBtn').addEventListener('click', peRotate);
+['peBrightness','peContrast','peSaturate'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', (e)=>{
+    if(!peState) return; // guards a stray event firing after the editor's already been closed
+    const key = id === 'peBrightness' ? 'brightness' : id === 'peContrast' ? 'contrast' : 'saturate';
+    peState[key] = Number(e.target.value);
+    peRenderBaseThrottled();
+  });
+});
+document.getElementById('peCropLayer').addEventListener('pointerdown', peCropPointerDown);
+window.addEventListener('pointermove', peCropPointerMove);
+window.addEventListener('pointerup', peCropPointerUp);
+window.addEventListener('resize', ()=>{ if(peState) peRenderBaseThrottled(); });
+
+document.getElementById('peDrawCanvas').addEventListener('pointerdown', peDrawPointerDown);
+window.addEventListener('pointermove', peDrawPointerMove);
+window.addEventListener('pointerup', peDrawPointerUp);
+document.getElementById('peDrawColors').addEventListener('click', (e)=>{
+  if(!peState) return;
+  const sw = e.target.closest('.pe-draw-swatch'); if(!sw) return;
+  peState.drawColor = sw.dataset.color;
+  document.querySelectorAll('.pe-draw-swatch').forEach(b=>b.classList.toggle('active', b===sw));
+  document.getElementById('peDrawColorPicker').value = sw.dataset.color;
+  peUpdateBrushPreview();
+});
+document.getElementById('peDrawColorPicker').addEventListener('input', (e)=>{
+  // The native OS color-picker dialog this opens can outlive the overlay (e.g. user backs out
+  // of the editor while it's still open) — peState may already be null by the time it fires.
+  if(!peState) return;
+  peState.drawColor = e.target.value;
+  document.querySelectorAll('.pe-draw-swatch').forEach(b=>b.classList.remove('active'));
+  peUpdateBrushPreview();
+});
+document.getElementById('peBrushSize').addEventListener('input', (e)=>{
+  if(!peState) return;
+  peState.brushSize = Number(e.target.value);
+  peUpdateBrushPreview();
+});
+document.getElementById('peDrawUndoBtn').addEventListener('click', peDrawUndo);
+document.getElementById('peDrawClearBtn').addEventListener('click', peDrawClear);
+
+/* ---------------- Pre-send video trim editor ----------------
+   Opens right after picking a real video (not an animated GIF — those keep going straight
+   through, same as before) from the attach menu, before it reaches sendPublicChatMedia().
+
+   Planned in six stages, same shape as the photo editor above:
+     ۱) برش — trim in/out points on a scrubber, with a sound-on preview of just that range
+        (implemented)
+     ۲) تنظیمات — brightness/contrast/saturation + mute-audio, baked in at export time
+        (implemented — see veFilterString()/veState.muteAudio, and the canvas-based re-record in
+        veExportTrimmedBlob() below, which is what actually bakes filters/mute into the exported
+        file; a plain video.captureStream() can't apply a CSS filter to its own frames)
+     ۳) کاور — pick a frame from inside the trimmed range as the thumbnail/poster
+        (implemented — see veCaptureCoverBlob(); the chosen frame is uploaded as a small JPEG
+        alongside the video and stored as media_thumb_path, independent of whether the video
+        itself needed re-encoding, since grabbing one frame is cheap either way)
+     ۴) پولیش/تجربه‌ی کاربری — a real progress indicator for the export wait, nicer scrubber
+        (frame filmstrip), can't-dismiss-mid-export guard
+     ۵) اج‌کیس‌ها و بهینه‌سازی — very short/long clips, unsupported browsers, memory
+     ۶) تست نهایی و یکپارچگی
+
+   THIS STAGE covers ۲ and ۳.
+
+   The one thing worth understanding up front, because it shapes everything below: unlike the
+   photo editor's crop (a cheap, instant <canvas> redraw), there's no way to losslessly cut a
+   video file in the browser — MP4/WebM containers need real re-encoding to produce a valid
+   trimmed file, and the only encoder available without pulling in a heavy library (ffmpeg.wasm,
+   tens of MB) is the browser's own MediaRecorder. So exporting here means: play the selected
+   range in real time through a hidden <video>, capture its stream, and re-record it — which
+   takes wall-clock time roughly equal to the trimmed clip's own length, and comes out the other
+   side as WebM regardless of the original's container (already one of CHAT_MEDIA_ALLOWED_TYPES,
+   so sendPublicChatMedia() doesn't need to know or care). If nothing was actually trimmed, the
+   original file is sent as-is instead — no reason to pay that re-encode cost (and the resulting
+   quality/bitrate change) for a no-op edit. */
+const VE_MIN_TRIM_SEC = 1; // smallest selectable range, in seconds
+// Stage 5 (edge cases / optimization): the real-time re-record in veExportTrimmedBlob() has to
+// hold every encoded chunk in memory for as long as the export takes, so an unbounded selection
+// on a long source clip (a multi-minute screen recording, say) risks a slow, memory-heavy export
+// with no visible cap. VE_MAX_TRIM_SEC bounds the *selected range*, not the source video itself —
+// a long clip can still be opened and scrubbed through, just not exported past this length.
+const VE_MAX_TRIM_SEC = 90;
+// Longest edge (px) the export canvas / cover-frame canvas are allowed to render at — downscales
+// large-resolution source video (e.g. a 4K phone recording) so the per-frame canvas draw and the
+// MediaRecorder chunk buffer above stay bounded regardless of what the source actually is.
+const VE_EXPORT_MAX_DIM = 1280;
+// Stage 5: filter presets. Each is just a CSS `filter` fragment that gets prepended to the
+// existing brightness/contrast/saturate sliders in veFilterString() below — since the sliders
+// default to the 100% identity value, a preset alone (no slider changes) already reproduces
+// exactly what its `css` string says, and a user nudging a slider afterward stacks on top of it
+// rather than replacing it. This is also why no separate baking step was needed anywhere else:
+// every place that already calls veFilterString() (preview, export, cover capture) picks up
+// presets for free.
+const VE_FILTER_PRESETS = [
+  { id:'normal',  name:'عادی',       css:'' },
+  { id:'vivid',   name:'واضح',       css:'saturate(160%) contrast(112%)' },
+  { id:'warm',    name:'گرم',        css:'sepia(25%) saturate(140%) hue-rotate(-8deg) brightness(105%)' },
+  { id:'cool',    name:'سرد',        css:'saturate(120%) hue-rotate(15deg) brightness(102%)' },
+  { id:'bw',      name:'سیاه‌وسفید', css:'grayscale(100%) contrast(108%)' },
+  { id:'vintage', name:'وینتیج',     css:'sepia(38%) contrast(90%) brightness(103%) saturate(85%)' },
+  { id:'drama',   name:'درام',       css:'contrast(128%) saturate(115%) brightness(95%)' },
+  { id:'fade',    name:'محو',        css:'contrast(85%) brightness(108%) saturate(78%)' },
+];
+let veState = null; // { file, duration, trimStart, trimEnd, playing, brightness, contrast, saturate, muteAudio, coverTime }
+let veDrag = null; // active pointer-drag info while moving a trim handle
+let veCoverDrag = null; // active pointer-drag info while moving the cover-frame handle
+let veSending = false;
+let veFilmstripToken = null; // bumped on every veOpen()/veClose() so an in-flight filmstrip build (see veBuildFilmstrip) can tell it's been superseded and stop appending frames
+
+function veShouldEdit(file){
+  if(!file || !isVideoFile(file)) return false;
+  // captureStream()/MediaRecorder are what the export below is built on (see the comment above) —
+  // both are Chromium APIs. Fine for this app's Android WebView target, but if either is missing
+  // there's no point opening an editor whose only button can't actually do anything — skip
+  // straight to sending the file untouched, same fallback the photo editor uses for a decode failure.
+  const hasCaptureStream = !!(HTMLVideoElement.prototype.captureStream || HTMLVideoElement.prototype.mozCaptureStream);
+  return hasCaptureStream && typeof MediaRecorder !== 'undefined';
+}
+function veFilterString(){
+  const preset = VE_FILTER_PRESETS.find(p=> p.id === (veState.filterPreset || 'normal'));
+  const presetCss = preset && preset.css ? preset.css + ' ' : '';
+  return `${presetCss}brightness(${veState.brightness}%) contrast(${veState.contrast}%) saturate(${veState.saturate}%)`;
+}
+function veFmtTime(s){
+  s = Math.max(0, Math.round(s));
+  const m = Math.floor(s/60), sec = s%60;
+  return `${toFaNum2(m)}:${toFaNum2(sec)}`;
+}
+function veUpdateTimeLabel(){
+  const el = document.getElementById('veTimeLabel');
+  if(!el || !veState) return;
+  const dur = Math.max(0, veState.trimEnd - veState.trimStart);
+  el.textContent = `${veFmtTime(veState.trimStart)} – ${veFmtTime(veState.trimEnd)} · ${toFa(Math.round(dur))} ثانیه`;
+}
+function veRenderScrub(){
+  if(!veState) return;
+  const d = veState.duration;
+  const sPct = peClamp(veState.trimStart / d, 0, 1) * 100;
+  const ePct = peClamp(veState.trimEnd / d, 0, 1) * 100;
+  document.getElementById('veScrubSelected').style.left = sPct + '%';
+  document.getElementById('veScrubSelected').style.width = (ePct - sPct) + '%';
+  document.getElementById('veHandleStart').style.left = sPct + '%';
+  document.getElementById('veHandleEnd').style.left = ePct + '%';
+  const cPct = peClamp(document.getElementById('veVideo').currentTime / d, 0, 1) * 100;
+  document.getElementById('veScrubPlayhead').style.left = cPct + '%';
+}
+/* ---- cover (stage 3) scrub: a dimmed range showing where the trim already narrowed things down
+   to, plus one draggable handle for the exact frame to use as the poster. Both are positioned as
+   a fraction of the *full* duration (same coordinate space veRenderScrub uses), not the trimmed
+   range, so this track and the trim track above always line up visually. ---- */
+function veRenderCoverTrack(){
+  if(!veState) return;
+  const d = veState.duration;
+  const sPct = peClamp(veState.trimStart / d, 0, 1) * 100;
+  const ePct = peClamp(veState.trimEnd / d, 0, 1) * 100;
+  document.getElementById('veCoverRange').style.left = sPct + '%';
+  document.getElementById('veCoverRange').style.width = (ePct - sPct) + '%';
+  const cPct = peClamp(veState.coverTime / d, 0, 1) * 100;
+  document.getElementById('veCoverHandle').style.left = cPct + '%';
+  document.getElementById('veCoverTimeLabel').textContent = `کاور: ${veFmtTime(veState.coverTime)}`;
+}
+/* ---- stage 4 polish: a filmstrip of real frames behind both scrub tracks (trim and cover), so
+   dragging a handle has actual video content to aim at instead of a flat colored bar — useful
+   for trimming to a specific visual moment, and doubly useful on the cover tab where the whole
+   point is picking a good-looking frame. Runs on its own throwaway <video>, independent of the
+   on-screen preview, so it can seek around freely without disturbing whatever the user's doing
+   with #veVideo. Best-effort only: nothing else in the editor depends on this succeeding, so any
+   failure just leaves the plain track from before this stage. ---- */
+function veSeekTo(video, t){
+  return new Promise(resolve=>{
+    if(Math.abs(video.currentTime - t) < 0.05){ resolve(); return; } // see the identical
+      // 'seeked'-may-never-fire note elsewhere in this module — same reasoning applies here.
+    video.addEventListener('seeked', function onSeeked(){
+      video.removeEventListener('seeked', onSeeked);
+      resolve();
+    }, {once:true});
+    video.currentTime = t;
+  });
+}
+async function veBuildFilmstrip(file, duration){
+  const trimTrack = document.getElementById('veFilmstrip');
+  const coverTrack = document.getElementById('veCoverFilmstrip');
+  if(trimTrack) trimTrack.innerHTML = '';
+  if(coverTrack) coverTrack.innerHTML = '';
+  if(!trimTrack && !coverTrack) return;
+
+  const FRAME_COUNT = 8;
+  const myToken = veFilmstripToken = {};
+  const video = document.createElement('video');
+  video.muted = true;
+  video.playsInline = true;
+  video.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;';
+  const cleanup = ()=>{ try{ URL.revokeObjectURL(video.src); }catch(e){} video.remove(); };
+
+  video.addEventListener('error', cleanup, {once:true});
+  video.addEventListener('loadedmetadata', async ()=>{
+    let canvas, ctx;
+    try{
+      canvas = document.createElement('canvas');
+      const targetH = 120;
+      canvas.height = targetH;
+      canvas.width = Math.max(1, Math.round((video.videoWidth / video.videoHeight) * targetH)) || targetH;
+      ctx = canvas.getContext('2d');
+    }catch(e){ cleanup(); return; }
+
+    for(let i=0; i<FRAME_COUNT; i++){
+      if(myToken !== veFilmstripToken){ cleanup(); return; } // superseded by a newer open/close — bail quietly
+      const t = (duration * (i + 0.5)) / FRAME_COUNT;
+      try{ await veSeekTo(video, t); }catch(e){ cleanup(); return; }
+      if(myToken !== veFilmstripToken){ cleanup(); return; }
+      let dataUrl;
+      try{
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        dataUrl = canvas.toDataURL('image/jpeg', 0.55);
+      }catch(e){ cleanup(); return; } // e.g. a tainted-canvas edge case — just stop, plain track stands
+      if(trimTrack){ const img = document.createElement('img'); img.src = dataUrl; img.alt = ''; trimTrack.appendChild(img); }
+      if(coverTrack){ const img2 = document.createElement('img'); img2.src = dataUrl; img2.alt = ''; coverTrack.appendChild(img2); }
+      // Stage 5 (افکت): the filter-preset row needs one representative frame to preview each
+      // preset against — reusing the filmstrip's own first frame instead of decoding a separate
+      // one avoids a second seek/draw pass just for this. Guarded on veState still being this
+      // same open session, same as the token check above.
+      if(i === 0 && veState) { veState.filterThumbUrl = dataUrl; veRenderFilterRow(); }
+    }
+    cleanup();
+  }, {once:true});
+
+  video.src = URL.createObjectURL(file);
+  document.body.appendChild(video);
+}
+/* ---- stage 5 (افکت): renders the filter-preset row from VE_FILTER_PRESETS. Each thumbnail is
+   the same base frame (veState.filterThumbUrl) with a different inline `filter` style — the
+   browser renders each preset's preview for free, no per-preset bitmap baking needed. Rebuilt
+   wholesale on every call (open, or a fresh frame arriving) rather than patched in place, since
+   the row is small (8 items) and this keeps active-state bookkeeping in one place. ---- */
+function veRenderFilterRow(){
+  const row = document.getElementById('veFilterRow');
+  if(!row || !veState) return;
+  const baseUrl = veState.filterThumbUrl || '';
+  row.innerHTML = '';
+  VE_FILTER_PRESETS.forEach(p=>{
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 've-filter-item' + (veState.filterPreset === p.id ? ' active' : '');
+    btn.dataset.filter = p.id;
+    const img = document.createElement('img');
+    img.className = 've-filter-thumb';
+    img.alt = '';
+    img.src = baseUrl;
+    img.style.filter = p.css || '';
+    const label = document.createElement('span');
+    label.className = 've-filter-name';
+    label.textContent = p.name;
+    btn.appendChild(img);
+    btn.appendChild(label);
+    row.appendChild(btn);
+  });
+}
+function veSetPlaying(playing){
+  if(!veState) return;
+  const video = document.getElementById('veVideo');
+  veState.playing = playing;
+  if(playing){
+    // The preview plays with sound (unless the user has chosen to mute the export) so trimming
+    // to a specific beat/word is possible.
+    video.muted = !!veState.muteAudio;
+    if(video.currentTime < veState.trimStart || video.currentTime >= veState.trimEnd){
+      video.currentTime = veState.trimStart;
+    }
+    video.play().catch(()=>{ veSetPlaying(false); });
+  } else {
+    video.pause();
+    video.muted = true; // back to silent while the user is just dragging handles around
+  }
+  document.getElementById('vePlayIcon').style.display = playing ? 'none' : '';
+  document.getElementById('vePauseIcon').style.display = playing ? '' : 'none';
+}
+function veTogglePlay(){ if(veState) veSetPlaying(!veState.playing); }
+
+async function veOpen(file){
+  const overlay = document.getElementById('videoEditorOverlay');
+  const video = document.getElementById('veVideo');
+  video.pause();
+  video.muted = true;
+  // Listeners must be attached before .src is assigned, not after — assigning .src can start
+  // loading (and fire 'loadedmetadata'/'error') before a later addEventListener call would even
+  // be registered, which would leave this awaiting an event that already happened and never came.
+  let ok = true;
+  const loadPromise = new Promise((resolve, reject)=>{
+    video.addEventListener('loadedmetadata', resolve, {once:true});
+    video.addEventListener('error', reject, {once:true});
+  });
+  video.src = URL.createObjectURL(file);
+  overlay.classList.add('show');
+
+  try{ await loadPromise; }catch(e){ ok = false; }
+
+  // A handful of files report duration as 0/NaN/Infinity until more of them has actually been
+  // buffered — without a real number there's no range to build a trim UI against.
+  if(ok && !(video.duration > 0 && isFinite(video.duration))) ok = false;
+
+  if(!ok){
+    overlay.classList.remove('show');
+    URL.revokeObjectURL(video.src);
+    video.removeAttribute('src'); video.load();
+    sendPublicChatMedia(file); // couldn't read it as a video — just send it as before
+    return;
+  }
+
+  // Stage 5 (edge case: کلیپ‌های خیلی طولانی) — a source longer than VE_MAX_TRIM_SEC no longer
+  // defaults to a full-length selection; the trim handles still open at the far edges, just
+  // clamped to the cap, so the user sees a real (exportable) range from the start instead of one
+  // they'd immediately have to shrink.
+  const initTrimEnd = peClamp(video.duration, 0, VE_MAX_TRIM_SEC);
+  veState = {
+    file, duration: video.duration, trimStart: 0, trimEnd: initTrimEnd, playing: false,
+    brightness: 100, contrast: 100, saturate: 100, muteAudio: false, filterPreset: 'normal',
+    // Default cover frame is the midpoint of the (initially full) selected range rather than 0 —
+    // a lot of clips open on a black or half-formed first frame, so the midpoint is a better
+    // starting thumbnail than "whatever the video happens to start on".
+    coverTime: peClamp(initTrimEnd / 2, 0, initTrimEnd),
+  };
+  video.currentTime = 0;
+  document.getElementById('vePlayIcon').style.display = '';
+  document.getElementById('vePauseIcon').style.display = 'none';
+  // Reset the adjust tab's controls to defaults — these elements are static and reused across
+  // editor sessions, so a previous open() could otherwise leave stale slider/toggle state
+  // showing before any 'input'/'click' event fires to correct it.
+  document.getElementById('veBrightness').value = 100;
+  document.getElementById('veContrast').value = 100;
+  document.getElementById('veSaturate').value = 100;
+  document.getElementById('veMuteBtn').classList.remove('active');
+  document.getElementById('veMuteBtn').setAttribute('aria-pressed', 'false');
+  // Clear any filter-preset thumbnails left over from a previous editor session — they'd
+  // otherwise keep showing (against the wrong video) until this session's own first frame
+  // arrives via veBuildFilmstrip() below.
+  const filterRowEl = document.getElementById('veFilterRow');
+  if(filterRowEl) filterRowEl.innerHTML = '';
+  video.style.filter = veFilterString();
+  veSwitchTab('trim');
+  veUpdateTimeLabel();
+  veRenderScrub();
+  veRenderCoverTrack();
+  veBuildFilmstrip(file, video.duration);
+}
+function veClose(){
+  const overlay = document.getElementById('videoEditorOverlay');
+  const video = document.getElementById('veVideo');
+  overlay.classList.remove('show');
+  video.pause();
+  video.style.filter = '';
+  if(video.src){ URL.revokeObjectURL(video.src); video.removeAttribute('src'); video.load(); }
+  veState = null;
+  veDrag = null;
+  veCoverDrag = null;
+  veFilmstripToken = null; // tells any in-flight veBuildFilmstrip() run to stop appending frames
+}
+function veCancel(){
+  // Same back-button race guard as the photo editor's peCancel() — see peConfirmSend's comment
+  // for why this can't just be a disabled-button check (the Android back button calls this
+  // directly, bypassing whatever's disabled in the DOM).
+  if(veSending) return;
+  if(!veState){ veClose(); return; }
+  const edited = veState.trimStart > 0.05 || veState.trimEnd < veState.duration - 0.05 ||
+    veState.brightness !== 100 || veState.contrast !== 100 || veState.saturate !== 100 || veState.muteAudio ||
+    veState.filterPreset !== 'normal';
+  if(edited && !confirm('برشی که دادی ذخیره نمی‌شه. مطمئنی می‌خوای بی‌خیالش شی؟')) return;
+  veClose();
+}
+
+/* ---- trim handle drag (Pointer Events, same pointerId-filtering pattern as the photo editor's
+   crop drag — ignores a second touch point so an incidental palm-touch mid-drag can't hijack it) ---- */
+function veHandlePointerDown(e){
+  if(!veState || veDrag) return;
+  const handle = e.target.closest('.ve-scrub-handle');
+  if(!handle) return;
+  e.preventDefault();
+  veSetPlaying(false); // pause any preview playback while the range itself is being adjusted
+  const track = document.getElementById('veScrubTrack');
+  const tRect = track.getBoundingClientRect();
+  veDrag = { pointerId: e.pointerId, mode: handle.dataset.h, trackLeft: tRect.left, trackWidth: tRect.width };
+  handle.setPointerCapture(e.pointerId);
+}
+function veHandlePointerMove(e){
+  if(!veDrag || e.pointerId !== veDrag.pointerId) return;
+  e.preventDefault();
+  const frac = peClamp((e.clientX - veDrag.trackLeft) / veDrag.trackWidth, 0, 1);
+  const t = frac * veState.duration;
+  const minGap = Math.min(VE_MIN_TRIM_SEC, veState.duration);
+  // Stage 5 (edge case: کلیپ‌های خیلی طولانی) — same lower bound as before (room for
+  // VE_MIN_TRIM_SEC), plus an upper bound so neither handle can widen the selected range past
+  // VE_MAX_TRIM_SEC. A toast fires once per drag the first time a movement gets clamped by this,
+  // so it reads as an intentional limit rather than the handle just silently sticking.
+  let hitMax = false;
+  if(veDrag.mode === 'start'){
+    const lowBound = Math.max(0, veState.trimEnd - VE_MAX_TRIM_SEC);
+    if(t < lowBound) hitMax = true;
+    veState.trimStart = peClamp(t, lowBound, veState.trimEnd - minGap);
+  } else {
+    const highBound = Math.min(veState.duration, veState.trimStart + VE_MAX_TRIM_SEC);
+    if(t > highBound) hitMax = true;
+    veState.trimEnd = peClamp(t, veState.trimStart + minGap, highBound);
+  }
+  if(hitMax && !veDrag.maxToastShown && veState.duration > VE_MAX_TRIM_SEC){
+    veDrag.maxToastShown = true;
+    showToast(`بازه‌ی انتخابی حداکثر می‌تونه ${toFa(VE_MAX_TRIM_SEC)} ثانیه باشه`, 'error');
+  }
+  // Seek the (silent) preview to whichever edge is being dragged, so the user can see exactly
+  // which frame they're cutting to instead of just watching an abstract bar move.
+  document.getElementById('veVideo').currentTime = veDrag.mode === 'start' ? veState.trimStart : veState.trimEnd;
+  // The cover frame has to stay inside the trimmed range — narrowing the trim past a previously
+  // chosen cover time would otherwise leave the cover pointing at a moment that got cut away.
+  veState.coverTime = peClamp(veState.coverTime, veState.trimStart, veState.trimEnd);
+  veRenderScrub();
+  veRenderCoverTrack();
+  veUpdateTimeLabel();
+}
+function veHandlePointerUp(e){ if(veDrag && e.pointerId === veDrag.pointerId) veDrag = null; }
+
+/* ---- cover-frame handle drag: same Pointer Events pattern as the trim handles above, but a
+   single handle constrained to [trimStart, trimEnd] instead of two handles constrained to each
+   other. ---- */
+function veCoverPointerDown(e){
+  if(!veState || veCoverDrag) return;
+  const handle = e.target.closest('.ve-scrub-handle') || (e.target.closest('#veCoverTrack') ? document.getElementById('veCoverHandle') : null);
+  if(!handle) return;
+  e.preventDefault();
+  veSetPlaying(false); // pause any preview playback while the cover frame is being picked
+  const track = document.getElementById('veCoverTrack');
+  const tRect = track.getBoundingClientRect();
+  veCoverDrag = { pointerId: e.pointerId, trackLeft: tRect.left, trackWidth: tRect.width };
+  handle.setPointerCapture(e.pointerId);
+  veCoverPointerMove(e); // jump straight to the tapped/clicked position, not just future drags
+}
+function veCoverPointerMove(e){
+  if(!veCoverDrag || e.pointerId !== veCoverDrag.pointerId) return;
+  e.preventDefault();
+  const frac = peClamp((e.clientX - veCoverDrag.trackLeft) / veCoverDrag.trackWidth, 0, 1);
+  const t = frac * veState.duration;
+  veState.coverTime = peClamp(t, veState.trimStart, veState.trimEnd);
+  document.getElementById('veVideo').currentTime = veState.coverTime;
+  veRenderCoverTrack();
+}
+function veCoverPointerUp(e){ if(veCoverDrag && e.pointerId === veCoverDrag.pointerId) veCoverDrag = null; }
+
+/* ---- export: play [trimStart, trimEnd] through a fresh, independent <video> element (not the
+   on-screen preview — the user could still be mid-drag on it right up until the tap that calls
+   this), capture its stream, and re-record it with MediaRecorder. See the module comment above
+   for why a real-time re-record is the only lossless-container-free option available here. ---- */
+/* Stage 2 addition: baking brightness/contrast/saturation into the output means the recorded
+   stream can't just be video.captureStream() directly — that captures the element's raw decoded
+   frames, with no way to apply a CSS-style filter to them. Instead each frame is drawn onto a
+   hidden <canvas> with ctx.filter set to the same string the on-screen preview uses, and it's
+   *that* canvas's captureStream() that gets recorded. Audio is handled separately: the canvas
+   only carries a video track, so if the export shouldn't be muted, the original video's own
+   audio track (from its own captureStream()) is added onto the canvas stream before recording;
+   if it should be muted, that track is simply never added — no silent audio track riding along,
+   just none at all. */
+function veExportTrimmedBlob(onProgress){
+  // Snapshot the settings up front rather than reading veState mid-export — the export can take
+  // real wall-clock time, and while veConfirmSend now locks the whole editor UI during export
+  // (stage 4), reading local copies here is cheap and one less thing to reason about if that
+  // lock is ever loosened later.
+  const filterCss = veFilterString();
+  const muteAudio = veState.muteAudio;
+  const trimStart = veState.trimStart;
+  const trimEnd = veState.trimEnd;
+  return new Promise((resolve, reject)=>{
+    const video = document.createElement('video');
+    video.muted = false;
+    video.playsInline = true;
+    video.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;';
+
+    let settled = false;
+    let safetyTimer = null;
+    let drawRAF = null;
+    const finish = (result, err)=>{
+      if(settled) return;
+      settled = true;
+      if(safetyTimer) clearTimeout(safetyTimer);
+      if(drawRAF) cancelAnimationFrame(drawRAF);
+      video.pause();
+      URL.revokeObjectURL(video.src);
+      video.remove();
+      if(err) reject(err); else resolve(result);
+    };
+    // A safety net for any failure mode that doesn't cleanly reach an 'error'/'onerror' callback
+    // (e.g. a codec quirk that just stalls playback) — without this, such a case would leave the
+    // send button disabled forever with no feedback at all instead of falling back to the
+    // original file. Generous headroom: normal completion always resolves well before this fires.
+    safetyTimer = setTimeout(()=> finish(null, new Error('برش ویدیو خیلی طول کشید')),
+      Math.max(15000, (trimEnd - trimStart) * 3000 + 10000));
+
+    // Listeners go on before .src is assigned — see the identical note in veOpen() above; setting
+    // .src first risks the browser firing 'loadedmetadata'/'error' before these are even attached.
+    video.addEventListener('error', ()=> finish(null, new Error('بارگذاری ویدیو برای برش ناموفق بود')), {once:true});
+    video.addEventListener('loadedmetadata', ()=>{
+      const target = trimStart;
+      if(Math.abs(video.currentTime - target) < 0.05){
+        // Already sitting at (or effectively at) the trim-start — a freshly loaded video already
+        // starts at 0, and some browsers won't fire 'seeked' for a currentTime assignment that
+        // doesn't actually move the playhead. Waiting for that event in this case would hang
+        // forever, so skip straight to capturing instead of setting currentTime again.
+        beginCapture();
+      } else {
+        video.addEventListener('seeked', function onSeeked(){
+          video.removeEventListener('seeked', onSeeked);
+          beginCapture();
+        }, {once:true});
+        video.currentTime = target;
+      }
+    }, {once:true});
+
+    video.src = URL.createObjectURL(veState.file);
+    document.body.appendChild(video);
+
+    function beginCapture(){
+      const canvas = document.createElement('canvas');
+      // Stage 5 (edge case / optimization): downscale a large-resolution source (e.g. a 4K phone
+      // recording) instead of recording at native size — see VE_EXPORT_MAX_DIM's own comment for
+      // why that matters for a real-time, memory-buffered re-record like this one.
+      const vw = video.videoWidth || 1, vh = video.videoHeight || 1;
+      const longEdge = Math.max(vw, vh);
+      const exportScale = longEdge > VE_EXPORT_MAX_DIM ? VE_EXPORT_MAX_DIM / longEdge : 1;
+      canvas.width = Math.max(1, Math.round(vw * exportScale));
+      canvas.height = Math.max(1, Math.round(vh * exportScale));
+      const ctx = canvas.getContext('2d');
+      ctx.filter = filterCss;
+
+      let canvasStream;
+      try{ canvasStream = canvas.captureStream(30); }
+      catch(err){ finish(null, err); return; }
+
+      if(!muteAudio){
+        let srcStream = null;
+        try{ srcStream = video.captureStream ? video.captureStream() : video.mozCaptureStream(); }
+        catch(err){ /* no captureStream on this element — export goes out silent either way */ }
+        if(srcStream){
+          srcStream.getAudioTracks().forEach(t=> canvasStream.addTrack(t));
+          // The video track from this stream is never used (the canvas above is what's actually
+          // being recorded) — stop it so it isn't left decoding in the background for nothing.
+          srcStream.getVideoTracks().forEach(t=> t.stop());
+        }
+      }
+
+      const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+      const mimeType = mimeCandidates.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+      let recorder;
+      try{ recorder = mimeType ? new MediaRecorder(canvasStream, {mimeType}) : new MediaRecorder(canvasStream); }
+      catch(err){ finish(null, err); return; }
+
+      const chunks = [];
+      recorder.ondataavailable = (e)=>{ if(e.data && e.data.size) chunks.push(e.data); };
+      recorder.onerror = (e)=> finish(null, e.error || new Error('ضبط ویدیوی برش‌خورده ناموفق بود'));
+      recorder.onstop = ()=>{
+        if(!chunks.length){ finish(null, new Error('هیچ فریمی ضبط نشد')); return; }
+        finish(new Blob(chunks, { type: recorder.mimeType || 'video/webm' }));
+      };
+
+      const stopAtEnd = ()=>{
+        // Stage 4: report how far through the trimmed range playback has gotten, so the export
+        // overlay's progress bar tracks something real instead of just spinning indefinitely.
+        if(onProgress) onProgress(peClamp((video.currentTime - trimStart) / (trimEnd - trimStart), 0, 1));
+        if(video.currentTime >= trimEnd - 0.03 || video.ended){
+          video.removeEventListener('timeupdate', stopAtEnd);
+          video.removeEventListener('ended', stopAtEnd);
+          video.pause();
+          if(recorder.state !== 'inactive') recorder.stop();
+        }
+      };
+      video.addEventListener('timeupdate', stopAtEnd);
+      video.addEventListener('ended', stopAtEnd);
+
+      // Redraws the current video frame onto the filtered canvas every animation frame for as
+      // long as recording is in flight — this loop, not the video element itself, is what the
+      // recorder actually sees, which is what makes the filter (and the trim window, since the
+      // canvas just shows whatever frame the video is currently on) actually land in the output.
+      const drawFrame = ()=>{
+        if(settled) return;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        drawRAF = requestAnimationFrame(drawFrame);
+      };
+
+      if(onProgress) onProgress(0);
+      recorder.start();
+      drawFrame();
+      video.play().catch(err=>{
+        video.removeEventListener('timeupdate', stopAtEnd);
+        video.removeEventListener('ended', stopAtEnd);
+        finish(null, err);
+      });
+    }
+  });
+}
+/* ---- cover (stage 3): grab a single frame at veState.coverTime as a JPEG, with the same
+   brightness/contrast/saturation baked in so the poster actually matches the video it's a poster
+   for. Uses its own throwaway <video> + <canvas>, independent of both the on-screen preview and
+   veExportTrimmedBlob()'s own throwaway video — either of those could be mid-seek or mid-record
+   when this runs, since veConfirmSend() below calls this before the (much longer) export. ---- */
+function veCaptureCoverBlob(){
+  const filterCss = veFilterString();
+  const coverTime = veState.coverTime;
+  return new Promise((resolve, reject)=>{
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;';
+
+    let settled = false;
+    let safetyTimer = null;
+    const finish = (result, err)=>{
+      if(settled) return;
+      settled = true;
+      if(safetyTimer) clearTimeout(safetyTimer);
+      URL.revokeObjectURL(video.src);
+      video.remove();
+      if(err) reject(err); else resolve(result);
+    };
+    safetyTimer = setTimeout(()=> finish(null, new Error('ساخت کاور خیلی طول کشید')), 10000);
+
+    // Same before-.src listener ordering as veOpen()/veExportTrimmedBlob() above.
+    video.addEventListener('error', ()=> finish(null, new Error('بارگذاری ویدیو برای ساخت کاور ناموفق بود')), {once:true});
+    video.addEventListener('loadedmetadata', ()=>{
+      if(Math.abs(video.currentTime - coverTime) < 0.05){
+        grabFrame(); // already sitting at (or effectively at) the target — see the identical
+                      // 'seeked' note elsewhere in this module for why waiting here could hang.
+      } else {
+        video.addEventListener('seeked', function onSeeked(){
+          video.removeEventListener('seeked', onSeeked);
+          grabFrame();
+        }, {once:true});
+        video.currentTime = coverTime;
+      }
+    }, {once:true});
+
+    video.src = URL.createObjectURL(veState.file);
+    document.body.appendChild(video);
+
+    function grabFrame(){
+      const canvas = document.createElement('canvas');
+      // Stage 5: same downscale as the export canvas above — a poster/cover thumbnail never
+      // needs native 4K resolution, so this keeps it consistent with the exported video's size.
+      const vw = video.videoWidth || 1, vh = video.videoHeight || 1;
+      const longEdge = Math.max(vw, vh);
+      const coverScale = longEdge > VE_EXPORT_MAX_DIM ? VE_EXPORT_MAX_DIM / longEdge : 1;
+      canvas.width = Math.max(1, Math.round(vw * coverScale));
+      canvas.height = Math.max(1, Math.round(vh * coverScale));
+      const ctx = canvas.getContext('2d');
+      ctx.filter = filterCss;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob=>{
+        if(!blob){ finish(null, new Error('ساخت کاور ناموفق بود')); return; }
+        finish(blob);
+      }, 'image/jpeg', 0.85);
+    }
+  });
+}
+/* ---- stage 4 polish: export progress overlay. Shown only for the needsReencode path below —
+   the no-op (original-file-goes-through-unchanged) path is near-instant and doesn't need it, and
+   flashing a spinner for a fraction of a second would be more distracting than reassuring. ---- */
+function veSetExportOverlay(shown, label){
+  const overlay = document.getElementById('veExportOverlay');
+  if(!overlay) return;
+  overlay.style.display = shown ? 'flex' : 'none';
+  if(shown){
+    if(label != null) document.getElementById('veExportLabel').textContent = label;
+    const fill = document.getElementById('veExportBarFill');
+    if(fill) fill.style.width = '0%';
+  }
+}
+function veSetExportProgress(frac){
+  const pct = Math.round(peClamp(frac, 0, 1) * 100);
+  const fill = document.getElementById('veExportBarFill');
+  const label = document.getElementById('veExportLabel');
+  if(fill) fill.style.width = pct + '%';
+  if(label) label.textContent = `${toFa(pct)}٪`;
+}
+async function veConfirmSend(){
+  const btn = document.getElementById('veSendBtn');
+  const cancelBtn = document.getElementById('veCancelBtn');
+  const tabsEl = document.getElementById('veTabs');
+  // Stage 4: everything the user could still poke mid-export gets locked too, not just the
+  // header buttons — dragging a trim/cover handle or hitting play while veExportTrimmedBlob()
+  // is running would otherwise be a real race on veState.trimStart/trimEnd, not just a
+  // cosmetic annoyance.
+  const lockEls = [tabsEl, document.getElementById('veStage'), document.getElementById('veTrimPanel'),
+    document.getElementById('veAdjustPanel'), document.getElementById('veEffectsPanel'), document.getElementById('veCoverPanel')];
+  const originalFile = veState.file;
+  const trimmed = veState.trimStart > 0.05 || veState.trimEnd < veState.duration - 0.05;
+  const filtersChanged = veState.brightness !== 100 || veState.contrast !== 100 || veState.saturate !== 100 ||
+    veState.filterPreset !== 'normal';
+  // Muting always needs a re-encode even with nothing else touched — stripping an audio track
+  // isn't something that can happen to a file in place, unlike trim/filters/mute which all
+  // already require the re-record pass below.
+  const needsReencode = trimmed || filtersChanged || veState.muteAudio;
+
+  // Lock the whole editor before doing anything async below — same reasoning as the photo
+  // editor's peConfirmSend(): without this, a tap on ✕ mid-export/mid-cover-capture would call
+  // veCancel()/veClose(), null out veState, and hide the overlay, yet this function would still
+  // finish and send a moment later as if nothing had been canceled.
+  if(btn) btn.disabled = true;
+  if(cancelBtn) cancelBtn.disabled = true;
+  lockEls.forEach(el=>{ if(el) el.style.pointerEvents = 'none'; });
+  veSending = true;
+  if(needsReencode) veSetExportOverlay(true, 'در حال آماده‌سازی…');
+  try{
+    // The cover frame is cheap (one seek, one canvas draw) regardless of whether the video
+    // itself needs a full re-encode, so it's always attempted here — but it's a nice-to-have
+    // poster image, not something worth failing the whole send over.
+    let thumbBlob = null;
+    try{ thumbBlob = await veCaptureCoverBlob(); }
+    catch(err){ console.error('Video cover capture error', err); }
+
+    if(!needsReencode){
+      // Nothing that actually changes the video itself was touched — skip the re-encode
+      // entirely rather than paying its time and quality/bitrate cost for a no-op edit; the
+      // original file goes through unchanged (only the cover, if any, rides along with it).
+      veClose();
+      sendPublicChatMedia(originalFile, thumbBlob);
+      return;
+    }
+    const blob = await veExportTrimmedBlob(veSetExportProgress);
+    if(!blob) throw new Error('برش ویدیو ناموفق بود');
+    const outFile = new File([blob], `trimmed-${Date.now()}.webm`, { type: blob.type });
+    veClose();
+    sendPublicChatMedia(outFile, thumbBlob);
+  }catch(err){
+    console.error('Video trim export error', err);
+    showToast('برش ویدیو ناموفق بود، ویدیوی اصلی ارسال می‌شه', 'error');
+    veClose();
+    sendPublicChatMedia(originalFile);
+  }finally{
+    if(btn) btn.disabled = false;
+    if(cancelBtn) cancelBtn.disabled = false;
+    lockEls.forEach(el=>{ if(el) el.style.pointerEvents = ''; });
+    veSetExportOverlay(false);
+    veSending = false;
+  }
+}
+
+
+/* ---- tab switching (stage 2/3 added a second and third tab alongside the original برش tab) —
+   same shape as peSwitchTab() above: toggle the .pe-tab.active state and show/hide the matching
+   panel. ---- */
+function veSwitchTab(tab){
+  if(!veState) return;
+  document.querySelectorAll('#veTabs .pe-tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  document.getElementById('veTrimPanel').style.display = tab==='trim' ? 'flex' : 'none';
+  document.getElementById('veAdjustPanel').style.display = tab==='adjust' ? 'flex' : 'none';
+  document.getElementById('veEffectsPanel').style.display = tab==='effects' ? 'flex' : 'none';
+  document.getElementById('veCoverPanel').style.display = tab==='cover' ? 'flex' : 'none';
+  // Land the preview on whichever frame is relevant to the tab being switched to: the trim
+  // start when going back to trimming, the chosen cover frame when picking a cover. (The adjust
+  // tab doesn't move the playhead — whatever frame was already showing is fine to judge a filter
+  // against.)
+  veSetPlaying(false);
+  const video = document.getElementById('veVideo');
+  if(tab === 'trim') video.currentTime = veState.trimStart;
+  else if(tab === 'cover') video.currentTime = veState.coverTime;
+}
+document.getElementById('veTabs').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.pe-tab'); if(!btn) return;
+  veSwitchTab(btn.dataset.tab);
+});
+// Stage 5 (افکت): picking a preset just updates state + the live preview filter and re-renders
+// the row for the new active state — same lightweight pattern as the mute toggle below, nothing
+// export-specific here since veFilterString() already threads filterPreset into every consumer.
+document.getElementById('veFilterRow').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.ve-filter-item'); if(!btn || !veState) return;
+  veState.filterPreset = btn.dataset.filter;
+  veRenderFilterRow();
+  document.getElementById('veVideo').style.filter = veFilterString();
+});
+['veBrightness','veContrast','veSaturate'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', (e)=>{
+    if(!veState) return; // guards a stray event firing after the editor's already been closed
+    const key = id === 'veBrightness' ? 'brightness' : id === 'veContrast' ? 'contrast' : 'saturate';
+    veState[key] = Number(e.target.value);
+    document.getElementById('veVideo').style.filter = veFilterString();
+  });
+});
+document.getElementById('veMuteBtn').addEventListener('click', ()=>{
+  if(!veState) return;
+  veState.muteAudio = !veState.muteAudio;
+  const btn = document.getElementById('veMuteBtn');
+  btn.classList.toggle('active', veState.muteAudio);
+  btn.setAttribute('aria-pressed', String(veState.muteAudio));
+  // Reflect the choice immediately if a preview is already playing, rather than waiting for the
+  // next play tap — otherwise toggling this mid-playback would look like it did nothing.
+  if(veState.playing) document.getElementById('veVideo').muted = veState.muteAudio;
+});
+document.getElementById('veCoverTrack').addEventListener('pointerdown', veCoverPointerDown);
+window.addEventListener('pointermove', veCoverPointerMove);
+window.addEventListener('pointerup', veCoverPointerUp);
+// Stage 4: the last piece of "can't-dismiss-mid-export" — the in-app guards above (veCancel's
+// veSending check, the hardware-back route through closeDismissableOverlay) cover every way to
+// leave the editor from inside the app, but a browser/webview-level refresh or tab close bypasses
+// all of that. This at least gives the OS's own native "leave site?" prompt a chance to stop it.
+window.addEventListener('beforeunload', (e)=>{
+  if(!veSending) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+
+document.getElementById('veCancelBtn').addEventListener('click', veCancel);
+document.getElementById('veSendBtn').addEventListener('click', veConfirmSend);
+document.getElementById('vePlayBtn').addEventListener('click', veTogglePlay);
+document.getElementById('veScrubTrack').addEventListener('pointerdown', veHandlePointerDown);
+window.addEventListener('pointermove', veHandlePointerMove);
+window.addEventListener('pointerup', veHandlePointerUp);
+document.getElementById('veVideo').addEventListener('timeupdate', ()=>{
+  if(!veState) return;
+  veRenderScrub();
+  if(veState.playing && document.getElementById('veVideo').currentTime >= veState.trimEnd - 0.03){
+    // Loop the preview back to the trim-start instead of just stopping, so reviewing the
+    // selected range doesn't need a re-tap of play every time.
+    document.getElementById('veVideo').currentTime = veState.trimStart;
+  }
+});
+document.getElementById('veVideo').addEventListener('ended', ()=>{
+  if(!veState || !veState.playing) return;
+  const v = document.getElementById('veVideo');
+  v.currentTime = veState.trimStart;
+  v.play().catch(()=>{});
 });
 
 /* ---------------- Giphy GIF picker ----------------
@@ -20267,7 +21810,7 @@ async function sendPublicChatGif(gifUrl, gifThumbUrl, mediaType){
     openPremiumOverlay();
     return;
   }
-  if(isReportModeActive() && !isAppOwner){
+  if(isReportModeActive() && !isAppOwner && !isChatReopenedForReport()){
     showToast('الان فقط ارسال گزارش کار امکان‌پذیره 📋', 'error');
     updateChatModeUI();
     return;
@@ -20402,6 +21945,9 @@ async function sendTaskReport(){
       if(!(storeData.premium || isInTrial())){ storeData.taskReportSentOnce = true; }
       saveData();
       try{ renderXP(); }catch(err){}
+      // If it's already 22:00+ the report we just sent should unlock normal chat
+      // for the rest of the window right away, not after the next 30s poll.
+      try{ updateChatModeUI(); }catch(err){}
     }
   }catch(err){ showToast('گزارش ارسال نشد', 'error'); }
   finally{ updateReportBtnState(); }
@@ -20700,7 +22246,7 @@ function buddyMsgHtml(m, grouped){
   const head = grouped ? '' : `<div class="cm-head"><div class="cm-name">${escapeHtml(nm)}</div></div>`;
   return `<div class="chat-msg${own?' own':''}${grouped?' grouped':''}" data-msg-id="${m.id}">
     ${head}
-    <div class="cm-text">${escapeHtml(m.content)}</div>
+    <div class="cm-text">${linkifyChatText(m.content)}</div>
     <div class="cm-bottom-row"><span class="cm-time">${time}</span></div>
   </div>`;
 }
@@ -25109,6 +26655,8 @@ function isOverlayShown(id){
   return !!(el.style.display && el.style.display !== 'none');
 }
 function closeDismissableOverlay(){
+  if(isOverlayShown('photoEditorOverlay')){ peCancel(); return true; }
+  if(isOverlayShown('videoEditorOverlay')){ veCancel(); return true; }
   if(isOverlayShown('gifPickerOverlay')){ closeGifPicker(); return true; }
   if(isOverlayShown('notifPanelOverlay')){ closeNotifPanel(); return true; }
   if(isOverlayShown('chatMembersOverlay')){ closeChatMembers(); return true; }
@@ -25400,10 +26948,25 @@ loadData().then(()=>{
   applyPendingOpenChat();
 });
 
+/* اپ الان یه اپِ نیتیوِ Capacitorـه — index.html/app.js از قبل داخلِ خودِ APK باندل شدن و
+   بدونِ نیاز به هیچ کشی آفلاین در دسترسن. سرویس‌ورکرِ کشِ app-shell (که این‌جا قبلاً
+   register می‌شد) هیچ فایده‌ی اضافه‌ای نداشت، و چون Cache Storage/رجیستریِ سرویس‌ورکر
+   با آپدیتِ این‌جاییِ APK (بدونِ حذفِ نسخه‌ی قبل) پاک نمی‌شه، نسخه‌ی قدیمیِ app.js/HTMLِ
+   کش‌شده به‌جایِ فایل‌هایِ تازه‌ی نیتیو سرو می‌شد — همون چیزی که باعثِ به‌هم‌ریختنِ
+   لِی‌اوت/اسکرول بعدِ هر آپدیت می‌شد. از این‌جا به بعد دیگه هیچ سرویس‌ورکری register
+   نمی‌شه؛ این بلاک فقط هر رجیستریشن/کشِ قدیمی‌ای که از نسخه‌های قبل رویِ گوشیِ کاربر
+   مونده رو یه‌بار پاک می‌کنه (خودِ sw.js هم یه نسخه‌ی یک‌بارمصرفِ خودپاک‌کن شده — نگاه
+   کن به sw-1.js — برایِ اطمینانِ دوبل که حتی اگه این بلاک به‌خاطرِ کشِ قدیمی همین یه‌بار
+   استیل اجرا بشه، بازم sw.js خودش خودشو جمع می‌کنه). */
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(err => console.warn('SW register failed', err));
-  });
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(reg => reg.unregister());
+  }).catch(err => console.warn('SW cleanup failed', err));
+}
+if ('caches' in window) {
+  caches.keys().then(keys => {
+    keys.forEach(k => caches.delete(k));
+  }).catch(err => console.warn('cache cleanup failed', err));
 }
 
 

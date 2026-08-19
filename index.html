@@ -1,6 +1,309 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
+<script>
+/* ============================================================
+   پنل دیباگ داخل‌برنامه‌ای — فقط برای تست، نه برای کاربر نهایی.
+   این اسکریپت عمداً همین‌جا، خیلی زود و به‌صورت sync (بدون defer)
+   قرار گرفته: باید قبل از supabase-js و app.js اجرا بشه تا
+   window.fetch/console/WebSocket رو *قبل* از اولین استفاده‌شون
+   دستکاری کنه، وگرنه اولین چندتا درخواست (که دقیقاً همونایی‌ان
+   که موقع لاگین/verify اتفاق می‌افتن) از دستمون در می‌رن.
+
+   چیزی که ثبت می‌کنه: هر console.log/warn/error، هر fetch (URL،
+   متد، وضعیت پاسخ، مدت‌زمان، بدنه‌ی خلاصه‌شده)، هر WebSocket
+   (باز/بسته/خطا — مهم برای اتصال realtime سوپابیس)، هر خطای
+   سراسری/Promise رد شده، و هر فراخوانی پلاگین Capacitor (که
+   خودکار و بعداً، وقتی Capacitor آماده شد، wrap می‌شن).
+
+   توکن‌ها/کلیدها قبل از نمایش، جزئی مخفی می‌شن (maskSecrets)؛
+   ولی بازم چون توکن نشست/JWT بخشی همیشه می‌مونه، این پنل رو
+   فقط برای تست خودت نگه دار و لاگ‌هاش رو با غریبه به اشتراک
+   نذار.
+   ============================================================ */
+(function(){
+  var MAX_LOGS = 600;
+  var logs = [];
+  var listeners = [];
+
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function nowStr(){
+    var d = new Date();
+    return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())+'.'+String(d.getMilliseconds()).padStart(3,'0');
+  }
+
+  function maskSecrets(str){
+    if (typeof str !== 'string') return str;
+    try {
+      return str
+        .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g, function(m){ return m.slice(0,10) + '…[JWT]…' + m.slice(-6); })
+        .replace(/(Bearer\s+)[A-Za-z0-9._-]{10,}/gi, '$1[masked]')
+        .replace(/("?(?:access_token|apikey|api_key|purchasetoken|purchase_token|x-access-token)"?\s*[:=]\s*"?)([A-Za-z0-9._-]{8,})/gi,
+          function(m,p1,p2){ return p1 + p2.slice(0,6) + '…[masked]…' + p2.slice(-4); });
+    } catch(e){ return str; }
+  }
+
+  function addLog(type, source, summary, detail){
+    var entry = { t: nowStr(), ts: Date.now(), type: type, source: String(source), summary: String(summary==null?'':summary), detail: detail==null?'':String(detail) };
+    logs.push(entry);
+    if (logs.length > MAX_LOGS) logs.shift();
+    for (var i=0;i<listeners.length;i++){ try{ listeners[i](entry); }catch(e){} }
+  }
+
+  window.__debugLog = addLog;
+  window.__debugLogMark = function(text){ addLog('mark', '───', text, ''); };
+  window.__debugLogAll = function(){ return logs.slice(); };
+
+  /* 0) اطلاعات نشست — همیشه اولین ردیف لاگه، تا هروقت کپی/فرستاده شد
+     دستگاه/شبکه/زمانش بدون پرسیدن معلوم باشه */
+  try{
+    var conn = navigator.connection || navigator.webkitConnection || navigator.mozConnection;
+    addLog('mark', 'session', 'شروع نشست', JSON.stringify({
+      time: new Date().toString(),
+      ua: navigator.userAgent,
+      onLine: navigator.onLine,
+      lang: navigator.language,
+      screen: (window.screen ? (screen.width+'x'+screen.height) : '?'),
+      connection: conn ? (conn.effectiveType+' | downlink:'+conn.downlink+'Mbps | rtt:'+conn.rtt+'ms') : 'نامشخص'
+    }, null, 0));
+  }catch(e){}
+  window.addEventListener('online', function(){ addLog('mark', 'network-status', '📶 آنلاین شد', ''); });
+  window.addEventListener('offline', function(){ addLog('suspicious', 'network-status', '📵 آفلاین شد (بدون اتصال شبکه)', ''); });
+
+  /* 1) console.* */
+  ['log','info','warn','error','debug'].forEach(function(level){
+    var orig = console[level] ? console[level].bind(console) : function(){};
+    console[level] = function(){
+      var args = Array.prototype.slice.call(arguments);
+      var text;
+      try {
+        text = args.map(function(a){
+          if (typeof a === 'string') return a;
+          try { return JSON.stringify(a); } catch(e){ return String(a); }
+        }).join(' ');
+      } catch(e){ text = '[unserializable]'; }
+      var type = (level === 'error') ? 'error' : (level === 'warn' ? 'suspicious' : 'console');
+      addLog(type, 'console.'+level, maskSecrets(text).slice(0,300), maskSecrets(text));
+      orig.apply(console, args);
+    };
+  });
+
+  /* 2) fetch */
+  var origFetch = window.fetch ? window.fetch.bind(window) : null;
+  function headersToObj(h){
+    var obj = {};
+    try{
+      if (!h) return obj;
+      if (typeof Headers !== 'undefined' && h instanceof Headers){ h.forEach(function(v,k){ obj[k]=v; }); return obj; }
+      return h;
+    }catch(e){ return obj; }
+  }
+  /* واچ‌داگِ درخواست‌های آویزون: اگه یه fetch نه جواب بده نه ارور بده (بلاک بی‌صدا،
+     نه ریجکتِ تمیز)، بدون این هیچ‌وقت تو لاگ چیزی جز همون خط اولیه‌ی "fetch →"
+     نمی‌بینیم. این هر چند ثانیه چک می‌کنه و صریح می‌گه "هنوز معلقه". */
+  var pendingReqs = {};
+  var pendingIdSeq = 0;
+  setInterval(function(){
+    var now = Date.now();
+    Object.keys(pendingReqs).forEach(function(id){
+      var p = pendingReqs[id];
+      var elapsed = now - p.start;
+      var thresholds = [6000, 15000, 30000, 60000];
+      for (var i=0;i<thresholds.length;i++){
+        if (elapsed >= thresholds[i] && !p.notified[i]) {
+          p.notified[i] = true;
+          addLog('suspicious', 'fetch ⏳', p.method+' '+maskSecrets(p.url)+'  — هنوز پاسخی نیومده ('+Math.round(elapsed/1000)+'s)',
+            'اگه این عدد بالا و بالاتر بره و آخرش هیچ‌وقت fetch ← یا fetch ✕ نیاد، خیلی محتمله درخواست جایی تو مسیر بی‌صدا drop می‌شه (بلاک شبکه‌ای)، نه اینکه سرور کند جواب بده یا خطای تمیز برگردونه.');
+        }
+      }
+    });
+  }, 1000);
+  if (origFetch) {
+    window.fetch = function(input, init){
+      var url = (typeof input === 'string') ? input : (input && input.url) || '';
+      var method = (init && init.method) || (input && input.method) || 'GET';
+      var start = Date.now();
+      var reqHeaders = headersToObj(init && init.headers);
+      var reqBodyPreview = '';
+      try { if (init && init.body && typeof init.body === 'string') reqBodyPreview = maskSecrets(init.body).slice(0,300); } catch(e){}
+      addLog('network', 'fetch →', method + ' ' + maskSecrets(url),
+        'headers: ' + maskSecrets(JSON.stringify(reqHeaders)) + (reqBodyPreview ? ('\nbody: ' + reqBodyPreview) : ''));
+      var pid = ++pendingIdSeq;
+      pendingReqs[pid] = { url: url, method: method, start: start, notified: [false,false,false,false] };
+      function settle(){ delete pendingReqs[pid]; }
+      return origFetch(input, init).then(function(res){
+        settle();
+        var dur = Date.now() - start;
+        var ct = '';
+        try { ct = res.headers.get('content-type') || ''; } catch(e){}
+        var isTextish = ct === '' || /json|text|xml|javascript/i.test(ct);
+        var statusOk = res.ok;
+        if (!isTextish) {
+          addLog(statusOk ? 'network' : 'error', 'fetch ←', method+' '+maskSecrets(url)+'  ['+res.status+']  '+dur+'ms', '(بدنه‌ی غیرمتنی، content-type: '+ct+' — نمایش داده نشد)');
+          return res;
+        }
+        try{
+          res.clone().text().then(function(bodyText){
+            addLog(statusOk ? 'network' : 'error', 'fetch ←', method+' '+maskSecrets(url)+'  ['+res.status+']  '+dur+'ms', maskSecrets(bodyText).slice(0,600));
+          }).catch(function(){
+            addLog(statusOk ? 'network' : 'error', 'fetch ←', method+' '+maskSecrets(url)+'  ['+res.status+']  '+dur+'ms', '(خواندن بدنه ممکن نشد)');
+          });
+        }catch(e){
+          addLog(statusOk ? 'network' : 'error', 'fetch ←', method+' '+maskSecrets(url)+'  ['+res.status+']  '+dur+'ms', '(خواندن بدنه ممکن نشد)');
+        }
+        return res;
+      }).catch(function(err){
+        settle();
+        var dur = Date.now() - start;
+        addLog('error', 'fetch ✕', method+' '+maskSecrets(url)+'  [شکست شبکه]  '+dur+'ms',
+          'خطا: ' + ((err && err.message) || String(err)) + ' — یعنی درخواست اصلاً به سرور نرسیده (DNS/فیلترینگ/قطعی شبکه)، نه اینکه سرور جواب رد داده باشه.');
+        throw err;
+      });
+    };
+  }
+
+  /* 3) WebSocket (اتصال realtime سوپابیس) */
+  if (window.WebSocket) {
+    var OrigWS = window.WebSocket;
+    var WrappedWS = function(url, protocols){
+      addLog('network', 'ws →', 'اتصال WebSocket: ' + maskSecrets(String(url)), '');
+      var ws = protocols !== undefined ? new OrigWS(url, protocols) : new OrigWS(url);
+      ws.addEventListener('open', function(){ addLog('network', 'ws', 'WebSocket باز شد', maskSecrets(String(url))); });
+      ws.addEventListener('error', function(){ addLog('error', 'ws ✕', 'خطای WebSocket', maskSecrets(String(url)) + ' — معمولاً یعنی مسیر شبکه به این آدرس مسدود/ناپایداره.'); });
+      ws.addEventListener('close', function(e){ addLog('suspicious', 'ws', 'WebSocket بسته شد (code='+e.code+', clean='+e.wasClean+')', maskSecrets(String(url)) + (e.reason?(' | reason: '+e.reason):'')); });
+      return ws;
+    };
+    WrappedWS.prototype = OrigWS.prototype;
+    window.WebSocket = WrappedWS;
+  }
+
+  /* 4) خطاهای سراسری */
+  window.addEventListener('error', function(e){
+    addLog('error', 'window.onerror', (e.message || 'خطای ناشناخته') + ' @' + (e.filename||'') + ':' + (e.lineno||''),
+      (e.error && e.error.stack) ? e.error.stack : '');
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    var reason = e.reason;
+    var text = (reason && reason.message) ? reason.message : String(reason);
+    var detail = (reason && reason.stack) ? reason.stack : (function(){ try{ return JSON.stringify(reason); }catch(x){ return ''; } })();
+    addLog('error', 'unhandledrejection', text, detail);
+  });
+
+  /* 5) پلاگین‌های Capacitor — خودکار، هروقت آماده شدن */
+  var pluginsWrapped = false;
+  function tryWrapPlugins(){
+    if (pluginsWrapped || !(window.Capacitor && window.Capacitor.Plugins)) return;
+    pluginsWrapped = true;
+    var names = Object.keys(window.Capacitor.Plugins);
+    names.forEach(function(pluginName){
+      var plugin = window.Capacitor.Plugins[pluginName];
+      if (!plugin) return;
+      Object.keys(plugin).forEach(function(methodName){
+        var orig = plugin[methodName];
+        if (typeof orig !== 'function') return;
+        plugin[methodName] = function(){
+          var args = Array.prototype.slice.call(arguments);
+          /* addListener('eventName', cb) رجیستر می‌کنه، ولی خودِ رویدادها بعداً
+             و به‌صورت ناهمگام از سمت نیتیو صدا زده می‌شن — بدون این wrap، هیچ‌وقت
+             نمی‌بینیم مثلاً وضعیت شبکه (Network plugin) یا resume/pause (App
+             plugin) یا رسیدن پوش کِی اتفاق افتاده. */
+          if (methodName === 'addListener' && typeof args[1] === 'function') {
+            var eventName = args[0];
+            var origCb = args[1];
+            args[1] = function(){
+              var cbArgs = Array.prototype.slice.call(arguments);
+              var preview = ''; try{ preview = maskSecrets(JSON.stringify(cbArgs[0]||{})).slice(0,300); }catch(e){}
+              addLog('plugin', pluginName+'.on:'+eventName, preview, '');
+              return origCb.apply(this, cbArgs);
+            };
+          }
+          var argPreview = '';
+          try { argPreview = maskSecrets(JSON.stringify(args[0]||{})).slice(0,200); } catch(e){}
+          addLog('plugin', pluginName+'.'+methodName+' →', argPreview, '');
+          var result;
+          try { result = orig.apply(plugin, args); }
+          catch(err){ addLog('error', pluginName+'.'+methodName+' ✕', (err&&err.message)||String(err), ''); throw err; }
+          if (result && typeof result.then === 'function') {
+            return result.then(function(res){
+              var rs = ''; try{ rs = maskSecrets(JSON.stringify(res||{})).slice(0,300); }catch(e){}
+              addLog('plugin', pluginName+'.'+methodName+' ←', rs, '');
+              return res;
+            }).catch(function(err){
+              addLog('error', pluginName+'.'+methodName+' ✕', (err&&err.message)||String(err), '');
+              throw err;
+            });
+          }
+          return result;
+        };
+      });
+    });
+    var platformInfo = '';
+    try{
+      platformInfo = ' | platform=' + (window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : '?') +
+        ' | native=' + (window.Capacitor.isNativePlatform ? window.Capacitor.isNativePlatform() : '?');
+    }catch(e){}
+    addLog('mark', 'debug-panel', 'پلاگین‌های Capacitor آماده شدن' + platformInfo + ': ' + names.join(', '), '');
+  }
+  var wrapInterval = setInterval(function(){ tryWrapPlugins(); if (pluginsWrapped) clearInterval(wrapInterval); }, 250);
+  setTimeout(function(){ clearInterval(wrapInterval); }, 30000);
+
+  /* 6) رابط کاربری پنل */
+  document.addEventListener('DOMContentLoaded', function(){
+    var panel = document.getElementById('__debugPanel');
+    var listEl = document.getElementById('__debugPanelList');
+    var trigger = document.getElementById('__debugTrigger');
+    if (!panel || !listEl) return;
+    var tapCount = 0, tapTimer = null;
+
+    var colors = { console:'#9ca3af', network:'#60a5fa', error:'#f87171', suspicious:'#fbbf24', plugin:'#34d399', mark:'#a78bfa' };
+    var labels = { console:'کنسول', network:'شبکه', error:'خطا', suspicious:'مشکوک', plugin:'پلاگین', mark:'—' };
+
+    function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function rowHtml(l){
+      var color = colors[l.type] || '#9ca3af';
+      var label = labels[l.type] || l.type;
+      var detailHtml = l.detail ? ('<div style="margin-top:4px;padding:6px;background:#00000055;border-radius:6px;white-space:pre-wrap;word-break:break-all;font-size:11px;color:#d1d5db;">'+escapeHtml(l.detail)+'</div>') : '';
+      return '<div style="padding:8px 10px;border-bottom:1px solid #ffffff14;">'+
+        '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;">'+
+          '<span style="font-size:10px;color:#6b7280;white-space:nowrap;">'+l.t+'</span>'+
+          '<span style="font-size:10px;font-weight:700;color:'+color+';border:1px solid '+color+';border-radius:4px;padding:1px 5px;white-space:nowrap;">'+label+'</span>'+
+          '<span style="font-size:11px;color:#e5e7eb;word-break:break-all;">'+escapeHtml(l.source)+'</span>'+
+        '</div>'+
+        '<div style="font-size:12px;color:#f3f4f6;margin-top:2px;word-break:break-all;">'+escapeHtml(l.summary)+'</div>'+
+        detailHtml+
+      '</div>';
+    }
+    function renderAll(){ listEl.innerHTML = logs.map(rowHtml).join(''); listEl.scrollTop = listEl.scrollHeight; }
+    function openPanel(){ panel.style.display = 'flex'; renderAll(); }
+    function closePanel(){ panel.style.display = 'none'; }
+
+    if (trigger) trigger.addEventListener('click', function(){
+      tapCount++; clearTimeout(tapTimer); tapTimer = setTimeout(function(){ tapCount = 0; }, 1500);
+      if (tapCount >= 7) { tapCount = 0; openPanel(); }
+    });
+    if (location.hash === '#debugpanel') openPanel();
+
+    var closeBtn = document.getElementById('__debugPanelClose');
+    if (closeBtn) closeBtn.addEventListener('click', closePanel);
+    var clearBtn = document.getElementById('__debugPanelClear');
+    if (clearBtn) clearBtn.addEventListener('click', function(){ logs.length = 0; renderAll(); });
+    var copyBtn = document.getElementById('__debugPanelCopy');
+    if (copyBtn) copyBtn.addEventListener('click', function(){
+      var text = logs.map(function(l){ return '['+l.t+'] ('+labels[l.type]+') '+l.source+' — '+l.summary + (l.detail?('\n    '+l.detail):''); }).join('\n');
+      function fallbackCopy(t){ var ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} document.body.removeChild(ta); }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function(){ copyBtn.textContent='کپی شد ✓'; setTimeout(function(){ copyBtn.textContent='کپی همه'; },1500); }).catch(function(){ fallbackCopy(text); });
+      } else { fallbackCopy(text); }
+    });
+
+    listeners.push(function(entry){
+      if (panel.style.display === 'flex') { listEl.insertAdjacentHTML('beforeend', rowHtml(entry)); listEl.scrollTop = listEl.scrollHeight; }
+    });
+
+    addLog('mark', 'debug-panel', 'پنل دیباگ آماده‌ست — برای باز کردن، ۷ بار سریع رو نقطه‌ی کم‌رنگ گوشه‌ی پایین-چپ بزن، یا #debugpanel رو به آدرس اضافه کن.', '');
+  });
+})();
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>چک‌لیست روزانه</title>
@@ -3119,6 +3422,13 @@
   .chat-msg .cm-action.cm-report:hover{color:#c98a1a;}
   .chat-msg .cm-action.cm-block:hover{color:#c1493d;}
   .chat-msg .cm-action.cm-suspend:hover{color:#d9822b;}
+  /* Telegram-style "X unread messages" divider dropped above the first unread message
+     (see chatUnreadDividerHtml/renderPublicChatMessages in app.js) — a centered pill with
+     a line on each side, sitting flush across the message list's own width. */
+  .cm-unread-divider{display:flex;align-items:center;gap:10px;margin:14px 4px 10px;}
+  .cm-unread-divider .cmud-line{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:.55;}
+  .cm-unread-divider .cmud-label{flex:none;font-size:11px;font-weight:800;color:var(--accent);
+    background:var(--accent-soft);border:1px solid rgba(0,0,0,.05);padding:4px 12px;border-radius:20px;white-space:nowrap;}
   /* Inline edit box: swaps in for .cm-text while a message is being edited */
   .cm-edit-box{display:flex;flex-direction:column;gap:6px;}
   .cm-edit-textarea{width:100%;min-height:52px;resize:vertical;background:var(--card-2);
@@ -3177,6 +3487,11 @@
   .chat-msg.cm-media-only .cm-bottom-row:empty{display:none;}
   /* Report message now behaves like a normal message in the flow — see the premium redesign below,
      which drops the old centered/oversized treatment in favor of a compact inline card. */
+  /* Auto-linkified URLs/phone numbers inside chat text (see linkifyChatText in app.js) —
+     stays readable on both own (colored) and others' (neutral) bubbles, and never
+     overflows the bubble on a long link. */
+  .cm-link{color:var(--accent);text-decoration:underline;word-break:break-all;}
+  .chat-msg.own .cm-link{color:inherit;text-decoration-color:currentColor;opacity:.92;}
   .chat-msg.report-msg{background:linear-gradient(160deg,rgba(124,58,237,.14),rgba(37,99,235,.10));
     border:1px solid rgba(124,58,237,.4);box-shadow:0 2px 10px rgba(99,60,220,.18);border-radius:16px;}
   .chat-msg.report-msg .cm-name{color:#7c3aed;}
@@ -3573,8 +3888,20 @@
   }
   body.chat-fullscreen .mode-bar{border-radius:0;}
   body.chat-fullscreen #tab-chat.tab-panel{margin:0;}
+  /* ---- باگ: روی باکس چت باید دوبار ضربه می‌زدی تا کیبورد بیاد بالا، و دکمه‌ی ارسال
+     تا کیبورد بسته نمی‌شد کار نمی‌کرد. علتش این بود که این پنل position:fixed با
+     bottom ثابت (calc(45px + safe-area)) داشت؛ رو اکثر WebViewهای اندروید، وقتی
+     کیبورد باز می‌شه layout viewport عوض نمی‌شه (فقط visual viewport کوچیک می‌شه)،
+     پس این عنصر fixed سرجای «قبل از باز شدن کیبورد» می‌مونه و مختصات لمس با موقعیت
+     واقعیِ نمایش‌داده‌شده هم‌خوان نیست — تا کیبورد بسته بشه و دو ویوپورت دوباره یکی
+     بشن. راه‌حل: bottom الان به‌جای مقدار ثابت، از یه متغیر CSS (--chat-kb-offset)
+     استفاده می‌کنه که با JS (پایین همین فایل، بخش «کیبورد چت») از روی
+     window.visualViewport هر بار کیبورد باز/بسته می‌شه آپدیت می‌شه؛ یعنی پنل همیشه
+     دقیقاً بالای کیبوردِ واقعاً دیده‌شده می‌شینه، نه بالای یه فرض اشتباه. ---- */
   body.chat-fullscreen #tab-chat .section.chat-premium-panel{
-    position:fixed;top:32px;bottom:calc(45px + env(safe-area-inset-bottom,0px));left:0;right:0;
+    position:fixed;top:32px;
+    bottom:max(calc(45px + env(safe-area-inset-bottom,0px)), var(--chat-kb-offset, 0px));
+    left:0;right:0;
     max-width:640px;margin:0 auto;width:100%;height:auto;
     border-radius:0;border:none;
   }
@@ -3615,6 +3942,175 @@
   .gif-picker-tab{flex:1;border:1px solid var(--line);background:var(--card-2);color:var(--muted);
     font-family:inherit;font-size:12px;font-weight:800;padding:8px 6px;border-radius:20px;cursor:pointer;}
   .gif-picker-tab.active{background:var(--accent);color:var(--accent-text);border-color:var(--accent);}
+
+  /* ================= Public chat: simple pre-send photo editor (crop + adjust) =================
+     Full-screen overlay opened right after picking a static image (PNG/JPEG/WebP — not GIF/video,
+     see peShouldEdit() in app.js) from the attach menu, before it's uploaded to chat. Three tools —
+     کراپ (crop, with aspect presets + 90° rotate), تنظیمات (brightness/contrast/saturation), and
+     نقاشی (freehand draw: swatches + custom color, brush size, undo, clear-all). Chrome (header/tab-bar/
+     bottom panel) is themed with the app's own tokens (--accent/--accent-2/--card etc.) so it
+     re-skins with whichever theme the user picked; the stage itself (where the photo sits) stays a
+     fixed neutral dark regardless of theme — the same convention every photo editor uses (Instagram/
+     WhatsApp/Telegram included), since crop guides and photo colors both need a neutral backdrop to
+     read correctly against any picture. */
+  .pe-overlay{position:fixed;inset:0;z-index:9700;background:#0b0c10;display:none;flex-direction:column;}
+  .pe-overlay.show{display:flex;animation:peFadeIn .16s ease;}
+  @keyframes peFadeIn{from{opacity:0;}to{opacity:1;}}
+  .pe-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:14px 12px;padding-top:calc(14px + env(safe-area-inset-top,0px));}
+  .pe-head-btn{width:38px;height:38px;border-radius:50%;border:none;flex-shrink:0;
+    background:rgba(255,255,255,.08);color:#fff;display:flex;align-items:center;justify-content:center;
+    cursor:pointer;padding:0;}
+  .pe-head-btn svg{width:18px;height:18px;}
+  .pe-head-btn:active{background:rgba(255,255,255,.16);}
+  .pe-head-btn.pe-send{background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);color:var(--accent-text,#fff);}
+  .pe-head-btn.pe-send:disabled{opacity:.55;}
+  .pe-tabs{display:flex;gap:4px;background:rgba(255,255,255,.06);border-radius:14px;padding:3px;}
+  .pe-tab{border:none;background:none;color:rgba(255,255,255,.6);font-family:inherit;font-size:12px;font-weight:700;
+    padding:7px 14px;border-radius:11px;cursor:pointer;}
+  .pe-tab.active{background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);color:var(--accent-text,#fff);}
+  .pe-stage{flex:1 1 auto;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden;min-height:0;}
+  #peBaseCanvas{display:block;touch-action:none;}
+  .pe-crop-layer{position:absolute;pointer-events:none;}
+  .pe-crop-rect{position:absolute;pointer-events:auto;touch-action:none;
+    box-shadow:0 0 0 9999px rgba(0,0,0,.6);border:1.5px solid rgba(255,255,255,.9);cursor:move;}
+  .pe-crop-grid{position:absolute;inset:0;pointer-events:none;opacity:.55;}
+  .pe-crop-grid span{position:absolute;background:rgba(255,255,255,.7);}
+  .pe-crop-grid span:nth-child(1){left:33.333%;top:0;bottom:0;width:1px;}
+  .pe-crop-grid span:nth-child(2){left:66.666%;top:0;bottom:0;width:1px;}
+  .pe-crop-grid span:nth-child(3){top:33.333%;left:0;right:0;height:1px;}
+  .pe-crop-grid span:nth-child(4){top:66.666%;left:0;right:0;height:1px;}
+  .pe-crop-handle{position:absolute;width:26px;height:26px;pointer-events:auto;touch-action:none;}
+  .pe-crop-handle::after{content:'';position:absolute;top:5px;left:5px;width:16px;height:16px;
+    background:#fff;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.4);}
+  .pe-ch-tl{top:-13px;left:-13px;cursor:nwse-resize;}
+  .pe-ch-tr{top:-13px;right:-13px;cursor:nesw-resize;}
+  .pe-ch-bl{bottom:-13px;left:-13px;cursor:nesw-resize;}
+  .pe-ch-br{bottom:-13px;right:-13px;cursor:nwse-resize;}
+  .pe-panel{flex:0 0 auto;background:rgba(20,20,26,.92);
+    padding:12px 14px calc(14px + env(safe-area-inset-bottom,0px));
+    display:flex;align-items:center;gap:12px;}
+  .pe-aspect-row{flex:1 1 auto;display:flex;gap:6px;overflow-x:auto;padding:2px 0;}
+  .pe-aspect-btn{flex-shrink:0;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);
+    color:rgba(255,255,255,.75);font-family:inherit;font-size:11.5px;font-weight:700;
+    padding:7px 14px;border-radius:20px;cursor:pointer;}
+  .pe-aspect-btn.active{background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);
+    border-color:transparent;color:var(--accent-text,#fff);}
+  .pe-rotate-btn{flex-shrink:0;width:38px;height:38px;border-radius:50%;border:none;
+    background:rgba(255,255,255,.08);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+  .pe-rotate-btn svg{width:18px;height:18px;}
+  .pe-rotate-btn:active{background:rgba(255,255,255,.16);}
+  #peAdjustPanel{flex-direction:column;align-items:stretch;gap:14px;}
+  .pe-slider-row{flex:1 1 auto;display:flex;align-items:center;gap:10px;}
+  .pe-slider-label{flex-shrink:0;width:66px;font-size:11.5px;font-weight:700;color:rgba(255,255,255,.75);}
+  .pe-slider{flex:1 1 auto;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;
+    background:rgba(255,255,255,.22);outline:none;margin:0;}
+  .pe-slider::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;
+    background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);cursor:pointer;
+    box-shadow:0 1px 4px rgba(0,0,0,.4);}
+  .pe-slider::-moz-range-thumb{width:18px;height:18px;border:none;border-radius:50%;
+    background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);cursor:pointer;
+    box-shadow:0 1px 4px rgba(0,0,0,.4);}
+  /* ---- draw tab: transparent canvas stacked exactly over peBaseCanvas (sized/positioned in JS,
+     see peFitDrawCanvasToStage in app.js); pointer-events only turned on while this tab is active,
+     so crop-dragging / adjust-sliders on the other tabs pass through untouched. ---- */
+  #peDrawCanvas{position:absolute;touch-action:none;}
+  .pe-draw-colors{flex:1 1 auto;display:flex;gap:7px;overflow-x:auto;padding:2px 0;align-items:center;}
+  .pe-draw-swatch{flex-shrink:0;width:26px;height:26px;border-radius:50%;border:2px solid transparent;
+    padding:0;cursor:pointer;box-shadow:0 0 0 1px rgba(255,255,255,.25) inset;}
+  .pe-draw-swatch.active{border-color:#fff;}
+  .pe-draw-color-custom{flex-shrink:0;width:26px;height:26px;border-radius:50%;
+    border:2px solid rgba(255,255,255,.4);padding:0;background:none;cursor:pointer;-webkit-appearance:none;overflow:hidden;}
+  .pe-draw-color-custom::-webkit-color-swatch-wrapper{padding:0;}
+  .pe-draw-color-custom::-webkit-color-swatch{border:none;border-radius:50%;}
+  .pe-brush-slider{flex:0 0 64px;width:64px;}
+  .pe-brush-wrap{flex-shrink:0;display:flex;align-items:center;gap:8px;}
+  .pe-brush-preview{flex-shrink:0;border-radius:50%;width:22px;height:22px;background:#fff;
+    border:1.5px solid rgba(255,255,255,.5);box-shadow:0 1px 3px rgba(0,0,0,.35);}
+  .pe-rotate-btn:disabled{opacity:.35;cursor:default;}
+  .pe-head-btn:disabled{opacity:.4;cursor:default;}
+
+  /* ---- video trim editor: reuses the same .pe-overlay/.pe-head/.pe-tabs/.pe-panel chrome as the
+     photo editor above (same look, same safe-area handling, same theming) — only the stage content
+     (a <video> instead of a <canvas>) and the trim scrubber below are new. See veOpen() in app.js
+     for why trimming needs a real re-encode pass instead of a cheap crop-style export. ---- */
+  #veVideo{max-width:100%;max-height:100%;display:block;background:#000;}
+  #veTrimPanel{flex-direction:column;align-items:stretch;gap:14px;}
+  .ve-time-row{display:flex;align-items:center;gap:12px;}
+  .ve-play-btn{flex-shrink:0;width:38px;height:38px;border-radius:50%;border:none;
+    background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);color:var(--accent-text,#fff);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+  .ve-play-btn svg{width:16px;height:16px;}
+  .ve-play-btn:active{filter:brightness(.92);}
+  .ve-time-label{font-size:12.5px;font-weight:700;color:rgba(255,255,255,.8);
+    font-variant-numeric:tabular-nums;letter-spacing:.2px;}
+  .ve-scrub-track{position:relative;height:46px;border-radius:12px;background:rgba(255,255,255,.1);
+    touch-action:none;}
+  .ve-scrub-selected{position:absolute;top:0;bottom:0;background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);
+    opacity:.55;border-top:1.5px solid rgba(255,255,255,.85);border-bottom:1.5px solid rgba(255,255,255,.85);
+    pointer-events:none;}
+  .ve-scrub-playhead{position:absolute;top:-3px;bottom:-3px;width:2px;background:#fff;
+    box-shadow:0 0 3px rgba(0,0,0,.6);pointer-events:none;transform:translateX(-1px);}
+  .ve-scrub-handle{position:absolute;top:0;bottom:0;width:16px;margin-left:-8px;
+    background:#fff;border-radius:6px;cursor:ew-resize;touch-action:none;
+    box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;gap:2px;}
+  .ve-scrub-handle::before,.ve-scrub-handle::after{content:'';width:1.5px;height:14px;
+    background:rgba(0,0,0,.35);border-radius:1px;}
+
+  /* ---- video editor, stage 2 (تنظیمات): brightness/contrast/saturation reuse the exact
+     .pe-slider-row/.pe-slider-label/.pe-slider classes from the photo editor's adjust tab above —
+     same look, so no new slider CSS needed here. The mute-audio toggle reuses .pe-aspect-btn as a
+     single standalone pill button (its .active state already means "this is the current choice",
+     which is exactly what a toggle needs). ---- */
+  #veAdjustPanel{flex-direction:column;align-items:stretch;gap:14px;}
+
+  /* ---- video editor, stage 3 (کاور): a second scrub track for picking the poster frame. Reuses
+     .ve-scrub-track/.ve-scrub-selected/.ve-scrub-handle wholesale (same track chrome as the trim
+     tab) — only two small modifiers on top: the range fill here is just context (where the trim
+     already cut things down to), dimmed further so it doesn't read as "draggable" the way the trim
+     tab's fill does, and the handle itself is round instead of the trim handles' grip-pill shape,
+     since there's only one of it and nothing to grip on either side. ---- */
+  #veCoverPanel{flex-direction:column;align-items:stretch;gap:14px;}
+  .ve-cover-range{opacity:.28;}
+  .ve-cover-handle{width:20px;margin-left:-10px;border-radius:50%;}
+  .ve-cover-handle::before,.ve-cover-handle::after{display:none;}
+
+  /* ---- video editor, stage 4 polish: a real frame filmstrip behind both scrub tracks (see
+     veBuildFilmstrip() in app.js), and a progress overlay over the stage during the export wait
+     instead of just disabled buttons and no feedback. direction:ltr on the filmstrip is
+     deliberate, not a mistake — the page is dir="rtl", but this track is positioned by time
+     fraction using physical `left`, same as the handles/selected-range fills above, so the
+     frames need to stay in physical left-to-right chronological order regardless of text
+     direction, or they'd render mirrored (last frame on the left). ---- */
+  .ve-filmstrip{position:absolute;inset:0;display:flex;flex-direction:row;direction:ltr;
+    border-radius:12px;overflow:hidden;pointer-events:none;background:#000;}
+  .ve-filmstrip img{flex:1 1 0;min-width:0;height:100%;object-fit:cover;display:block;}
+  .ve-export-overlay{position:absolute;inset:0;background:rgba(0,0,0,.72);z-index:2;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;}
+  .ve-export-spinner{width:32px;height:32px;border-radius:50%;flex-shrink:0;
+    border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:ve-spin .8s linear infinite;}
+  @keyframes ve-spin{to{transform:rotate(360deg);}}
+  .ve-export-label{font-size:13px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;}
+  .ve-export-bar-track{width:70%;max-width:220px;height:6px;border-radius:3px;overflow:hidden;
+    background:rgba(255,255,255,.18);}
+  .ve-export-bar-fill{height:100%;width:0%;border-radius:3px;transition:width .15s linear;
+    background:linear-gradient(135deg,var(--accent) 0%,var(--accent-2) 100%);}
+
+  /* ---- video editor, stage 5 (افکت): a horizontally-scrolling row of filter-preset thumbnails,
+     each just an <img> reusing one captured frame (see veRenderFilterRow() in app.js) with a
+     different CSS `filter` inline style — cheap, since the browser does the preset preview for
+     free instead of baking 8 separate bitmaps. Sits between تنظیمات and کاور in the tab order so
+     a chosen preset is already visible by the time the user picks a cover frame. ---- */
+  #veEffectsPanel{padding:12px 14px calc(14px + env(safe-area-inset-bottom,0px));}
+  .ve-filter-row{flex:1 1 auto;display:flex;gap:10px;overflow-x:auto;padding:2px 2px 4px;}
+  .ve-filter-item{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:6px;
+    background:none;border:none;padding:0;cursor:pointer;font-family:inherit;}
+  .ve-filter-thumb{width:54px;height:54px;border-radius:14px;object-fit:cover;background:#111;
+    border:2px solid transparent;display:block;}
+  .ve-filter-item.active .ve-filter-thumb{border-color:var(--accent);
+    box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);}
+  .ve-filter-name{font-size:10.5px;font-weight:700;color:rgba(255,255,255,.75);white-space:nowrap;}
+  .ve-filter-item.active .ve-filter-name{color:#fff;}
 
   /* ---- fixed header: community icon / title / member indicator / user chip / actions ---- */
   #tab-chat .chat-user-row{
@@ -5975,6 +6471,20 @@ overflow:hidden;
 <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7"></script>
 </head>
 <body>
+
+<div id="__debugTrigger" style="position:fixed;bottom:6px;left:6px;width:28px;height:28px;z-index:999999;opacity:0.07;background:#000;border-radius:50%;"></div>
+
+<div id="__debugPanel" style="display:none;position:fixed;inset:0;z-index:9999999;background:#0b0f1a;flex-direction:column;font-family:monospace;direction:ltr;">
+  <div style="display:flex;align-items:center;gap:8px;padding:10px;background:#111827;border-bottom:1px solid #374151;flex-wrap:wrap;">
+    <strong style="color:#f9fafb;font-size:13px;direction:rtl;">پنل دیباگ (شبکه / کنسول / پلاگین)</strong>
+    <span style="flex:1"></span>
+    <button id="__debugPanelCopy" style="padding:6px 10px;border-radius:6px;border:none;background:#2563eb;color:#fff;font-size:12px;">کپی همه</button>
+    <button id="__debugPanelClear" style="padding:6px 10px;border-radius:6px;border:none;background:#374151;color:#fff;font-size:12px;">پاک کردن</button>
+    <button id="__debugPanelClose" style="padding:6px 10px;border-radius:6px;border:none;background:#dc2626;color:#fff;font-size:12px;">بستن</button>
+  </div>
+  <div id="__debugPanelList" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;"></div>
+</div>
+
 <div class="bg-decor" aria-hidden="true">
   <div class="bg-blob bg-blob-1"></div>
   <div class="bg-blob bg-blob-2"></div>
@@ -8933,7 +9443,7 @@ overflow:hidden;
       <div class="section chat-auth-card">
         <div class="section-head"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.3" r="3.6"/><path d="M4.7 19.5c1.3-3.4 4-5.1 7.3-5.1s6 1.7 7.3 5.1"/></svg></span> اکانت</div>
         <div style="padding:0 14px 10px;font-size:11.5px;color:var(--muted);line-height:1.8;">
-          برای استفاده از این بخش و بقیه‌ی امکانات برنامه (تمرین، کتابخونه، مدیتیشن، فن بیان، مشاور شخصی، پیشرفت و دعوت از دوستان) یه اکانت رایگان بساز یا وارد شو. تب‌های «امروز» و «تنظیمات» بدون نیاز به اکانت در دسترسن.
+          برای استفاده از بخش عمومی (چت، لیدربورد، هم‌مسیر، پروفایل) یه اکانت رایگان بساز یا وارد شو.
         </div>
         <div class="chat-auth-tabs">
           <div class="chat-auth-tab active" id="chatTabLogin">ورود</div>
@@ -9141,6 +9651,166 @@ overflow:hidden;
       <button type="button" class="gif-picker-tab" data-tab="recent"><span class="ci"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.8l2.7 5.9 6.3.7-4.7 4.4 1.3 6.4-5.6-3.3-5.6 3.3 1.3-6.4-4.7-4.4 6.3-.7z"/></svg></span> اخیرا استفاده‌شده</button>
     </div>
     <div class="cm-ov-body gif-picker-grid" id="gifPickerGrid"><div class="cm-ov-loading">در حال بارگذاری گیف‌های پرطرفدار...</div></div>
+  </div>
+
+  <!-- ===================== چت عمومی: ادیتور ساده‌ی عکس قبل از ارسال (کراپ + تنظیمات) =====================
+       فقط برای عکس‌های استاتیک (PNG/JPEG/WebP) باز می‌شه؛ گیف و ویدیو همون مسیر قبلی رو می‌رن.
+       منطقش تو app.js، توابعی که با پیشوندِ pe شروع می‌شن (peOpen/peRenderBase/...). -->
+  <div class="pe-overlay" id="photoEditorOverlay">
+    <div class="pe-head">
+      <button type="button" class="pe-head-btn" id="peCancelBtn" aria-label="لغو"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="pe-tabs" id="peTabs">
+        <button type="button" class="pe-tab active" data-tab="crop">کراپ</button>
+        <button type="button" class="pe-tab" data-tab="adjust">تنظیمات</button>
+        <button type="button" class="pe-tab" data-tab="draw">نقاشی</button>
+      </div>
+      <button type="button" class="pe-head-btn pe-send" id="peSendBtn" aria-label="اعمال و ارسال" title="اعمال و ارسال">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" pathLength="1"></polyline></svg>
+      </button>
+    </div>
+
+    <div class="pe-stage" id="peStage">
+      <canvas id="peBaseCanvas"></canvas>
+      <canvas id="peDrawCanvas"></canvas>
+      <div class="pe-crop-layer" id="peCropLayer">
+        <div class="pe-crop-rect" id="peCropRect">
+          <div class="pe-crop-grid"><span></span><span></span><span></span><span></span></div>
+          <div class="pe-crop-handle pe-ch-tl" data-h="tl"></div>
+          <div class="pe-crop-handle pe-ch-tr" data-h="tr"></div>
+          <div class="pe-crop-handle pe-ch-bl" data-h="bl"></div>
+          <div class="pe-crop-handle pe-ch-br" data-h="br"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pe-panel" id="peCropPanel">
+      <div class="pe-aspect-row" id="peAspectRow">
+        <button type="button" class="pe-aspect-btn active" data-aspect="free">آزاد</button>
+        <button type="button" class="pe-aspect-btn" data-aspect="1:1">۱:۱</button>
+        <button type="button" class="pe-aspect-btn" data-aspect="4:5">۴:۵</button>
+        <button type="button" class="pe-aspect-btn" data-aspect="3:4">۳:۴</button>
+        <button type="button" class="pe-aspect-btn" data-aspect="16:9">۱۶:۹</button>
+      </div>
+      <button type="button" class="pe-rotate-btn" id="peRotateBtn" aria-label="چرخش عکس" title="چرخش عکس">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 1 3 6.7"/><path d="M3 21v-6h6"/></svg>
+      </button>
+    </div>
+
+    <div class="pe-panel" id="peAdjustPanel" style="display:none;">
+      <div class="pe-slider-row">
+        <span class="pe-slider-label">روشنایی</span>
+        <input type="range" id="peBrightness" min="50" max="150" value="100" class="pe-slider">
+      </div>
+      <div class="pe-slider-row">
+        <span class="pe-slider-label">کنتراست</span>
+        <input type="range" id="peContrast" min="50" max="150" value="100" class="pe-slider">
+      </div>
+      <div class="pe-slider-row">
+        <span class="pe-slider-label">اشباع رنگ</span>
+        <input type="range" id="peSaturate" min="0" max="200" value="100" class="pe-slider">
+      </div>
+    </div>
+
+    <div class="pe-panel" id="peDrawPanel" style="display:none;">
+      <div class="pe-draw-colors" id="peDrawColors">
+        <input type="color" id="peDrawColorPicker" class="pe-draw-color-custom" value="#ffffff" aria-label="رنگ دلخواه" title="رنگ دلخواه">
+        <button type="button" class="pe-draw-swatch active" data-color="#ffffff" style="background:#ffffff" aria-label="سفید"></button>
+        <button type="button" class="pe-draw-swatch" data-color="#1c1c1e" style="background:#1c1c1e" aria-label="مشکی"></button>
+        <button type="button" class="pe-draw-swatch" data-color="#ff3b30" style="background:#ff3b30" aria-label="قرمز"></button>
+        <button type="button" class="pe-draw-swatch" data-color="#ff9500" style="background:#ff9500" aria-label="نارنجی"></button>
+        <button type="button" class="pe-draw-swatch" data-color="#ffcc00" style="background:#ffcc00" aria-label="زرد"></button>
+        <button type="button" class="pe-draw-swatch" data-color="#34c759" style="background:#34c759" aria-label="سبز"></button>
+        <button type="button" class="pe-draw-swatch" data-color="#007aff" style="background:#007aff" aria-label="آبی"></button>
+        <button type="button" class="pe-draw-swatch" data-color="#5856d6" style="background:#5856d6" aria-label="بنفش"></button>
+        <button type="button" class="pe-draw-swatch" data-color="#ff2d78" style="background:#ff2d78" aria-label="صورتی"></button>
+      </div>
+      <div class="pe-brush-wrap">
+        <span class="pe-brush-preview" id="peBrushPreview" aria-hidden="true"></span>
+        <input type="range" id="peBrushSize" min="2" max="40" value="8" class="pe-slider pe-brush-slider" aria-label="ضخامت قلم" title="ضخامت قلم">
+      </div>
+      <button type="button" class="pe-rotate-btn" id="peDrawUndoBtn" aria-label="واگرد آخرین خط" title="واگرد آخرین خط" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+      </button>
+      <button type="button" class="pe-rotate-btn" id="peDrawClearBtn" aria-label="پاک کردن همه‌ی نقاشی" title="پاک کردن همه‌ی نقاشی">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===================== Pre-send video trim editor ===================== -->
+  <div class="pe-overlay" id="videoEditorOverlay">
+    <div class="pe-head">
+      <button type="button" class="pe-head-btn" id="veCancelBtn" aria-label="لغو"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="pe-tabs" id="veTabs">
+        <button type="button" class="pe-tab active" data-tab="trim">برش</button>
+        <button type="button" class="pe-tab" data-tab="adjust">تنظیمات</button>
+        <button type="button" class="pe-tab" data-tab="effects">افکت</button>
+        <button type="button" class="pe-tab" data-tab="cover">کاور</button>
+      </div>
+      <button type="button" class="pe-head-btn pe-send" id="veSendBtn" aria-label="اعمال و ارسال" title="اعمال و ارسال">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" pathLength="1"></polyline></svg>
+      </button>
+    </div>
+
+    <div class="pe-stage" id="veStage">
+      <video id="veVideo" playsinline muted></video>
+      <div class="ve-export-overlay" id="veExportOverlay" style="display:none;">
+        <div class="ve-export-spinner" aria-hidden="true"></div>
+        <div class="ve-export-label" id="veExportLabel">در حال آماده‌سازی…</div>
+        <div class="ve-export-bar-track"><div class="ve-export-bar-fill" id="veExportBarFill"></div></div>
+      </div>
+    </div>
+
+    <div class="pe-panel" id="veTrimPanel">
+      <div class="ve-time-row">
+        <button type="button" class="ve-play-btn" id="vePlayBtn" aria-label="پخش">
+          <svg id="vePlayIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg id="vePauseIcon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+        </button>
+        <span class="ve-time-label" id="veTimeLabel">۰:۰۰ – ۰:۰۰ · ۰ ثانیه</span>
+      </div>
+      <div class="ve-scrub-track" id="veScrubTrack">
+        <div class="ve-filmstrip" id="veFilmstrip"></div>
+        <div class="ve-scrub-selected" id="veScrubSelected"></div>
+        <div class="ve-scrub-playhead" id="veScrubPlayhead"></div>
+        <div class="ve-scrub-handle" id="veHandleStart" data-h="start"></div>
+        <div class="ve-scrub-handle" id="veHandleEnd" data-h="end"></div>
+      </div>
+    </div>
+
+    <div class="pe-panel" id="veAdjustPanel" style="display:none;">
+      <div class="pe-slider-row">
+        <span class="pe-slider-label">روشنایی</span>
+        <input type="range" id="veBrightness" min="50" max="150" value="100" class="pe-slider">
+      </div>
+      <div class="pe-slider-row">
+        <span class="pe-slider-label">کنتراست</span>
+        <input type="range" id="veContrast" min="50" max="150" value="100" class="pe-slider">
+      </div>
+      <div class="pe-slider-row">
+        <span class="pe-slider-label">اشباع رنگ</span>
+        <input type="range" id="veSaturate" min="0" max="200" value="100" class="pe-slider">
+      </div>
+      <div class="pe-slider-row">
+        <span class="pe-slider-label">صدا</span>
+        <button type="button" class="pe-aspect-btn" id="veMuteBtn" aria-pressed="false">بی‌صدا کردن</button>
+      </div>
+    </div>
+
+    <div class="pe-panel" id="veEffectsPanel" style="display:none;">
+      <div class="ve-filter-row" id="veFilterRow"></div>
+    </div>
+
+    <div class="pe-panel" id="veCoverPanel" style="display:none;">
+      <div class="ve-time-row">
+        <span class="ve-time-label" id="veCoverTimeLabel">کاور: ۰:۰۰</span>
+      </div>
+      <div class="ve-scrub-track" id="veCoverTrack">
+        <div class="ve-filmstrip" id="veCoverFilmstrip"></div>
+        <div class="ve-scrub-selected ve-cover-range" id="veCoverRange"></div>
+        <div class="ve-scrub-handle ve-cover-handle" id="veCoverHandle"></div>
+      </div>
+    </div>
   </div>
 
   <!-- ===================== TAB: INVITE FRIENDS ===================== -->
@@ -10292,7 +10962,6 @@ overflow:hidden;
     <button class="analyze-btn upd-download-btn" id="updDownloadBtn" style="display:none;">⬇️ دانلود نسخه‌ی جدید</button>
     <button class="analyze-btn upd-check-again" id="updRecheckBtn" style="background:var(--card);color:var(--text);border:1px solid var(--line);">بررسی مجدد</button>
 
-    <div class="upd-note">چون برنامه هنوز تو مایکت منتشر نشده، آپدیت‌ها مستقیم از همین‌جا و به‌صورت فایل نصبی (APK) در اختیارت قرار می‌گیرن. بعد از دانلود، فایل رو باز کن و اجازه‌ی نصب از منابع نامعتبر رو بده تا نسخه‌ی جدید جایگزین بشه. اطلاعات و پیشرفتت پاک نمی‌شه.</div>
   </div>
 
   <div class="tab-panel" id="tab-guide">
