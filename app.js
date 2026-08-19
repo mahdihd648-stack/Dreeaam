@@ -26325,9 +26325,14 @@ async function iabVerifyOnServer(purchase){
   try{
     const __auth = await authHeaders();
     iabDebugStep('ارسال تایید به سرور (iab/verify)', null, 'auth header ارسال شد؟ ' + !!__auth.Authorization);
+    // مهم: ورکر یه چک دقیق و حساس به حروف بزرگ/کوچک می‌کنه (store === "bazaar" یا
+    // === "myket")؛ اگه پلاگین نیتیو یه‌روزی «Myket»/«MYKET» یا فاصله‌ی اضافه برگردونه،
+    // بدون این normalize، ورکر بی‌سروصدا verified=false می‌مونه و فقط «خرید تایید نشد»
+    // برمی‌گرده — بدون هیچ سرنخی که مشکل دقیقاً از عدم تطابق حروف بوده.
+    const normalizedStore = String(purchase.store || '').trim().toLowerCase();
     const res = await fetch(WORKER_BASE + '/iab/verify', {
       method:'POST', headers: Object.assign({'Content-Type':'application/json'}, __auth),
-      body: JSON.stringify({ store: purchase.store, sku: purchase.sku, purchaseToken: purchase.purchaseToken })
+      body: JSON.stringify({ store: normalizedStore, sku: purchase.sku, purchaseToken: purchase.purchaseToken })
     });
     const data = await res.json().catch(()=>null);
     // قبلاً اینجا هیچ لاگی نبود؛ اگه ورکر خطا می‌داد یا جواب JSON نبود، کاملاً بی‌صدا
@@ -26867,6 +26872,17 @@ document.getElementById('premiumPayBtn').addEventListener('click', async ()=>{
       console.log('[IAB] iabPurchase چیزی برنگردوند (null) — یعنی یا پلاگین پیدا نشد، یا خرید نیتیو fail/cancel/timeout شد؛ جزئیاتش تو لاگ‌های بالاتره.');
       iabDebugStep('نتیجه‌ی کلی', false, 'iabPurchase چیزی برنگردوند — یکی از مراحل بالا ❌ خورده');
     }
+  }catch(e){
+    // باگ قبلی: این بلوک اصلاً وجود نداشت (فقط try/finally بود، بدون catch). یعنی اگه
+    // یه خطای پیش‌بینی‌نشده — نه از iabPurchase/iabVerifyOnServer/confirmPremiumOnServer
+    // (که هرکدوم خودشون داخلی try/catch دارن و null/false برمی‌گردونن)، بلکه مثلاً از
+    // finalizePremiumActivationUI یا هر کد دیگه‌ای که این‌جا صدا زده می‌شه — پرتاب می‌شد،
+    // finally دکمه رو آزاد می‌کرد ولی خودِ خطا به‌صورت یه unhandled promise rejection
+    // بی‌صدا گم می‌شد: از دید کاربر دکمه یه لحظه «در حال اتصال...» می‌شد و بدون هیچ toast
+    // یا پیامی به حالت اول برمی‌گشت — دقیقاً همون «هیچ عملکردی نداشت» که مایکت گزارش داد.
+    console.error('[IAB] خطای پیش‌بینی‌نشده تو فلوی خرید:', (e && e.message) || e, e);
+    iabDebugStep('خطای پیش‌بینی‌نشده', false, (e && e.message) || String(e));
+    showToast('مشکلی پیش اومد؛ دوباره امتحان کن', 'error');
   }finally{
     btn.disabled = false; btn.textContent = '💳 خرید نسخه‌ی پرمیوم';
   }
