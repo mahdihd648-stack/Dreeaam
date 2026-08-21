@@ -1803,7 +1803,11 @@ function defaultStoreData(){
     // برخلاف peakCelebrated/maxStreak که با «شروع دوباره» صفر می‌شن، این هیچ‌وقت پاک
     // نمی‌شه، چون قابلیتِ «تعیین دستیِ تاریخ شکست» رو باز می‌کنه. جزئیات کامل پایین فایل.
     backdateUnlocked:false,
-    timeGuard:{lastDeviceMs:null, lastServerMs:null, suspicious:false, suspiciousSince:null} };
+    timeGuard:{lastDeviceMs:null, lastServerMs:null, suspicious:false, suspiciousSince:null},
+    // کدوم اکانتِ Supabase (auth user id) صاحبِ دیتای محلیِ فعلیه — null یعنی «میهمان»
+    // (هیچ‌وقت به اکانتی وصل نشده). برای جداسازیِ دیتای اکانت‌های مختلف رو یه دستگاه؛
+    // ببین توضیح کامل بالای handlePublicChatSession.
+    accountUserId:null };
 }
 let storeData = defaultStoreData();
 let today = todayKey();
@@ -5166,6 +5170,7 @@ function normalizeAndRenderStoreData(){
   if(storeData.appLock && !storeData.appLock.method) storeData.appLock.method = 'pin';
   if(storeData.backdateUnlocked===undefined) storeData.backdateUnlocked = false;
   if(!storeData.timeGuard) storeData.timeGuard = {lastDeviceMs:null, lastServerMs:null, suspicious:false, suspiciousSince:null};
+  if(storeData.accountUserId===undefined) storeData.accountUserId = null;
   if(storeData.startDate && !storeData.startTimestamp){
     storeData.startTimestamp = dateOnly(storeData.startDate).toISOString();
   }
@@ -10106,13 +10111,26 @@ let lastChatVisibleSynced = null;
 function syncChatVisibleToNativeIfChanged(){
   const plugin = authBridgePlugin();
   if(!plugin) return;
-  const visible = document.visibilityState === 'visible' && document.body.classList.contains('chat-fullscreen');
+  // قبلاً این پرچم فقط وقتی true می‌شد که کاربر دقیقاً رو خودِ تب «چت» باشه — یعنی اگه
+  // یه تبِ دیگه (لیدربورد/پروفایل/هم‌مسیر/بازی‌ها یا کل بخش خصوصی) باز بود، نوتیفِ پوش
+  // بازم می‌اومد. حالا که یه بجِ شماره‌ی نخونده رو دکمه‌ی «عمومی» داریم
+  // (updateModePublicChatBadge/isChatTabActivelyOpen پایین‌تر همین فایل)، دیگه لازم نیست
+  // حتماً تو تبِ چت باشیم تا نوتیف سرکوب بشه: همین که اپ جلوعه (هر تبی، حتی بخش خصوصی)،
+  // خودِ بجِ داخلِ اپ جایگزینِ نوتیف می‌شه؛ فقط وقتی اپ کامل بک‌گراند/بسته‌ست نوتیفِ پوشِ
+  // واقعی لازمه.
+  const visible = document.visibilityState === 'visible';
   if(visible === lastChatVisibleSynced) return;
   lastChatVisibleSynced = visible;
   try{ plugin.setChatVisible({ visible }).catch(()=>{}); }catch(e){}
 }
 new MutationObserver(syncChatVisibleToNativeIfChanged).observe(document.body, { attributes:true, attributeFilter:['class'] });
 document.addEventListener('visibilitychange', syncChatVisibleToNativeIfChanged);
+// برخلاف پرچمِ بالا (که حالا کلِ اپ رو پوشش می‌ده)، این یکی دقیقاً همون شرطِ قبلی رو
+// نگه می‌داره — «داریم همین الان واقعاً خودِ تبِ چت رو می‌بینیم» — و پایین‌تر برای تصمیمِ
+// «این پیامِ تازه رو رو بجِ دکمه‌ی عمومی بشمریم یا نه» استفاده می‌شه.
+function isChatTabActivelyOpen(){
+  return document.visibilityState === 'visible' && document.body.classList.contains('chat-fullscreen');
+}
 
 /* ================= Side menu (chat + settings) ================= */
 function closeSideMenu(){ document.getElementById('sideMenuOverlay').classList.remove('show'); }
@@ -10275,6 +10293,15 @@ function showPublicTabInner(tabId){
   if(panel) panel.classList.add('active');
   if(tabId === 'leaderboard' && typeof loadLeaderboard === 'function') loadLeaderboard();
   if(tabId === 'chat' && typeof updateChatModeUI === 'function') updateChatModeUI();
+  if(tabId === 'chat'){
+    // پیام‌هایی که وقتی رو این تب نبودیم رسیدن فقط بی‌صدا append شده بودن (بدون خطِ
+    // جداکننده، چون اون فقط تو یه رندرِ کامل ساخته می‌شه) — یه loadPublicChatMessages تازه
+    // می‌زنیم تا renderPublicChatMessages دوباره firstUnreadIdx رو از رو lastReadAt واقعی
+    // (که دست‌نخورده مونده بود) حساب کنه و خط دقیقاً همون‌جا که رفته بودیم بشینه.
+    if(chatTabUnreadCount > 0 && typeof loadPublicChatMessages === 'function') loadPublicChatMessages();
+    chatTabUnreadCount = 0;
+    updateModePublicChatBadge();
+  }
   if(tabId === 'chat') maybeSuggestChatNarration();
   if(tabId === 'profile' && typeof renderProfileTab === 'function') renderProfileTab();
   if(tabId === 'buddy' && typeof loadBuddyTab === 'function') loadBuddyTab();
@@ -10344,6 +10371,19 @@ document.querySelectorAll('.pub-subnav-btn').forEach(btn=>{
     if(game === 'dobble' && typeof window.dblRenderStage1Status === 'function') window.dblRenderStage1Status();
     if(game === 'dobble' && typeof window.dblRenderStage2aIcons === 'function') window.dblRenderStage2aIcons();
     if(game === 'dobble' && typeof window.dblRenderStage2bCards === 'function') window.dblRenderStage2bCards();
+    // باگِ قبلی: هر سه لودرِ لابی (hkLoadLobby/efLoadLobby/dblLoadLobby) فقط یه‌بار، تویِ
+    // showPublicTabInner، همون لحظه‌ای که کاربر اولین‌بار واردِ کلِ تبِ «بازی‌ها» می‌شه صدا
+    // زده می‌شدن — نه هر بار که خودِ کاربر بینِ سه زیرتبِ حکم/اسم‌فامیل/دابل جابه‌جا می‌شه.
+    // اگه اون لحظه‌ی اول (مثلاً بلافاصله بعدِ ورود/لاگین) sb یا publicChatUser هنوز آماده
+    // نبودن، اون لودر بی‌سروصدا early-return می‌کرد (خطِ اولِ خودِ تابع) و دیگه هیچ‌وقت
+    // دوباره صدا زده نمی‌شد — یعنی همون پنل تا ابد رو اسکلتونِ لودینگ می‌موند، حتی بعدِ
+    // آماده‌شدنِ sb. علائمش دقیقاً همینه که برایِ دابل گزارش شده بود (دکمه‌ی «ساخت میز»
+    // هیچ‌وقت ظاهر نمی‌شد). فیکس: هر بار که خودِ کاربر رویِ یکی از سه کارت کلیک می‌کنه،
+    // همون لودرِ مخصوصِ همون بازی رو دوباره صدا می‌زنیم — بی‌ضرره چون هر سه تابع idempotentن
+    // (dataset-based wiring guard رویِ دکمه‌ها، رفرشِ ساده‌ی state رویِ بقیه‌ی چیزها).
+    if(game === 'hokm' && typeof window.hkLoadLobby === 'function') window.hkLoadLobby();
+    if(game === 'esmfamil' && typeof window.efLoadLobby === 'function') window.efLoadLobby();
+    if(game === 'dobble' && typeof window.dblLoadLobby === 'function') window.dblLoadLobby();
   }
   selBar.querySelectorAll('.games-select-card').forEach(function(card){
     card.addEventListener('click', function(){ showGame(card.dataset.game); });
@@ -11724,24 +11764,32 @@ if (typeof window !== 'undefined') {
     // dobble_my_active_room هم اصلاً میزهایِ finished رو برنمی‌گردونه) — فقط وضعیتِ محلی رو
     // ریست و برمی‌گرده به لیستِ میزهای باز. تمیزکاریِ خودِ ردیفِ میزِ finished تو دیتابیس،
     // طبقِ سند، مالِ STAGE ۵ (روم‌های رهاشده)ه.
+    // این هلپر از دلِ dblRenderGameEndOverlay بیرون کشیده شد تا dblOpenHistoryDetail
+    // (پایین‌تر، تاریخچه) هم بتونه دقیقاً همون HTMLِ ردیف‌های اسکوربورد (مدال/اسم/تعدادِ
+    // کارت) رو بدونِ کپی‌کردنِ منطق بسازه — عیناً هم‌الگو با efScoreRowsHtml. ورودی‌اش
+    // خروجیِ dobble_room_scoreboard‌ه (از قبل مرتب نیست، این‌جا نزولی مرتب می‌شه).
+    function dblScoreRowsHtml(scoreboard){
+      const sorted = (scoreboard || []).slice().sort(function(a, b){ return (b.card_count || 0) - (a.card_count || 0); });
+      const medals = ['🥇', '🥈', '🥉'];
+      const myId = publicChatUser && publicChatUser.id;
+      return sorted.map(function(r, i){
+        const name = dblProfileCache[r.user_id] || 'کاربر';
+        const isMe = !!(myId && r.user_id === myId);
+        const rank = medals[i] || ('#' + toFa(i + 1));
+        return '<div class="dbl-gameend-row' + (isMe ? ' dbl-gameend-row-me' : '') + '">'
+          + '<span class="dbl-gameend-rank">' + rank + '</span>'
+          + '<span class="dbl-gameend-name">' + escapeHtml(name) + (isMe ? ' (شما)' : '') + '</span>'
+          + '<span class="dbl-gameend-score">' + toFa(r.card_count || 0) + ' کارت</span>'
+          + '</div>';
+      }).join('');
+    }
+
     function dblRenderGameEndOverlay(){
       try{
         const overlay = dblLobbyEl('dblGameEndOverlay');
         if(!overlay) return;
         if(!dblScoreboard || !dblScoreboard.length){ overlay.style.display = 'none'; return; }
-        const sorted = dblScoreboard.slice().sort(function(a, b){ return (b.card_count || 0) - (a.card_count || 0); });
-        const medals = ['🥇', '🥈', '🥉'];
-        const myId = publicChatUser && publicChatUser.id;
-        const rows = sorted.map(function(r, i){
-          const name = dblProfileCache[r.user_id] || 'کاربر';
-          const isMe = !!(myId && r.user_id === myId);
-          const rank = medals[i] || ('#' + toFa(i + 1));
-          return '<div class="dbl-gameend-row' + (isMe ? ' dbl-gameend-row-me' : '') + '">'
-            + '<span class="dbl-gameend-rank">' + rank + '</span>'
-            + '<span class="dbl-gameend-name">' + escapeHtml(name) + (isMe ? ' (شما)' : '') + '</span>'
-            + '<span class="dbl-gameend-score">' + toFa(r.card_count || 0) + ' کارت</span>'
-            + '</div>';
-        }).join('');
+        const rows = dblScoreRowsHtml(dblScoreboard);
 
         overlay.innerHTML =
           '<div class="dbl-gameend-card">' +
@@ -12266,6 +12314,150 @@ if (typeof window !== 'undefined') {
           dblJoinRoom(jbtn.dataset.joinRoom);
         });
       }
+      // تاریخچه — دکمه + بستنِ هردو مودال، عیناً هم‌الگو با efWireLobbyControls/
+      // hkWireLobbyControls (STAGE 9، نیمه‌ی دوم).
+      const historyBtn = dblLobbyEl('dblHistoryBtn');
+      if(historyBtn && !historyBtn.dataset.dblWired){
+        historyBtn.dataset.dblWired = '1';
+        historyBtn.addEventListener('click', dblOpenHistory);
+      }
+      const historyCloseBtn = dblLobbyEl('dblHistoryCloseBtn');
+      if(historyCloseBtn && !historyCloseBtn.dataset.dblWired){
+        historyCloseBtn.dataset.dblWired = '1';
+        historyCloseBtn.addEventListener('click', dblCloseHistory);
+      }
+      const historyModal = dblLobbyEl('dblHistoryModal');
+      if(historyModal && !historyModal.dataset.dblWired){
+        historyModal.dataset.dblWired = '1';
+        historyModal.addEventListener('click', function(e){
+          if(e.target.id === 'dblHistoryModal') dblCloseHistory();
+        });
+      }
+      const historyList = dblLobbyEl('dblHistoryList');
+      if(historyList && !historyList.dataset.dblWired){
+        historyList.dataset.dblWired = '1';
+        historyList.addEventListener('click', function(e){
+          const row = e.target.closest('.dbl-history-row');
+          if(row && row.dataset.roomId) dblOpenHistoryDetail(row.dataset.roomId);
+        });
+      }
+      const historyDetailCloseBtn = dblLobbyEl('dblHistoryDetailCloseBtn');
+      if(historyDetailCloseBtn && !historyDetailCloseBtn.dataset.dblWired){
+        historyDetailCloseBtn.dataset.dblWired = '1';
+        historyDetailCloseBtn.addEventListener('click', dblCloseHistoryDetail);
+      }
+      const historyDetailModal = dblLobbyEl('dblHistoryDetailModal');
+      if(historyDetailModal && !historyDetailModal.dataset.dblWired){
+        historyDetailModal.dataset.dblWired = '1';
+        historyDetailModal.addEventListener('click', function(e){
+          if(e.target.id === 'dblHistoryDetailModal') dblCloseHistoryDetail();
+        });
+      }
+    }
+
+    // =====================================================================
+    // تاریخچه — عیناً هم‌الگو با efOpenHistory/efLoadHistory/efRenderHistoryList/
+    // efOpenHistoryDetail (STAGE 9، نیمه‌ی دوم اسم‌فامیل). جزئیاتِ هر بازی
+    // (dblOpenHistoryDetail) نیازی به RPCِ تازه نداشت — dobble_room_scoreboard از قبل
+    // برایِ هر میزی که caller توش عضو بوده کار می‌کنه (چه finished چه نه)، پس همون +
+    // dblScoreRowsHtml (بالاتر، از دلِ dblRenderGameEndOverlay بیرون کشیده شد) دوباره
+    // استفاده می‌شه.
+    // =====================================================================
+
+    async function dblOpenHistory(){
+      const modal = dblLobbyEl('dblHistoryModal');
+      if(modal) modal.classList.add('visible');
+      await dblLoadHistory();
+    }
+
+    function dblCloseHistory(){
+      const modal = dblLobbyEl('dblHistoryModal');
+      if(modal) modal.classList.remove('visible');
+    }
+
+    async function dblLoadHistory(){
+      try{
+        if(!sb) return;
+        const listEl = dblLobbyEl('dblHistoryList');
+        if(listEl) listEl.innerHTML = '<div class="dbl-history-empty">در حالِ بارگذاری...</div>';
+        const [statsRes, historyRes] = await Promise.all([
+          sb.rpc('dobble_my_stats'),
+          sb.rpc('dobble_my_history', { p_limit: 20 })
+        ]);
+        if(statsRes.error) throw statsRes.error;
+        if(historyRes.error) throw historyRes.error;
+        const stats = (statsRes.data && statsRes.data[0]) || { games_played: 0, games_won: 0 };
+        const rows = historyRes.data || [];
+        dblRenderHistoryStats(stats);
+        dblRenderHistoryList(rows);
+      }catch(e){
+        console.warn('dblLoadHistory failed', e);
+        const listEl = dblLobbyEl('dblHistoryList');
+        if(listEl) listEl.innerHTML = '<div class="dbl-history-empty">گرفتنِ تاریخچه الان جواب نداد؛ دوباره امتحان کن.</div>';
+      }
+    }
+
+    function dblRenderHistoryStats(stats){
+      const el = dblLobbyEl('dblHistoryStats');
+      if(!el) return;
+      el.innerHTML =
+        '<div class="dbl-history-stat"><div class="dbl-history-stat-num">' + toFa(stats.games_played || 0) + '</div>'
+          + '<div class="dbl-history-stat-label">بازی</div></div>'
+        + '<div class="dbl-history-stat"><div class="dbl-history-stat-num">' + toFa(stats.games_won || 0) + '</div>'
+          + '<div class="dbl-history-stat-label">برد 🏆</div></div>';
+    }
+
+    function dblRenderHistoryList(rows){
+      const listEl = dblLobbyEl('dblHistoryList');
+      if(!listEl) return;
+      if(!rows.length){
+        listEl.innerHTML = '<div class="dbl-history-empty">هنوز هیچ بازیِ تمومی نداری — یه میز بساز و شروع کن! 🔍</div>';
+        return;
+      }
+      const medals = ['🥇', '🥈', '🥉'];
+      listEl.innerHTML = rows.map(function(r){
+        const dt = r.ended_at ? new Date(r.ended_at) : null;
+        const dateLabel = dt ? dt.toLocaleDateString('fa-IR', { day:'numeric', month:'long' }) : '';
+        const rankIcon = medals[(r.my_rank || 99) - 1] || ('#' + toFa(r.my_rank || '?'));
+        return '<div class="dbl-history-row" data-room-id="' + r.room_id + '">'
+          + '<span class="dbl-history-row-rank">' + rankIcon + '</span>'
+          + '<div class="dbl-history-row-info">'
+            + '<div class="dbl-history-row-cats">' + toFa(r.players_count || 0) + ' بازیکن' + (dateLabel ? ' · ' + dateLabel : '') + '</div>'
+            + '<div class="dbl-history-row-meta">از ' + toFa(r.max_players || 0) + ' نفر</div>'
+          + '</div>'
+          + '<span class="dbl-history-row-score">' + toFa(r.my_cards || 0) + ' کارت</span>'
+          + '</div>';
+      }).join('');
+    }
+
+    async function dblOpenHistoryDetail(roomId){
+      try{
+        if(!sb || !roomId) return;
+        const titleEl = dblLobbyEl('dblHistoryDetailTitle');
+        if(titleEl) titleEl.textContent = 'در حالِ بارگذاری...';
+        const rowsEl = dblLobbyEl('dblHistoryDetailRows');
+        if(rowsEl) rowsEl.innerHTML = '';
+        const modal = dblLobbyEl('dblHistoryDetailModal');
+        if(modal) modal.classList.add('visible');
+
+        const { data, error } = await sb.rpc('dobble_room_scoreboard', { p_room_id: roomId });
+        if(error) throw error;
+        const scoreboard = data || [];
+        await dblEnsureProfilesLoaded(scoreboard.map(function(r){ return r.user_id; }));
+        if(titleEl) titleEl.textContent = '🏁 نتیجه‌ی بازی';
+        if(rowsEl) rowsEl.innerHTML = dblScoreRowsHtml(scoreboard);
+      }catch(e){
+        console.warn('dblOpenHistoryDetail failed', e);
+        const titleEl = dblLobbyEl('dblHistoryDetailTitle');
+        if(titleEl) titleEl.textContent = '🏁 نتیجه‌ی بازی';
+        const rowsEl = dblLobbyEl('dblHistoryDetailRows');
+        if(rowsEl) rowsEl.innerHTML = '<div class="dbl-history-empty">گرفتنِ جزئیات الان جواب نداد.</div>';
+      }
+    }
+
+    function dblCloseHistoryDetail(){
+      const modal = dblLobbyEl('dblHistoryDetailModal');
+      if(modal) modal.classList.remove('visible');
     }
 
     async function dblLoadLobby(){
@@ -14295,6 +14487,10 @@ document.getElementById('importJsonInput').addEventListener('change', (e)=>{
       const parsed = JSON.parse(reader.result);
       if(!parsed || typeof parsed !== 'object') throw new Error('invalid');
       storeData = parsed;
+      // فایل بکاپ ممکنه مالِ یه اکانتِ دیگه (یا میهمان) بوده باشه؛ اگه الان لاگینیم،
+      // این دیتای بازیابی‌شده رو صریح به همینِ اکانت وصل می‌کنیم تا خروج/عوض‌کردنِ
+      // اکانت بعدش درست رفتار کنه (ببین توضیح بالای handlePublicChatSession).
+      storeData.accountUserId = publicChatUser ? publicChatUser.id : null;
       normalizeAndRenderStoreData();
       await window.storage.set('checklist:data', JSON.stringify(storeData));
       pushCloudData();
@@ -15324,9 +15520,51 @@ function clearAuthSessionNative(){
 async function handlePublicChatSession(session){
   sessionPending = false;
   hideChatConnectingState();
+  // قبل از رونویسیِ publicChatUser پایین، یه رفرنس از «کی تا همین الان لاگین بود»
+  // نگه می‌داریم — فقط برایِ سناریویِ خروجِ واقعی لازمه (پایین‌تر، برای فلاش‌کردنِ یه
+  // سیوِ در حالِ صف که ممکنه هنوز به ابر نرسیده باشه) چون بعد از این خط publicChatUser
+  // خودش دیگه null می‌شه و pushCloudData معمولی دیگه کار نمی‌کنه.
+  const previousChatUser = publicChatUser;
   publicChatUser = session ? session.user : null;
   if(!publicChatUser) clearAuthSessionNative();
   if(publicChatUser){
+    // ================= جداسازیِ دیتای اکانت‌های مختلف رو یه دستگاه =================
+    // storeData یه آبجکتِ واحد و محلیه (window.storage/localStorage) که تا قبل از این
+    // هیچ ردی نداشت از اینکه «مالِ کدوم اکانته». در نتیجه اگه رو یه گوشی از اکانتِ A
+    // خارج و وارد اکانتِ B می‌شدی، روزشمار/چک‌لیست/فعالیت‌هایِ A همچنان نشون داده
+    // می‌شد — و بدتر، پایین‌ترِ همین تابع (syncOnLogin) چون localTime تازه‌تر از
+    // آخرین سینکِ B بود، همون دیتایِ محلیِ A رو رویِ نسخه‌ی ابریِ اکانتِ B می‌نوشت.
+    // storeData.accountUserId مشخص می‌کنه دیتای محلیِ الان مالِ کدوم auth user id هست:
+    //   - null → دیتای محلی «میهمانه» (هیچ‌وقت به اکانتی وصل نشده) → دست نمی‌زنیم؛
+    //     syncOnLogin پایین‌ترِ همین تابع اولین‌بار پوشش می‌کنه رو همین اکانت.
+    //   - همینِ uid → داریم همون اکانتی که دیتا مالشه رو دوباره لود می‌کنیم (باز شدنِ
+    //     اپ درحالی که لاگین بودی/رفرشِ سشن) → دست نمی‌زنیم.
+    //   - یه uid دیگه → این دستگاه قبلاً برایِ اکانتِ دیگه‌ای استفاده شده و الان داره
+    //     اکانت عوض می‌شه → قبل از هر درخواستِ شبکه‌ای، دیتای محلی رو کامل ریست
+    //     می‌کنیم؛ بعدش syncOnLogin دیتایِ واقعیِ همین اکانت رو از ابر می‌کشه (یا اگه
+    //     این اکانت واقعاً تازه‌ست، همین دیتایِ تازه‌ریست‌شده به‌عنوانِ شروعِ صفر پوش می‌شه).
+    // این رو همین‌جا، قبل از دستکاریِ accountUserId پایین، جدا نگه می‌داریم — لازمش
+    // داریم پایین‌تر موقعِ صدا زدنِ syncOnLogin: اگه این دیتای محلی قبلِ همین لحظه هیچ‌وقت
+    // مالِ همین اکانت نبوده (چه میهمان بوده، چه مالِ اکانتِ دیگه‌ای بوده و بالا ریست شده)،
+    // یعنی هر مقداری هم که lastModified محلیش داشته باشه (مثلاً چون رو همین گوشی، قبل از
+    // لاگین‌کردن، دوباره ویزاردِ آنبوردینگ رو زده) به این اکانت ربطی نداره — نباید
+    // بذاریم رو نسخه‌ی ابریِ واقعیِ این اکانت (اگه از قبل وجود داشته) نوشته بشه.
+    const localDataIsStrangerToThisAccount = (storeData.accountUserId !== publicChatUser.id);
+    if(storeData.accountUserId && storeData.accountUserId !== publicChatUser.id){
+      // یه سیوِ در صفِ (debounced) از اکانتِ قبلی رو کنسل می‌کنیم — وگرنه ۳۵۰ میلی‌ثانیه
+      // دیگه، بعد از اینکه پایین همین‌جا storeData رو ریست کردیم، همون تایمرِ قدیمی
+      // فایر می‌شه و pushCloudData (که publicChatUser فعلی رو می‌خونه، یعنی همین اکانتِ
+      // جدید) دیتایِ خالیِ تازه‌ریست‌شده رو می‌کوبه رو نسخه‌ی ابریِ همین اکانتِ جدید —
+      // درست همون لحظه‌ای که ممکنه syncOnLogin پایین‌تر داره دیتایِ واقعیِ همین اکانت رو
+      // از ابر برمی‌گردونه.
+      clearTimeout(saveTimeout);
+      storeData = defaultStoreData();
+      storeData.accountUserId = publicChatUser.id;
+      try{ await window.storage.set('checklist:data', JSON.stringify(storeData)); }catch(err){}
+      normalizeAndRenderStoreData();
+    } else if(storeData.accountUserId !== publicChatUser.id){
+      storeData.accountUserId = publicChatUser.id;
+    }
     // Fired first, in parallel with everything below — the message list doesn't
     // actually depend on the profile fetch (own/other bubble styling only needs
     // publicChatUser, already set above). This used to be the 3rd/4th sequential
@@ -15336,12 +15574,19 @@ async function handlePublicChatSession(session){
     let profile = null;
     let profileFetchOk = false;
     try{
-      let res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url, chat_gender_filter').eq('id', publicChatUser.id).single();
+      let res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url, chat_gender_filter, streak_override_start_date, streak_override_set_at').eq('id', publicChatUser.id).single();
       if(res.error && /chat_gender_filter/i.test(res.error.message || '')){
         // chat-gender-filter-supabase-schema.sql هنوز رو این پروژه اجرا نشده — برگرد به
         // ستون‌هایِ قدیمی تا لاگین/پروفایل مثلِ قبل کار کنه؛ فیلترِ جنسیت فقط پیش‌فرضِ
         // «هردو» می‌مونه تا migration اجرا بشه.
-        res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url').eq('id', publicChatUser.id).single();
+        res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url, streak_override_start_date, streak_override_set_at').eq('id', publicChatUser.id).single();
+      }
+      if(res.error && /streak_override/i.test(res.error.message || '')){
+        // games_streak_admin.sql هنوز اجرا نشده رو این پروژه — برگرد به نسخه‌ی بدونِ این دو
+        // ستون تا لاگین/پروفایل مثلِ قبل کار کنه؛ پنلِ ادمینِ روزشمار فقط بعدِ اجرایِ اون
+        // migration فعال می‌شه.
+        res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url, chat_gender_filter').eq('id', publicChatUser.id).single();
+        if(res.error) res = await sb.from('profiles').select('username, referral_code, premium_until, referral_count, discount_percent, discount_code, wheel_spun, username_updated_at, suspended_until, suspension_stage, suspended_permanently, muted_until, is_admin, admin_title, avatar_url').eq('id', publicChatUser.id).single();
       }
       if(!res.error){ profile = res.data; profileFetchOk = true; }
     }catch(err){}
@@ -15389,6 +15634,33 @@ async function handlePublicChatSession(session){
     if(chatAdminManageBtn) chatAdminManageBtn.style.display = isAppOwner ? 'inline-flex' : 'none';
     { const _lb = document.getElementById('chatLockBtn'); if(_lb) _lb.style.display = isAppOwner ? 'inline-flex' : 'none'; }
     { const _cb = document.getElementById('chatCooldownBtn'); if(_cb) _cb.style.display = isAppOwner ? 'inline-flex' : 'none'; }
+    // پنلِ مدیریتِ روزشمارها (streak_admin_set_start_date/streak_admin_reset،
+    // games_streak_admin.sql) — عیناً هم‌الگو با chatAdminManageBtn، فقط OWNER_EMAIL می‌بینتش.
+    { const _sb2 = document.getElementById('streakAdminMenuOpenBtn'); if(_sb2) _sb2.style.display = isAppOwner ? 'flex' : 'none'; }
+    // اگه ادمین (پنلِ بالا، از یه دستگاهِ دیگه) روزشمارِ همینِ اکانت رو دستکاری کرده باشه،
+    // profile.streak_override_set_at جدیدتر از storeData.streakOverrideAppliedAt (آخرین باری
+    // که خودِ همین دستگاه اعمالش کرده) می‌مونه — عیناً هم‌الگو با مقایسه‌ی
+    // cloudTime/localTime تویِ syncOnLogin، پایین‌تر. اعمال‌شدنش یعنی فقط startDate/
+    // startTimestamp بازنویسی می‌شه، بدونِ دست‌زدن به entries/badges/چک‌لیست.
+    if(profileFetchOk && profile && profile.streak_override_set_at && profile.streak_override_start_date){
+      try{
+        const serverSetAt = new Date(profile.streak_override_set_at).getTime();
+        const localAppliedAt = storeData.streakOverrideAppliedAt ? new Date(storeData.streakOverrideAppliedAt).getTime() : 0;
+        if(!isNaN(serverSetAt) && serverSetAt > localAppliedAt){
+          const newStart = new Date(profile.streak_override_start_date + 'T00:00:00');
+          if(!isNaN(newStart.getTime())){
+            storeData.startDate = (typeof tgDateKeyOf === 'function') ? tgDateKeyOf(newStart) : profile.streak_override_start_date;
+            storeData.startTimestamp = newStart.toISOString();
+            storeData.streakOverrideAppliedAt = profile.streak_override_set_at;
+            storeData.startDateBackdateOffered = true; // دیگه لازم نیست مودالِ «اولین‌بار» رو هم نشون بدیم
+            saveData();
+            try{ updateLiveCounter(); }catch(e){}
+            try{ updateStreakUI(); }catch(e){}
+            showToast('ادمین روزشمارت رو به‌روزرسانی کرد 🔄', 'info');
+          }
+        }
+      }catch(e){ console.warn('streak override reconcile failed', e); }
+    }
     // Suspension is read fresh from the server on every session load, so a lifted/expired
     // suspension (or a fresh one applied on another device) is always picked up on login.
     mySuspendedUntil = (profile && profile.suspended_until) ? new Date(profile.suspended_until) : null;
@@ -15433,7 +15705,7 @@ async function handlePublicChatSession(session){
     maybeWeeklyPurgeChat();
     updateChatModeUI();
     renderSuspensionLocks();
-    syncOnLogin();
+    syncOnLogin(localDataIsStrangerToThisAccount);
     lbLastSyncedKey = null;
     syncMyLeaderboardData();
     touchLeaderboardActivity();
@@ -15450,18 +15722,49 @@ async function handlePublicChatSession(session){
     isAppOwner = false;
     isChatAdmin = false;
     { const _b = document.getElementById('chatAdminManageBtn'); if(_b) _b.style.display = 'none'; }
+    { const _sb3 = document.getElementById('streakAdminMenuOpenBtn'); if(_sb3) _sb3.style.display = 'none'; }
     { const _lb = document.getElementById('chatLockBtn'); if(_lb) _lb.style.display = 'none'; }
     { const _cb = document.getElementById('chatCooldownBtn'); if(_cb) _cb.style.display = 'none'; }
     mySuspendedUntil = null;
     mySuspendedPermanently = false;
     mySuspensionStage = 0;
     myMutedUntil = null;
-    // مهم: بدون این خط، storeData.premium از آخرین لاگین (حتی لاگین OWNER_EMAIL) تو
-    // localStorage باقی می‌مونه و بعد از خروج از حساب — یا رو یه حساب دیگه‌ی همون
-    // دستگاه — همچنان پرمیوم نشون داده می‌شه. منبع حقیقت همیشه سروره؛ وقتی سشن
-    // نیست (لاگ‌اوت یا هنوز لاگین نشده)، باید همیشه false باشه.
-    storeData.premium = false;
-    saveData();
+    // مهم: بدون این بخش، storeData (روزشمار، چک‌لیست، تمرین، جک‌لاین، هرچی) از آخرین
+    // لاگین تو localStorage باقی می‌مونه و بعد از خروج از حساب — یا رو یه حساب دیگه‌ی
+    // همون دستگاه — همچنان همون‌جوری نشون داده می‌شه. منبع حقیقت همیشه سروره: اگه
+    // storeData.accountUserId ست بود یعنی این دیتای محلی واقعاً مالِ یه اکانت بود و
+    // الان از اون اکانت خارج شدیم (نه صرفاً هنوز لاگین نکرده‌ایم) — طبق درخواست، باید
+    // کامل از اول شروع بشه. نسخه‌ی واقعیِ این اکانت جایی گم نمی‌شه؛ آخرین حالتش قبل از
+    // خروج رو ابر (Supabase user_data) سینک شده (pushCloudData/saveData) و با ورود
+    // دوباره به همین اکانت — رو هر گوشی‌ای — از همون‌جا برمی‌گرده (syncOnLogin بالا).
+    if(storeData.accountUserId){
+      // اول، هر سیوِ در صفِ (debounced، تا ۳۵۰ میلی‌ثانیه‌ی آخر) رو کنسل می‌کنیم — وگرنه
+      // بعد از اینکه پایین storeData رو ریست کردیم، همون تایمرِ قدیمی فایر می‌شه و
+      // pushCloudData (که دیگه publicChatUser نداره چون بالا null شده) کاری نمی‌کنه؛ یعنی
+      // بدونِ این clearTimeout، خطر این نیست که چیزِ اشتباهی پوش بشه، خطر اینه که آخرین
+      // تغییرِ کاربر (که هنوز به ابر نرسیده) گم بشه. برای همین، قبل از ریست، یه پوشِ آخر
+      // رو دستی و صریح با آیدیِ همون اکانتی که تازه ازش خارج شدیم (previousChatUser) انجام
+      // می‌دیم تا مطمئن بشیم آخرین وضعیتِ واقعی حتماً رو ابر ذخیره شده، قبل از اینکه محلی
+      // پاکش کنیم.
+      clearTimeout(saveTimeout);
+      if(sb && previousChatUser){
+        try{
+          await sb.from('user_data').upsert({
+            user_id: previousChatUser.id,
+            data: storeData,
+            updated_at: storeData.lastModified || new Date().toISOString()
+          });
+        }catch(err){ console.error('Final pre-logout cloud flush failed', err); }
+      }
+      storeData = defaultStoreData();
+      try{ await window.storage.set('checklist:data', JSON.stringify(storeData)); }catch(err){}
+      normalizeAndRenderStoreData();
+    } else {
+      // میهمان بودیم (هیچ‌وقت لاگین نشده)؛ فقط مطمئن می‌شیم پرمیوم خاموشه، بقیه‌ی
+      // پیشرفتِ محلی که به هیچ اکانتی وصل نیست دست‌نخورده می‌مونه.
+      storeData.premium = false;
+      saveData();
+    }
     showAuthForm('login');
     renderInviteTab(null);
     renderProfileTab();
@@ -15710,7 +16013,7 @@ async function pushCloudData(){
   }catch(err){ console.error('Cloud push failed', err); }
   try{ await syncMyLeaderboardData(); }catch(err){}
 }
-async function syncOnLogin(){
+async function syncOnLogin(localDataIsStrangerToThisAccount){
   if(!sb || !publicChatUser) return;
   try{
     const { data, error } = await sb.from('user_data').select('data,updated_at').eq('user_id', publicChatUser.id).single();
@@ -15721,11 +16024,22 @@ async function syncOnLogin(){
     }
     const cloudTime = data.updated_at ? new Date(data.updated_at).getTime() : 0;
     const localTime = storeData.lastModified ? new Date(storeData.lastModified).getTime() : 0;
-    if(cloudTime > localTime){
+    // اگه دیتای محلی قبل از همین ورود هیچ‌وقت مالِ همین اکانت نبوده (مثلاً نصبِ تازه‌ست،
+    // یا رو همین گوشی قبل از لاگین‌کردن دوباره ویزاردِ آنبوردینگ زده شده)، و از قبل یه
+    // رکوردِ واقعی برایِ همین اکانت رو ابر هست، همیشه ابر رو ترجیح می‌دیم — صرف‌نظر از
+    // مقایسه‌ی زمانی. وگرنه lastModified محلی (که همین چند ثانیه پیش، حین همون
+    // آنبوردینگِ تازه، استمپ خورده) از cloudTime واقعی «جدیدتر» به نظر می‌رسه و مسیرِ
+    // پایین (localTime > cloudTime) اشتباهاً دیتای بی‌ربطِ تازه رو رو تاریخچه‌ی واقعیِ
+    // این اکانت پوش می‌کرد.
+    if(localDataIsStrangerToThisAccount || cloudTime > localTime){
       storeData = data.data;
+      // اینجا داریم رکوردِ خودِ این اکانت (user_id = publicChatUser.id) رو می‌خونیم، برای
+      // همین صرف‌نظر از اینکه خودِ JSON چی توش داره (مثلاً رکوردهای قدیمی‌تر از قبلِ اضافه
+      // شدنِ این فیلد)، accountUserId رو همیشه صریح رو همینِ uid ست می‌کنیم.
+      storeData.accountUserId = publicChatUser.id;
       try{ await window.storage.set('checklist:data', JSON.stringify(storeData)); }catch(err){}
       normalizeAndRenderStoreData();
-      showToast('پیشرفتت از دستگاه دیگه‌ات همگام شد ☁️');
+      showToast('پیشرفتِ اکانتت برگشت ☁️');
     } else if(localTime > cloudTime){
       pushCloudData();
     }
@@ -17788,12 +18102,12 @@ function renderNotifPanel(){
   const incomingBuddy = (myPendingBuddyRequests||[]).filter(r=> r.to_user === publicChatUser.id);
   let html = '<div class="notif-section-head">🤝 درخواست‌های هم‌مسیر</div>';
   if(incomingBuddy.length){
-    html += '<div class="notif-buddy-row"><div style="flex:1;">'+toFa(incomingBuddy.length)+' درخواست هم‌مسیری جدید داری</div><button class="notif-go-btn" id="notifGoBuddyBtn">مشاهده</button></div>';
+    html += '<div class="notif-buddy-row"><div class="notif-icon notif-icon-buddy">🤝</div><div class="notif-row-text">'+toFa(incomingBuddy.length)+' درخواست هم‌مسیری جدید داری</div><button class="notif-go-btn" id="notifGoBuddyBtn">مشاهده</button></div>';
   } else {
     html += '<div class="notif-empty">درخواست جدیدی نداری.</div>';
   }
   if(myOpenSosAlert){
-    html += '<div class="notif-my-sos-row"><div style="flex:1;">درخواست کمک فوری تو در حال ارسال به دیگرانه…</div><button class="notif-cancel-btn" id="notifCancelSosBtn">لغو</button></div>';
+    html += '<div class="notif-my-sos-row"><div class="sos-active-card-dot"></div><div class="notif-row-text">درخواست کمک فوری تو در حال ارسال به دیگرانه…</div><button class="notif-cancel-btn" id="notifCancelSosBtn">لغو</button></div>';
   }
   html += '<div class="notif-section-head">🆘 نیاز به کمک فوری دارن</div>';
   if(!myGenderValue()){
@@ -17803,7 +18117,7 @@ function renderNotifPanel(){
       const name = escapeHtml(a.username || 'کاربر');
       const minAgo = Math.max(0, Math.floor((Date.now()-new Date(a.created_at).getTime())/60000));
       const sub = (minAgo < 1 ? 'همین الان' : (toFa(minAgo)+' دقیقه پیش')) + ' · روز ' + toFa(a.day_count||0);
-      return '<div class="notif-sos-row"><div style="flex:1;min-width:0;"><div class="notif-sos-name">'+name+'</div><div class="notif-sos-sub">'+sub+'</div></div><button class="notif-go-btn" data-sos-respond="'+a.id+'" data-sos-name="'+name+'">برم کمک کنم</button></div>';
+      return '<div class="notif-sos-row"><div class="notif-icon notif-icon-sos">🆘</div><div style="flex:1;min-width:0;"><div class="notif-sos-name">'+name+'</div><div class="notif-sos-sub">'+sub+'</div></div><button class="notif-go-btn" data-sos-respond="'+a.id+'" data-sos-name="'+name+'">برم کمک کنم</button></div>';
     }).join('');
   } else {
     html += '<div class="notif-empty">فعلاً کسی درخواست فوری نداره.</div>';
@@ -18220,6 +18534,24 @@ let chatUnseenCount = 0;
 // full renders and live inserts, so that "the user scrolled/tapped down to the bottom" (see
 // updateChatScrollDownBtn) can stamp last-read all the way to it without re-querying anything.
 let chatLatestMsgCreatedAt = null;
+/* ---------------- Unread badge on the bottom-nav «عمومی» button ----------------
+   chatUnseenCount above is only for scroll position *inside* the already-open chat panel
+   (near bottom vs scrolled up). This counter is for the opposite case: a public-chat message
+   arrived while the chat tab itself wasn't the active view at all — a different public subnav
+   tab (لیدربورد/پروفایل/هم‌مسیر/بازی‌ها) or the whole private section. #modePublicBtn (the
+   "عمومی" button) is a fixed bottom-bar element visible from literally anywhere in the app, so
+   it's the one place a number can always land regardless of where the user currently is. */
+let chatTabUnreadCount = 0;
+function updateModePublicChatBadge(){
+  const badge = document.getElementById('modePublicChatBadge');
+  if(!badge) return;
+  if(chatTabUnreadCount > 0){
+    badge.textContent = chatTabUnreadCount > 9 ? '۹+' : toFa(chatTabUnreadCount);
+    badge.classList.add('show');
+  } else {
+    badge.classList.remove('show');
+  }
+}
 function isChatListNearBottom(){
   const wrap = document.getElementById('chatMessages');
   if(!wrap) return true;
@@ -18890,14 +19222,33 @@ async function loadPublicChatMessages(){
           // و id موقتش با id واقعی سرور جایگزین شده، الان دوباره از realtime برمی‌گرده؛
           // اینجا جلوی رندر دوبرابری‌شو می‌گیریم.
           if(wrap.querySelector(`.chat-msg[data-msg-id="${payload.new.id}"]`)) return;
-          const wasNearBottom = isChatListNearBottom();
           const isOwnMsg = publicChatUser && payload.new.user_id === publicChatUser.id;
+          // مهم: قبلاً wasNearBottom مستقیم از isChatListNearBottom() می‌اومد، که رو
+          // scrollHeight/scrollTop/clientHeightِ #chatMessages حساب می‌شه. وقتی تبِ چت
+          // اصلاً روی صفحه نیست (display:none رو یه پنلِ غیرفعال)، این سه‌تا هر سه صفر
+          // می‌شن و though (0-0-0)<90 همیشه true درمیاد — یعنی کد قبلی هر پیامِ رسیده در
+          // حالی که رو یه تبِ دیگه بودیم رو هم اشتباهاً "نزدیکِ ته/دیده‌شده" حساب می‌کرد و
+          // فوراً setChatLastReadAt صداش می‌زد. نتیجه: خطِ «پیام‌های نخونده» عملاً هیچ‌وقت
+          // برای پیام‌هایی که وقتی رو تبِ دیگه بودیم رسیدن نشون داده نمی‌شد. حالا این
+          // محاسبه رو فقط وقتی معتبر می‌دونیم که واقعاً خودِ تبِ چت باز باشه.
+          const chatActivelyOpen = isChatTabActivelyOpen();
+          const wasNearBottom = chatActivelyOpen && isChatListNearBottom();
           if(wrap.querySelector('.chat-empty-msg')) wrap.innerHTML = '';
           appendPublicChatMessage(payload.new);
           chatLatestMsgCreatedAt = payload.new.created_at;
           applyChatUserFilter();
           applyChatGenderFilter();
-          if(isOwnMsg || wasNearBottom){
+          if(!chatActivelyOpen){
+            // رو یه تبِ دیگه (یا کل بخشِ خصوصی) هستیم: پیام بی‌صدا به DOMِ پنهان اضافه شد،
+            // ولی lastReadAt رو دست‌نمی‌زنیم — تا وقتی برگردیم به تبِ چت، showPublicTabInner
+            // یه loadPublicChatMessages تازه می‌زنه و renderPublicChatMessages دقیقاً از
+            // همون‌جا که رفته بودیم خطِ «پیام‌های نخونده» رو نشون می‌ده. فقط بجِ دکمه‌ی
+            // «عمومی» رو زیاد می‌کنیم (پیامِ خودمون رو نمی‌شمریم).
+            if(!isOwnMsg){
+              chatTabUnreadCount++;
+              updateModePublicChatBadge();
+            }
+          } else if(isOwnMsg || wasNearBottom){
             // Already at the bottom (or it's our own message going out): keep the classic
             // auto-scroll feel, exactly like before. Since it just landed in front of the
             // user's eyes, count it as read right away — no need to wait for the next tab
@@ -25870,6 +26221,7 @@ function finishOnboarding(){
   render();
   updateLiveCounter();
   showToast(obEditMode ? 'پروفایلت به‌روز شد ✅' : 'برنامه‌ات دقیقاً بر اساس خودت چیده شد 🎉', 'success');
+  if(!obEditMode && typeof maybeOfferStartDateBackdate === 'function') maybeOfferStartDateBackdate();
 }
 document.getElementById('obNextBtn').addEventListener('click', ()=>{
   if(!validateObStep(obStep)) return;
@@ -25894,6 +26246,7 @@ function skipOnboarding(){
   render();
   updatePersonalizeHints();
   showToast('باشه، فعلاً با برنامه‌ی عمومی شروع کن — هر وقت خواستی از منو تکمیلش کن', 'info');
+  if(typeof maybeOfferStartDateBackdate === 'function') maybeOfferStartDateBackdate();
 }
 document.getElementById('obSkipBtn').addEventListener('click', skipOnboarding);
 
@@ -25929,6 +26282,7 @@ function enterNoProgramMode(){
   render();
   updatePersonalizeHints();
   showToast('باشه! فقط روزشمار، یادداشت روزانه و بقیه‌ی امکانات رو می‌بینی — هر وقت خواستی از تنظیمات برنامه رو فعال کن', 'info');
+  if(typeof maybeOfferStartDateBackdate === 'function') maybeOfferStartDateBackdate();
 }
 document.getElementById('obNoProgramBtn').addEventListener('click', enterNoProgramMode);
 function applyNoProgramModeUI(){
@@ -25979,6 +26333,7 @@ function enterManualProgramSetup(){
   updatePersonalizeHints();
   openManualPlanBuilder();
   showToast('خودت برنامه‌تو بچین — هر چی برای امروز اضافه کنی همین الان جزو چک‌لیستته 📝', 'info');
+  if(typeof maybeOfferStartDateBackdate === 'function') maybeOfferStartDateBackdate();
 }
 function applyManualProgramModeUI(){
   const on = !!(storeData.profile && storeData.profile.manualProgramMode);
@@ -26174,25 +26529,61 @@ function withTimeout(promise, ms){
     promise.then(v=>{ clearTimeout(t); resolve(v); }, e=>{ clearTimeout(t); reject(e); });
   });
 }
+// موازی با صبر برای پاسخ نیتیوِ purchase()، هر ۶ ثانیه یه‌بار خودمون از مارکت
+// می‌پرسیم که آیا این خرید واقعاً ثبت شده یا نه. چون تو پنل دیباگِ خودِ کاربر دیده
+// شد که بعضی وقت‌ها callback نیتیو اصلاً نمی‌رسه (نه رد می‌شه نه قبول)، و کد فقط
+// کورکورانه تا سقف ۱۲۰ ثانیه صبر می‌کرد، درحالی‌که خودِ خرید رو مارکت خیلی زودتر
+// کامل شده بود. هرکدوم اول جواب بده (نیتیو یا این چک دوره‌ای)، برنده‌ست.
+function iabPollForPurchase(plugin, sku, maxWaitMs){
+  const premiumSkus = new Set(Object.values(PREMIUM_SKU_BY_DISCOUNT));
+  const start = Date.now();
+  let stopped = false;
+  const promise = new Promise((resolve, reject)=>{
+    async function tick(){
+      if(stopped) return;
+      if(Date.now() - start >= maxWaitMs){ stopped = true; reject(new Error('iab-timeout')); return; }
+      try{
+        const owned = await plugin.getPurchases();
+        const found = owned && owned.purchases && owned.purchases.find(p => p.sku === sku || premiumSkus.has(p.sku));
+        if(found && !stopped){ stopped = true; resolve(found); return; }
+      }catch(err){ /* خطای گذرا رو نادیده بگیر، دور بعد دوباره امتحان می‌کنیم */ }
+      if(!stopped) setTimeout(tick, 6000);
+    }
+    // اولین چک رو فوری نمی‌زنیم چون تازه داره پنل مایکت باز می‌شه؛ ۶ ثانیه فرصت بده.
+    setTimeout(tick, 6000);
+  });
+  return { promise, stop(){ stopped = true; } };
+}
 async function iabPurchase(sku){
   console.log('[IAB] درخواست خرید، sku =', sku);
   const plugin = getIabPlugin();
   if(!plugin){ showToast('این نسخه هنوز به پرداخت درون‌برنامه‌ای مایکت وصل نشده', 'error'); return null; }
   iabDebugStep('پلاگین بیلینگ (MarketBilling)', true, 'پیدا شد');
+  const poller = iabPollForPurchase(plugin, sku, 120000);
   try{
     console.log('[IAB] پلاگین پیدا شد، در حال صدا زدن purchase() نیتیو...');
-    iabDebugStep('purchase() نیتیو', null, 'در حال باز شدن پنل مایکت...');
+    iabDebugStep('purchase() نیتیو', null, 'در حال باز شدن پنل مایکت... (هم‌زمان هر ۶ ثانیه خودکار هم چک می‌کنیم)');
     // اگه کاربر وسط درگاه پرداخت برگرده عقب یا فیلترشکن رو خاموش/روشن کنه، ممکنه
     // callback نیتیو هیچ‌وقت نرسه و promise برای همیشه معلق بمونه؛ برای همین یه
-    // سقف زمانی می‌ذاریم تا دکمه هیچ‌وقت قفل نمونه.
-    const result = await withTimeout(plugin.purchase({ sku }), 120000);
+    // سقف زمانی می‌ذاریم تا دکمه هیچ‌وقت قفل نمونه. همزمان، iabPollForPurchase هم
+    // داره جدا چک می‌کنه — هرکدوم زودتر جواب بده همون برنده‌ست.
+    const result = await Promise.race([ withTimeout(plugin.purchase({ sku }), 120000), poller.promise ]);
+    poller.stop();
     console.log('[IAB] purchase() نیتیو resolve شد:', result);
     iabDebugStep('purchase() نیتیو', true, result);
     return result;
   }catch(e){
+    poller.stop();
     console.error('[IAB] purchase() نیتیو fail شد:', (e && e.message) || e, e);
     iabDebugStep('purchase() نیتیو', false, (e && e.message) || String(e));
-    if(e && e.message === 'iab-timeout'){
+    if(e && typeof e.message === 'string' && e.message.indexOf('مایکت رو این گوشی در دسترس نیست') !== -1){
+      // این پیام دقیقاً همون چیزیه که ensureBound() تو MarketBillingPlugin.java برمی‌گردونه
+      // وقتی نتونسته به سرویس بیلینگ مایکت وصل بشه (چه چون خودِ اپ مایکت رو گوشی نیست،
+      // چه چون <queries> تو Manifest جا افتاده). این با «کاربر منصرف شد» فرق داره و
+      // باید جدا و رک نشون داده بشه — هم برای کاربر واقعی، هم برای دیباگ حین ری‌ویو.
+      iabDebugStep('نتیجه‌ی نهایی', false, 'سرویس بیلینگ مایکت در دسترس نیست');
+      showToast('برنامه‌ی مایکت روی این گوشی پیدا یا وصل نشد؛ لطفاً از نصب و به‌روز بودن مایکت مطمئن شو', 'error');
+    } else if(e && e.message === 'iab-timeout'){
       // بعضی مسیرهای مایکت (مثلاً شارژ کیف‌پول وسط خرید) نتیجه رو هیچ‌وقت به
       // onActivityResult برنمی‌گردونن، درحالی‌که خودِ خرید رو مارکت واقعاً ثبت
       // می‌شه. به‌جای اینکه فقط بگیم «از بازیابی خرید قبلی استفاده کن»، همینجا
@@ -26291,6 +26682,21 @@ function handleAppUsageForegroundChange(isActive){
   }
 }
 let lastAppForegroundState = true;
+// ================= فلاش اضطراریِ سیوِ ابری، لحظه‌ی رفتن به پس‌زمینه =================
+// saveData() یه سیو رو تا ۳۵۰ میلی‌ثانیه debounce می‌کنه قبل از پوش‌کردنش به ابر
+// (user_data روی Supabase). تا اینجای کار، اگه درست وسط اون ۳۵۰ میلی‌ثانیه کاربر
+// اپ رو ببنده و بلافاصله آنینستال کنه یا از تنظیماتِ اندروید «پاک کردن دیتا» بزنه،
+// اون آخرین تغییر می‌تونست هیچ‌وقت به ابر نرسه. نکته‌ی مهم: برای رسیدن به هر دوی این
+// کارها (آنینستال / پاک کردنِ دیتا)، کاربر اول باید از اپ خارج بشه (بره صفحه‌ی اصلی/
+// تنظیمات) — یعنی همیشه یه appStateChange/visibilitychange=hidden قبلش اتفاق می‌افته.
+// برای همین، دقیقاً همون لحظه که اپ می‌ره پس‌زمینه، به‌جای صبر کردن برای تایمر، فوراً
+// و بدون تاخیر یه پوش می‌زنیم — این‌جوری تا وقتی کاربر واقعاً از اپ خارج نشده، هیچ
+// تغییری بیشتر از چند میلی‌ثانیه رو دستگاه تنها نمی‌مونه.
+function flushPendingCloudSave(){
+  if(!sb || !publicChatUser) return;
+  clearTimeout(saveTimeout);
+  pushCloudData();
+}
 function handleAppForegroundChange(isActive){
   if(!sb) return;
   if(isActive === lastAppForegroundState) return;
@@ -26311,8 +26717,13 @@ function handleAppForegroundChange(isActive){
     });
   } else {
     try{ sb.auth.stopAutoRefresh(); }catch(e){}
+    flushPendingCloudSave();
   }
 }
+// Extra safety net (همون منطقِ pauseMusicForBackground بالاتر): بعضی WebViewهای
+// اندروید موقع دکمه‌ی خانه/اپ‌های اخیر، visibilitychange رو قابل‌اعتماد نمی‌زنن، ولی
+// pagehide رو تقریباً همیشه می‌زنن.
+window.addEventListener('pagehide', flushPendingCloudSave);
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState === 'visible'){
     resetPremiumPayBtnIfStuck();
@@ -26355,7 +26766,23 @@ async function iabVerifyOnServer(purchase){
    ورکر باگ داشته باشه (مثلاً برای مایکت verify رو درست انجام نداده یا ذخیره نکرده)،
    این جلوی اون حالت رو می‌گیره که کاربر تست "فعال شد 🎉" ببینه ولی چند لحظه بعد
    (با اولین رفرش سشن) دوباره غیرپرمیوم بشه — منبع حقیقت همیشه همینجاست، نه پاسخ ورکر. */
-async function confirmPremiumOnServer(){
+async function confirmPremiumOnServer(trustedPremiumUntilHint){
+  // اگه ورکر خودش premiumUntil رو تو پاسخ iab/verify برگردونده باشه (فقط بعد از چک
+  // grantRes.ok، پس مطمئنیم واقعاً نوشته شده)، به‌جاش یه رفت‌وبرگشت شبکه‌ی جداگونه و کند
+  // نمی‌زنیم؛ این مقدار رو مستقیم معتبر می‌دونیم و فوراً ادامه می‌دیم. برای اطمینان بیشتر
+  // (بدون بلاک کردن UI)، یه چک واقعی از Supabase رو پس‌زمینه هم می‌زنیم که فقط تو پنل
+  // دیباگ لاگ بشه.
+  if(trustedPremiumUntilHint && new Date(trustedPremiumUntilHint) > new Date()){
+    iabDebugStep('تایید نهایی از Supabase (profiles.premium_until)', true, 'از پاسخ iab/verify گرفته شد (بدون رفت‌وبرگشت اضافه): ' + trustedPremiumUntilHint);
+    if(sb && publicChatUser){
+      sb.from('profiles').select('premium_until').eq('id', publicChatUser.id).single()
+        .then(({data})=>{
+          const ok = !!(data && data.premium_until && new Date(data.premium_until) > new Date());
+          if(!ok) console.warn('[IAB] چک پس‌زمینه‌ی Supabase با پاسخ ورکر همخونی نداشت:', data);
+        }).catch(()=>{});
+    }
+    return true;
+  }
   if(!sb || !publicChatUser){
     iabDebugStep('تایید نهایی از Supabase', false, 'sb یا publicChatUser موجود نیست (یعنی لاگین نبودی)');
     return isAppOwner === true;
@@ -26753,6 +27180,37 @@ async function openPremiumPage(){
   applyPremiumLocksUI(); // اطمینان دهیم که قفل‌ها به‌روز شوند
   loadLifetimeRemaining();
   enterSubPage('premium');
+
+  // چک سبک و کاملاً fire-and-forget: آیا اصلاً سرویس بیلینگ مایکت رو این گوشی در
+  // دسترسه؟ هدف اینه که به‌جای اینکه کاربر دکمه رو بزنه و بعد با یه خطای گنگ مواجه بشه،
+  // همین‌جا (قبل از کلیک) یه هشدار واضح ببینه. اگه این چک خودش fail بشه یا کند باشه،
+  // هیچ تاثیری رو باز شدن صفحه یا کارکرد دکمه‌ی خرید نداره — کاملاً مستقله.
+  (async function checkStoreAvailability(){
+    try{
+      let banner = document.getElementById('premStoreMissingBanner');
+      const payBtn = document.getElementById('premiumPayBtn');
+      function showBanner(msg){
+        if(!banner && payBtn){
+          banner = document.createElement('div');
+          banner.id = 'premStoreMissingBanner';
+          banner.style.cssText = 'margin:0 0 12px;padding:10px;border-radius:12px;background:#fee2e2;border:1px solid #ef4444;color:#b91c1c;font-size:12.5px;font-weight:700;text-align:center;';
+          payBtn.insertAdjacentElement('beforebegin', banner);
+        }
+        if(banner){ banner.style.display = 'block'; banner.textContent = msg; }
+      }
+      const plugin = getIabPlugin();
+      if(!plugin){ showBanner('⚠️ این نسخه هنوز به پرداخت درون‌برنامه‌ای وصل نشده'); return; }
+      const res = await withTimeout(plugin.getStore(), 4000);
+      const store = res && res.store;
+      if(!store || store === 'none'){
+        showBanner('⚠️ برنامه‌ی مایکت روی این گوشی پیدا نشد — برای خرید باید نصب و به‌روز باشه');
+      } else if(banner){
+        banner.style.display = 'none';
+      }
+    }catch(err){
+      console.warn('[IAB] checkStoreAvailability fail شد (بی‌ضرره، تاثیری رو خرید نداره):', err);
+    }
+  })();
 }
 // Backward-compatible alias (kept in case anything else in the app still calls the old name)
 function openPremiumOverlay(){ openPremiumPage(); }
@@ -26815,8 +27273,8 @@ async function activateOwnedPremiumIfAny(opts){
     }
     // همون دلیل مسیر خرید مستقیم: فقط "owned" بودن رو مارکت کافی نیست، باید مطمئن
     // شیم سرور (profiles.premium_until) هم همینو می‌دونه.
-    await iabVerifyOnServer(ownedPremium);
-    const reallyActivated = await confirmPremiumOnServer();
+    const ownedVerify = await iabVerifyOnServer(ownedPremium);
+    const reallyActivated = await confirmPremiumOnServer(ownedVerify && ownedVerify.premiumUntil);
     if(!reallyActivated){
       if(!silent) showToast('خرید رو مارکت پیدا شد ولی سرور تاییدش نکرد؛ لطفاً با پشتیبانی تماس بگیر', 'error');
       return false;
@@ -26848,6 +27306,20 @@ document.getElementById('premiumPayBtn').addEventListener('click', async ()=>{
   }
   const btn = document.getElementById('premiumPayBtn');
   btn.disabled = true; btn.textContent = 'در حال اتصال...';
+  // موقع بررسی توسط مایکت، دقیقاً همین لحظه (بین کلیک و نتیجه) بود که کارشناس هیچ
+  // فیدبکی ندید و فکر کرد «هیچ اتفاقی نیفتاد» — درحالی‌که پشت‌صحنه داشت رو شبکه‌ی
+  // کند تایید می‌شد. یه پیام دائمی و واضح می‌ذاریم تا معلوم باشه داره کار می‌کنه،
+  // و کاربر/کارشناس چند بار پشت‌سرهم دکمه رو نزنه (که دکمه دیزیبله، ولی این پیام
+  // دلیلشو هم توضیح می‌ده).
+  let loadingBanner = document.getElementById('premPurchaseLoadingBanner');
+  if(!loadingBanner){
+    loadingBanner = document.createElement('div');
+    loadingBanner.id = 'premPurchaseLoadingBanner';
+    loadingBanner.style.cssText = 'margin:10px 0 0;padding:10px;border-radius:12px;background:var(--accent-soft, #eef2ff);border:1px solid var(--accent, #4338ca);color:var(--accent, #4338ca);font-size:12.5px;font-weight:700;text-align:center;';
+    btn.insertAdjacentElement('afterend', loadingBanner);
+  }
+  loadingBanner.style.display = 'block';
+  loadingBanner.textContent = '⏳ در حال تایید خرید... رو شبکه‌ی کند ممکنه تا حدود ۱-۲ دقیقه طول بکشه. لطفاً اپ رو نبند و چندبار کلیک نکن.';
   console.log('[IAB] دکمه‌ی خرید کلیک شد. sku انتخاب‌شده:', currentPremiumSku(), '| myDiscount:', myDiscount);
   iabDebugReset();
   iabDebugStep('کلیک روی دکمه‌ی خرید', true, 'sku=' + currentPremiumSku());
@@ -26857,7 +27329,7 @@ document.getElementById('premiumPayBtn').addEventListener('click', async ()=>{
       console.log('[IAB] purchase از نیتیو برگشت:', purchase);
       const verify = await iabVerifyOnServer(purchase);
       console.log('[IAB] نتیجه‌ی iab/verify از ورکر:', verify);
-      const reallyActivated = (verify && verify.ok) ? await confirmPremiumOnServer() : false;
+      const reallyActivated = (verify && verify.ok) ? await confirmPremiumOnServer(verify.premiumUntil) : false;
       console.log('[IAB] reallyActivated (تایید نهایی رو Supabase):', reallyActivated);
       iabDebugStep('نتیجه‌ی کلی', reallyActivated, reallyActivated ? 'پرمیوم فعال شد 🎉' : 'فعال نشد — اولین ❌ بالا رو نگاه کن');
       if(reallyActivated){
@@ -26885,6 +27357,8 @@ document.getElementById('premiumPayBtn').addEventListener('click', async ()=>{
     showToast('مشکلی پیش اومد؛ دوباره امتحان کن', 'error');
   }finally{
     btn.disabled = false; btn.textContent = '💳 خرید نسخه‌ی پرمیوم';
+    const loadingBannerEl = document.getElementById('premPurchaseLoadingBanner');
+    if(loadingBannerEl) loadingBannerEl.style.display = 'none';
   }
 });
 
@@ -27031,7 +27505,12 @@ if ('caches' in window) {
       }
     }
 
+    // میزِ نیمه‌کاره‌یِ ۶۰دقیقه‌ای — عیناً هم‌الگو با dblRefreshOpenRooms: فایرـاندـفورگت،
+    // نه منتظرش می‌مونیم نه خطاش رو نشون می‌دیم؛ اگه شکست بخوره همون میزهایِ قدیمی یه بارِ
+    // دیگه (لودِ بعدیِ لابی) امتحان می‌شن. جزئیاتِ آستانه تویِ خودِ
+    // hokm_cleanup_abandoned_rooms (games_history_and_60min_autoclose.sql)ه.
     async function hkRefreshOpenRooms(){
+      sb.rpc('hokm_cleanup_abandoned_rooms').catch(function(){});
       try{
         const { data, error } = await sb.rpc('hokm_list_open_rooms');
         if(error) throw error;
@@ -27215,6 +27694,169 @@ if ('caches' in window) {
           hkJoinRoom(jbtn.dataset.joinRoom);
         });
       }
+      // تاریخچه — دکمه + بستنِ هردو مودال (چه با ✕ چه با کلیک رویِ بک‌دراپ)، عیناً هم‌الگو
+      // با efWireLobbyControls (STAGE 9، نیمه‌ی دوم).
+      const historyBtn = hkLobbyEl('hkHistoryBtn');
+      if(historyBtn && !historyBtn.dataset.hkWired){
+        historyBtn.dataset.hkWired = '1';
+        historyBtn.addEventListener('click', hkOpenHistory);
+      }
+      const historyCloseBtn = hkLobbyEl('hkHistoryCloseBtn');
+      if(historyCloseBtn && !historyCloseBtn.dataset.hkWired){
+        historyCloseBtn.dataset.hkWired = '1';
+        historyCloseBtn.addEventListener('click', hkCloseHistory);
+      }
+      const historyModal = hkLobbyEl('hkHistoryModal');
+      if(historyModal && !historyModal.dataset.hkWired){
+        historyModal.dataset.hkWired = '1';
+        historyModal.addEventListener('click', function(e){
+          if(e.target.id === 'hkHistoryModal') hkCloseHistory();
+        });
+      }
+      const historyList = hkLobbyEl('hkHistoryList');
+      if(historyList && !historyList.dataset.hkWired){
+        historyList.dataset.hkWired = '1';
+        historyList.addEventListener('click', function(e){
+          const row = e.target.closest('.hk-history-row');
+          if(row && row.dataset.matchId) hkOpenHistoryDetail(row.dataset.matchId);
+        });
+      }
+      const historyDetailCloseBtn = hkLobbyEl('hkHistoryDetailCloseBtn');
+      if(historyDetailCloseBtn && !historyDetailCloseBtn.dataset.hkWired){
+        historyDetailCloseBtn.dataset.hkWired = '1';
+        historyDetailCloseBtn.addEventListener('click', hkCloseHistoryDetail);
+      }
+      const historyDetailModal = hkLobbyEl('hkHistoryDetailModal');
+      if(historyDetailModal && !historyDetailModal.dataset.hkWired){
+        historyDetailModal.dataset.hkWired = '1';
+        historyDetailModal.addEventListener('click', function(e){
+          if(e.target.id === 'hkHistoryDetailModal') hkCloseHistoryDetail();
+        });
+      }
+    }
+
+    // =====================================================================
+    // تاریخچه — عیناً هم‌الگو با efOpenHistory/efLoadHistory/efRenderHistoryList/
+    // efOpenHistoryDetail (STAGE 9، نیمه‌ی دوم). سه تفاوتِ حکم با اسم‌فامیل/دابل:
+    //   ۱) واحدِ «یه بازیِ تموم‌شده» خودِ room نیست، هر ردیفِ hokm_matches.status='finished'ه
+    //      (room با «بازیِ دوباره» می‌تونه چند match پشتِ‌سرهم داشته باشه — بالاتر، کنارِ
+    //      hokm_my_history تو SQL توضیح داده شده).
+    //   ۲) حکم بازیِ دوتیمی‌ست، نه چندنفره‌ی امتیازِ فردی — پس به‌جایِ رتبه/مدال، فقط
+    //      برد/باختِ خودم (رنگ/ایموجیِ win یا lose) نشون داده می‌شه.
+    //   ۳) جزئیاتش (hkOpenHistoryDetail) دست‌به‌دستِ خودِ مسابقه‌ست (hokm_match_detail)، نه
+    //      اسکوربوردِ بازیکن‌ها — چون تویِ حکم اصلاً امتیازِ فردی معنی نداره.
+    // =====================================================================
+
+    async function hkOpenHistory(){
+      const modal = hkLobbyEl('hkHistoryModal');
+      if(modal) modal.classList.add('visible');
+      await hkLoadHistory();
+    }
+
+    function hkCloseHistory(){
+      const modal = hkLobbyEl('hkHistoryModal');
+      if(modal) modal.classList.remove('visible');
+    }
+
+    async function hkLoadHistory(){
+      try{
+        if(!sb) return;
+        const listEl = hkLobbyEl('hkHistoryList');
+        if(listEl) listEl.innerHTML = '<div class="hk-history-empty">در حالِ بارگذاری...</div>';
+        const [statsRes, historyRes] = await Promise.all([
+          sb.rpc('hokm_my_stats'),
+          sb.rpc('hokm_my_history', { p_limit: 20 })
+        ]);
+        if(statsRes.error) throw statsRes.error;
+        if(historyRes.error) throw historyRes.error;
+        const stats = (statsRes.data && statsRes.data[0]) || { games_played: 0, games_won: 0 };
+        const rows = historyRes.data || [];
+        hkRenderHistoryStats(stats);
+        hkRenderHistoryList(rows);
+      }catch(e){
+        console.warn('hkLoadHistory failed', e);
+        const listEl = hkLobbyEl('hkHistoryList');
+        if(listEl) listEl.innerHTML = '<div class="hk-history-empty">گرفتنِ تاریخچه الان جواب نداد؛ دوباره امتحان کن.</div>';
+      }
+    }
+
+    function hkRenderHistoryStats(stats){
+      const el = hkLobbyEl('hkHistoryStats');
+      if(!el) return;
+      el.innerHTML =
+        '<div class="hk-history-stat"><div class="hk-history-stat-num">' + toFa(stats.games_played || 0) + '</div>'
+          + '<div class="hk-history-stat-label">مسابقه</div></div>'
+        + '<div class="hk-history-stat"><div class="hk-history-stat-num">' + toFa(stats.games_won || 0) + '</div>'
+          + '<div class="hk-history-stat-label">برد 🏆</div></div>';
+    }
+
+    function hkRenderHistoryList(rows){
+      const listEl = hkLobbyEl('hkHistoryList');
+      if(!listEl) return;
+      if(!rows.length){
+        listEl.innerHTML = '<div class="hk-history-empty">هنوز هیچ مسابقه‌ی تمومی نداری — یه میز بساز و شروع کن! 🃏</div>';
+        return;
+      }
+      listEl.innerHTML = rows.map(function(r){
+        const dt = r.finished_at ? new Date(r.finished_at) : null;
+        const dateLabel = dt ? dt.toLocaleDateString('fa-IR', { day:'numeric', month:'long' }) : '';
+        const resultIcon = r.won ? '🏆' : '🙁';
+        return '<div class="hk-history-row' + (r.won ? ' hk-history-row-won' : '') + '" data-match-id="' + r.match_id + '">'
+          + '<span class="hk-history-row-rank">' + resultIcon + '</span>'
+          + '<div class="hk-history-row-info">'
+            + '<div class="hk-history-row-cats">' + toFa(r.hands_played || 0) + ' دست' + (dateLabel ? ' · ' + dateLabel : '') + '</div>'
+            + '<div class="hk-history-row-meta">' + (r.won ? 'بردید' : 'باختید') + '</div>'
+          + '</div>'
+          + '<span class="hk-history-row-score">' + toFa(r.my_score || 0) + ' - ' + toFa(r.opp_score || 0) + '</span>'
+          + '</div>';
+      }).join('');
+    }
+
+    async function hkOpenHistoryDetail(matchId){
+      try{
+        if(!sb || !matchId) return;
+        const titleEl = hkLobbyEl('hkHistoryDetailTitle');
+        if(titleEl) titleEl.textContent = 'در حالِ بارگذاری...';
+        const rowsEl = hkLobbyEl('hkHistoryDetailRows');
+        if(rowsEl) rowsEl.innerHTML = '';
+        const modal = hkLobbyEl('hkHistoryDetailModal');
+        if(modal) modal.classList.add('visible');
+
+        const { data, error } = await sb.rpc('hokm_match_detail', { p_match_id: matchId });
+        if(error) throw error;
+        const hands = data || [];
+        if(titleEl) titleEl.textContent = '🃏 جزئیاتِ مسابقه — دست به دست';
+        if(rowsEl) rowsEl.innerHTML = hkHistoryHandRowsHtml(hands);
+      }catch(e){
+        console.warn('hkOpenHistoryDetail failed', e);
+        const titleEl = hkLobbyEl('hkHistoryDetailTitle');
+        if(titleEl) titleEl.textContent = '🃏 جزئیاتِ مسابقه';
+        const rowsEl = hkLobbyEl('hkHistoryDetailRows');
+        if(rowsEl) rowsEl.innerHTML = '<div class="hk-history-empty">گرفتنِ جزئیات الان جواب نداد.</div>';
+      }
+    }
+
+    function hkCloseHistoryDetail(){
+      const modal = hkLobbyEl('hkHistoryDetailModal');
+      if(modal) modal.classList.remove('visible');
+    }
+
+    // نگاشتِ خالِ حکم برایِ نمایش — نسخه‌ی محلیِ همین ماژول (نه HK3_WORD_SUIT، چون اون تویِ
+    // IIFEِ جداگونه‌ی STAGE ۷/بخشِ ۳ تعریف شده و از اینجا در دسترس نیست).
+    const HK_HISTORY_SUIT_ICON = { spade:'♠', heart:'♥', diamond:'♦', club:'♣' };
+    function hkHistoryHandRowsHtml(hands){
+      if(!hands.length) return '<div class="hk-history-empty">دستی برایِ نمایش نیست.</div>';
+      return hands.map(function(h){
+        const suitIcon = HK_HISTORY_SUIT_ICON[h.trump_suit] || '؟';
+        const hakemTeam = h.hakem_seat % 2;
+        const won = h.winner_team != null;
+        return '<div class="game-history-hand-row">'
+          + '<span class="game-history-hand-num">دستِ ' + toFa(h.hand_number) + '</span>'
+          + '<span class="game-history-hand-trump">حکم ' + suitIcon + '</span>'
+          + '<span class="game-history-hand-tricks">' + toFa(h.team0_tricks || 0) + '-' + toFa(h.team1_tricks || 0) + '</span>'
+          + '<span class="game-history-hand-result">' + (won ? ('تیمِ ' + toFa(h.winner_team + 1) + (h.is_kat ? ' 🔥کت' : '')) : '—') + '</span>'
+          + '</div>';
+      }).join('');
     }
 
     async function hkLoadLobby(){
@@ -27379,7 +28021,11 @@ if ('caches' in window) {
       }
     }
 
+    // میزِ نیمه‌کاره‌یِ ۶۰دقیقه‌ای — عیناً هم‌الگو با dblRefreshOpenRooms/hkRefreshOpenRooms:
+    // فایرـاندـفورگت. جزئیاتِ آستانه تویِ خودِ esmfamil_cleanup_abandoned_rooms
+    // (games_history_and_60min_autoclose.sql)ه.
     async function efRefreshOpenRooms(){
+      sb.rpc('esmfamil_cleanup_abandoned_rooms').catch(function(){});
       try{
         const { data, error } = await sb.rpc('esmfamil_list_open_rooms');
         if(error) throw error;
@@ -30757,3 +31403,270 @@ document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState === 'visible'){ try{ tgRunCheck(); }catch(e){} }
 });
 try{ tgUpdateBanner(); }catch(e){}
+
+/* ================= STAGE 10: مدیریتِ روزشمار — بک‌دیتِ اولین‌بار برایِ همه + پنلِ ادمین =================
+   خلاصه‌ی قابلیت (طبق درخواست):
+   ۱) اولین‌باری که روزشمارِ هرکسی خودکار از «همین الان» شروع می‌شه (چه با پایانِ ویزارد،
+      چه با ردکردنش، چه با «بدون برنامه»/«دستی» — چهار نقطه‌ی خروجِ اولین‌بار، بالاتر تو
+      همین فایل، هرکدوم یه صدا به maybeOfferStartDateBackdate اضافه کردن)، یه‌بار (فقط
+      همون یه‌بار — storeData.startDateBackdateOffered) ازش می‌پرسیم از کِی واقعاً شروع
+      کرده — بدونِ هیچ محدودیتِ owner/backdateUnlocked/tgCanBackdate (STAGE 9، بالاتر)،
+      چون این یه روزشمارِ کاملاً تازه‌ست، نه تمدیدِ یکیِ فعلی — اون محدودیت‌ها مخصوصِ
+      جلوگیری از دستکاریِ یه روزشمارِ درحال‌شمارشه، نه اظهارِ صادقانه‌ی نقطه‌ی شروع.
+   ۲) پنلِ ادمین (streakAdminMenuOpenBtn، تویِ چاتِ عمومی، منویِ «⋮ گزینه‌های بیشتر» —
+      عمداً یه پیلِ همیشه‌-نمایانِ جدا نیست، چون اون ردیف (کنارِ ادمین‌هایِ چت/قوانین/
+      فیلترِ جنسیت/کول‌داون/قفل) از قبل شلوغه؛ chatMoreMenu دقیقاً همون مکانیزمیه که
+      خودِ کدباز برایِ اضافه‌کردنِ اکشن‌هایِ کم‌تکرار بدونِ اورلپ ساخته — فقط
+      OWNER_EMAIL می‌بینتش — چک/نمایشش عیناً هم‌الگو
+      با chatAdminManageBtn، بالاتر تو resolveSession): جست‌وجویِ هر کاربری با یوزرنیم،
+      دیدنِ روزشمارِ فعلیش، و تغییر/صفرکردنِ تاریخِ شروعش
+      (streak_admin_set_start_date/streak_admin_reset، games_streak_admin.sql). امنیتِ
+      واقعی سمتِ سرورِ همون دو RPCه (چک ایمیل با auth.users)، نه این چک‌های کلاینتی —
+      عیناً همون فلسفه‌ای که کامنتِ grantOrRevokeChatAdmin (بالاتر) براش توضیح داده.
+   ۳) OWNER_EMAIL از همین پنل، با جست‌وجویِ خودش، می‌تونه روزشمارِ اکانتِ خودشو هم هرچند
+      بار خواست عوض کنه — تفاوتی با تغییرِ روزشمارِ بقیه نداره، همون مسیر و همون RPC.
+   ۴) وقتی OWNER_EMAIL روزشمارِ یه کاربرِ دیگه رو عوض می‌کنه، همون‌لحظه سمتِ سرور
+      profiles.day_count هم به‌روز می‌شه (لیدربورد فوراً درست می‌شه) — ولی خودِ اون کاربر
+      تا دفعه‌ی بعدی لاگین/سینکِ اپش، storeData.startDateِ محلیِ خودش رو نمی‌گیره؛ اون
+      اتفاق تویِ resolveSession (جایی که isAppOwner محاسبه می‌شه، بالاتر تو همین فایل)
+      می‌افته — مقایسه‌ی profile.streak_override_set_at با storeData.streakOverrideAppliedAt،
+      عیناً هم‌الگو با مقایسه‌ی cloudTime/localTime تویِ syncOnLogin.
+*/
+
+// ---------------- ۱) بک‌دیتِ اولین‌بار (همه) ----------------
+function saStartDateChoiceInputDefault(){
+  const input = document.getElementById('startDateChoiceInput');
+  if(!input) return;
+  const now = new Date();
+  input.max = (typeof tgToLocalInputValue === 'function') ? tgToLocalInputValue(now) : '';
+  input.value = input.max;
+}
+function openStartDateChoiceModal(){
+  const modal = document.getElementById('startDateChoiceModal');
+  if(!modal) return;
+  saChosenStartDate = null;
+  document.querySelectorAll('#startDateChoiceChips .reset-date-chip').forEach(c=>c.classList.remove('active'));
+  const nowChip = document.querySelector('#startDateChoiceChips .reset-date-chip[data-days="0"]');
+  if(nowChip) nowChip.classList.add('active');
+  saStartDateChoiceInputDefault();
+  modal.classList.add('visible');
+}
+let saChosenStartDate = null; // یه Date واقعی، یا null یعنی «همین الان»
+document.querySelectorAll('#startDateChoiceChips .reset-date-chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    document.querySelectorAll('#startDateChoiceChips .reset-date-chip').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    const daysAgo = parseInt(chip.dataset.days, 10) || 0;
+    const d = new Date(Date.now() - daysAgo*86400000);
+    saChosenStartDate = daysAgo===0 ? null : d;
+    const input = document.getElementById('startDateChoiceInput');
+    if(input && typeof tgToLocalInputValue === 'function') input.value = tgToLocalInputValue(d);
+  });
+});
+const startDateChoiceInputEl = document.getElementById('startDateChoiceInput');
+if(startDateChoiceInputEl){
+  startDateChoiceInputEl.addEventListener('input', (e)=>{
+    document.querySelectorAll('#startDateChoiceChips .reset-date-chip').forEach(c=>c.classList.remove('active'));
+    const v = e.target.value;
+    saChosenStartDate = v ? new Date(v) : null;
+  });
+}
+const startDateChoiceConfirmBtnEl = document.getElementById('startDateChoiceConfirmBtn');
+if(startDateChoiceConfirmBtnEl){
+  startDateChoiceConfirmBtnEl.addEventListener('click', async ()=>{
+    const modal = document.getElementById('startDateChoiceModal');
+    const now = new Date();
+    let chosen = saChosenStartDate;
+    if(chosen && (isNaN(chosen.getTime()) || chosen.getTime() > now.getTime())) chosen = null; // تاریخِ نامعتبر/آینده → همون الان
+    const effective = chosen || now;
+    storeData.startDate = (typeof tgDateKeyOf === 'function') ? tgDateKeyOf(effective) : today;
+    storeData.startTimestamp = effective.toISOString();
+    storeData.streakOverrideAppliedAt = new Date().toISOString();
+    saveData();
+    try{ updateLiveCounter(); }catch(e){}
+    try{ updateStreakUI(); }catch(e){}
+    try{ render(); }catch(e){}
+    if(modal) modal.classList.remove('visible');
+    try{ await pushCloudData(); }catch(e){}
+    try{ await syncMyLeaderboardData(); }catch(e){}
+  });
+}
+// یه‌بار، درست همون لحظه‌ای که روزشمار برایِ اولین‌بار خودکار از «همین الان» شروع می‌شه —
+// از چهار نقطه‌ی خروجِ اولین‌بارِ ویزاردِ آنبوردینگ (finishOnboarding/skipOnboarding/
+// enterNoProgramMode/enterManualProgramSetup) صدا زده می‌شه.
+function maybeOfferStartDateBackdate(){
+  try{
+    if(!storeData.startDate) return;
+    if(storeData.startDateBackdateOffered) return;
+    storeData.startDateBackdateOffered = true;
+    saveData();
+    openStartDateChoiceModal();
+  }catch(e){}
+}
+
+// ---------------- ۲+۳) پنلِ ادمینِ روزشمارها (فقط OWNER_EMAIL) ----------------
+let saAdminUsers = [];
+let saAdminTargetUserId = null;
+let saAdminEditChosenDate = null; // یه Date، یا null یعنی «امروز»
+const streakAdminManageBtnEl = document.getElementById('streakAdminMenuOpenBtn');
+if(streakAdminManageBtnEl){
+  streakAdminManageBtnEl.addEventListener('click', ()=>{
+    if(!isAppOwner) return;
+    // منویِ «⋮ گزینه‌های بیشتر» که این دکمه توشه رو ببند — عیناً هم‌کاری که
+    // chatSearchOpenBtn (همون منو) موقعِ انتخاب‌شدن می‌کنه.
+    { const _mm = document.getElementById('chatMoreMenu'); if(_mm) _mm.classList.remove('show'); }
+    { const _mb = document.getElementById('chatMoreMenuBackdrop'); if(_mb) _mb.classList.remove('show'); }
+    const modal = document.getElementById('streakAdminModal');
+    if(modal) modal.classList.add('visible');
+    document.getElementById('streakAdminEditPanel').style.display = 'none';
+    saAdminTargetUserId = null;
+    saStreakAdminSearch('');
+  });
+}
+const streakAdminCloseBtnEl = document.getElementById('streakAdminCloseBtn');
+if(streakAdminCloseBtnEl){
+  streakAdminCloseBtnEl.addEventListener('click', ()=>{
+    const modal = document.getElementById('streakAdminModal');
+    if(modal) modal.classList.remove('visible');
+  });
+}
+const streakAdminModalEl = document.getElementById('streakAdminModal');
+if(streakAdminModalEl){
+  streakAdminModalEl.addEventListener('click', (e)=>{ if(e.target.id === 'streakAdminModal') streakAdminModalEl.classList.remove('visible'); });
+}
+let saAdminSearchDebounce = null;
+const streakAdminSearchInputEl = document.getElementById('streakAdminSearchInput');
+if(streakAdminSearchInputEl){
+  streakAdminSearchInputEl.addEventListener('input', (e)=>{
+    clearTimeout(saAdminSearchDebounce);
+    const v = e.target.value;
+    saAdminSearchDebounce = setTimeout(()=> saStreakAdminSearch(v), 350);
+  });
+}
+async function saStreakAdminSearch(term){
+  const listEl = document.getElementById('streakAdminList');
+  if(!sb || !isAppOwner || !listEl) return;
+  listEl.innerHTML = '<div class="streak-admin-empty">در حالِ جست‌وجو...</div>';
+  try{
+    const { data, error } = await sb.rpc('streak_admin_list_users', { p_search: term || null, p_limit: 30 });
+    if(error) throw error;
+    saAdminUsers = data || [];
+    saStreakAdminRenderList();
+  }catch(e){
+    console.warn('streak_admin_list_users failed', e);
+    listEl.innerHTML = '<div class="streak-admin-empty">جست‌وجو الان جواب نداد؛ دوباره امتحان کن.</div>';
+  }
+}
+function saStreakAdminRenderList(){
+  const listEl = document.getElementById('streakAdminList');
+  if(!listEl) return;
+  if(!saAdminUsers.length){
+    listEl.innerHTML = '<div class="streak-admin-empty">کاربری پیدا نشد.</div>';
+    return;
+  }
+  listEl.innerHTML = saAdminUsers.map(function(u){
+    const overridden = !!u.streak_override_set_at;
+    return '<div class="streak-admin-row" data-user-id="' + u.user_id + '">'
+      + '<div class="streak-admin-row-info">'
+        + '<div class="streak-admin-row-name">' + escapeHtml(u.username || 'کاربر') + (overridden ? ' <span class="streak-admin-row-badge">دستی</span>' : '') + '</div>'
+        + '<div class="streak-admin-row-days">روز ' + toFa(u.day_count || 0) + '</div>'
+      + '</div>'
+      + '<div class="streak-admin-row-actions">'
+        + '<button type="button" class="streak-admin-row-btn" data-act="edit">✏️ تغییر</button>'
+        + '<button type="button" class="streak-admin-row-btn" data-act="reset">0️⃣ صفر</button>'
+      + '</div>'
+    + '</div>';
+  }).join('');
+}
+const streakAdminListEl = document.getElementById('streakAdminList');
+if(streakAdminListEl){
+  streakAdminListEl.addEventListener('click', async (e)=>{
+    const row = e.target.closest('.streak-admin-row');
+    if(!row) return;
+    const userId = row.dataset.userId;
+    const user = saAdminUsers.find(function(u){ return u.user_id === userId; });
+    if(!user) return;
+    const actBtn = e.target.closest('.streak-admin-row-btn');
+    if(!actBtn) return;
+    if(actBtn.dataset.act === 'reset'){
+      if(!confirm('روزشمارِ «' + (user.username || 'این کاربر') + '» صفر بشه (از همین امروز)؟')) return;
+      await saStreakAdminApply(userId, null);
+      return;
+    }
+    if(actBtn.dataset.act === 'edit'){
+      saStreakAdminOpenEditPanel(user);
+    }
+  });
+}
+function saStreakAdminOpenEditPanel(user){
+  saAdminTargetUserId = user.user_id;
+  saAdminEditChosenDate = null;
+  const panel = document.getElementById('streakAdminEditPanel');
+  const title = document.getElementById('streakAdminEditTitle');
+  if(title) title.textContent = '✏️ ' + (user.username || 'کاربر') + ' — روزشمار از کِی؟';
+  document.querySelectorAll('#streakAdminEditChips .reset-date-chip').forEach(c=>c.classList.remove('active'));
+  const dateInput = document.getElementById('streakAdminEditDateInput');
+  if(dateInput){
+    const now = new Date();
+    dateInput.max = now.toISOString().slice(0,10);
+    dateInput.value = now.toISOString().slice(0,10);
+  }
+  if(panel) panel.style.display = 'block';
+}
+document.querySelectorAll('#streakAdminEditChips .reset-date-chip').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    document.querySelectorAll('#streakAdminEditChips .reset-date-chip').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    const daysAgo = parseInt(chip.dataset.days, 10) || 0;
+    const d = new Date(Date.now() - daysAgo*86400000);
+    saAdminEditChosenDate = d;
+    const input = document.getElementById('streakAdminEditDateInput');
+    if(input) input.value = d.toISOString().slice(0,10);
+  });
+});
+const streakAdminEditDateInputEl = document.getElementById('streakAdminEditDateInput');
+if(streakAdminEditDateInputEl){
+  streakAdminEditDateInputEl.addEventListener('input', (e)=>{
+    document.querySelectorAll('#streakAdminEditChips .reset-date-chip').forEach(c=>c.classList.remove('active'));
+    const v = e.target.value;
+    saAdminEditChosenDate = v ? new Date(v + 'T00:00:00') : null;
+  });
+}
+const streakAdminEditCancelBtnEl = document.getElementById('streakAdminEditCancelBtn');
+if(streakAdminEditCancelBtnEl){
+  streakAdminEditCancelBtnEl.addEventListener('click', ()=>{
+    document.getElementById('streakAdminEditPanel').style.display = 'none';
+    saAdminTargetUserId = null;
+  });
+}
+const streakAdminEditApplyBtnEl = document.getElementById('streakAdminEditApplyBtn');
+if(streakAdminEditApplyBtnEl){
+  streakAdminEditApplyBtnEl.addEventListener('click', async ()=>{
+    if(!saAdminTargetUserId) return;
+    await saStreakAdminApply(saAdminTargetUserId, saAdminEditChosenDate);
+    document.getElementById('streakAdminEditPanel').style.display = 'none';
+    saAdminTargetUserId = null;
+  });
+}
+// saStreakAdminApply — چه از دکمه‌ی «صفر» (chosenDate=null) چه از پنلِ ویرایش
+// (chosenDate=یه Date دلخواه) صدا زده بشه، هردو همون یه RPC رو صدا می‌زنن —
+// streak_admin_reset صرفاً میان‌بُرِ سمتِ سروریِ همینه با تاریخِ امروز.
+async function saStreakAdminApply(userId, chosenDate){
+  if(!sb || !isAppOwner || !userId) return;
+  try{
+    let error;
+    if(chosenDate instanceof Date && !isNaN(chosenDate.getTime())){
+      const p = n => String(n).padStart(2,'0');
+      const dateStr = chosenDate.getFullYear()+'-'+p(chosenDate.getMonth()+1)+'-'+p(chosenDate.getDate());
+      ({ error } = await sb.rpc('streak_admin_set_start_date', { p_user_id: userId, p_start_date: dateStr }));
+    } else {
+      ({ error } = await sb.rpc('streak_admin_reset', { p_user_id: userId }));
+    }
+    if(error) throw error;
+    showToast('روزشمار به‌روز شد ✅', 'success');
+    saStreakAdminSearch(document.getElementById('streakAdminSearchInput').value || '');
+  }catch(e){
+    console.warn('streak admin apply failed', e);
+    alert('خطا: ' + (e && e.message ? e.message : 'مشکل در اتصال به سرور'));
+  }
+}

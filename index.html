@@ -125,7 +125,7 @@
       var start = Date.now();
       var reqHeaders = headersToObj(init && init.headers);
       var reqBodyPreview = '';
-      try { if (init && init.body && typeof init.body === 'string') reqBodyPreview = maskSecrets(init.body).slice(0,300); } catch(e){}
+      try { if (init && init.body && typeof init.body === 'string') reqBodyPreview = maskSecrets(init.body); } catch(e){}
       addLog('network', 'fetch →', method + ' ' + maskSecrets(url),
         'headers: ' + maskSecrets(JSON.stringify(reqHeaders)) + (reqBodyPreview ? ('\nbody: ' + reqBodyPreview) : ''));
       var pid = ++pendingIdSeq;
@@ -144,7 +144,7 @@
         }
         try{
           res.clone().text().then(function(bodyText){
-            addLog(statusOk ? 'network' : 'error', 'fetch ←', method+' '+maskSecrets(url)+'  ['+res.status+']  '+dur+'ms', maskSecrets(bodyText).slice(0,600));
+            addLog(statusOk ? 'network' : 'error', 'fetch ←', method+' '+maskSecrets(url)+'  ['+res.status+']  '+dur+'ms', maskSecrets(bodyText));
           }).catch(function(){
             addLog(statusOk ? 'network' : 'error', 'fetch ←', method+' '+maskSecrets(url)+'  ['+res.status+']  '+dur+'ms', '(خواندن بدنه ممکن نشد)');
           });
@@ -258,6 +258,24 @@
     var colors = { console:'#9ca3af', network:'#60a5fa', error:'#f87171', suspicious:'#fbbf24', plugin:'#34d399', mark:'#a78bfa' };
     var labels = { console:'کنسول', network:'شبکه', error:'خطا', suspicious:'مشکوک', plugin:'پلاگین', mark:'—' };
 
+    // فیلتر «فقط پرمیوم»: تشخیص می‌ده هر خط لاگ واقعاً به فلوی خرید/IAP مربوطه یا نه،
+    // تا بشه چت/لیدربورد/هم‌مسیر/پوش‌نوتیف/ویجت‌تسک و بقیه‌ی نویزهای بی‌ربط رو موقع
+    // فرستادن گزارش به مایکت حذف کرد. عمداً یه لیست کلیدواژه‌ی ساده‌ست (نه regex پیچیده)
+    // که راحت می‌شه بعداً کلیدواژه‌ی جدید بهش اضافه کرد اگه یه مسیر جدید مربوط به خرید
+    // به کد اضافه شد.
+    var PREMIUM_FILTER_KEYWORDS = ['iab', 'premium', 'پرمیوم', 'خرید', 'marketbilling', 'purchase',
+      'claim_lifetime_slot', 'get_lifetime_remaining', 'sku', 'consumepurchase', 'getbuyintent',
+      'مایکت', 'myket', 'session', 'شروع نشست'];
+    function isPremiumEntry(l){
+      var hay = (String(l.source||'') + ' ' + String(l.summary||'') + ' ' + String(l.detail||'')).toLowerCase();
+      for (var i=0;i<PREMIUM_FILTER_KEYWORDS.length;i++){
+        if (hay.indexOf(PREMIUM_FILTER_KEYWORDS[i]) !== -1) return true;
+      }
+      return false;
+    }
+    var premFilterOn = false;
+    function visibleLogs(){ return premFilterOn ? logs.filter(isPremiumEntry) : logs; }
+
     function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function rowHtml(l){
       var color = colors[l.type] || '#9ca3af';
@@ -273,7 +291,7 @@
         detailHtml+
       '</div>';
     }
-    function renderAll(){ listEl.innerHTML = logs.map(rowHtml).join(''); listEl.scrollTop = listEl.scrollHeight; }
+    function renderAll(){ listEl.innerHTML = visibleLogs().map(rowHtml).join(''); listEl.scrollTop = listEl.scrollHeight; }
     function openPanel(){ panel.style.display = 'flex'; renderAll(); }
     function closePanel(){ panel.style.display = 'none'; }
 
@@ -287,20 +305,452 @@
     if (closeBtn) closeBtn.addEventListener('click', closePanel);
     var clearBtn = document.getElementById('__debugPanelClear');
     if (clearBtn) clearBtn.addEventListener('click', function(){ logs.length = 0; renderAll(); });
+    var premFilterBtn = document.getElementById('__debugPanelPremFilter');
+    if (premFilterBtn) premFilterBtn.addEventListener('click', function(){
+      premFilterOn = !premFilterOn;
+      premFilterBtn.style.background = premFilterOn ? '#8b5cf6' : '#0b0f1a';
+      premFilterBtn.style.color = premFilterOn ? '#fff' : '#a78bfa';
+      premFilterBtn.textContent = premFilterOn ? '✓ فقط پرمیوم' : 'فقط پرمیوم';
+      copyBtn.textContent = premFilterOn ? 'کپی پرمیوم' : 'کپی همه';
+      renderAll();
+    });
     var copyBtn = document.getElementById('__debugPanelCopy');
     if (copyBtn) copyBtn.addEventListener('click', function(){
-      var text = logs.map(function(l){ return '['+l.t+'] ('+labels[l.type]+') '+l.source+' — '+l.summary + (l.detail?('\n    '+l.detail):''); }).join('\n');
+      var text = visibleLogs().map(function(l){ return '['+l.t+'] ('+labels[l.type]+') '+l.source+' — '+l.summary + (l.detail?('\n    '+l.detail):''); }).join('\n');
       function fallbackCopy(t){ var ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} document.body.removeChild(ta); }
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(function(){ copyBtn.textContent='کپی شد ✓'; setTimeout(function(){ copyBtn.textContent='کپی همه'; },1500); }).catch(function(){ fallbackCopy(text); });
+        navigator.clipboard.writeText(text).then(function(){ var prevLabel = premFilterOn ? 'کپی پرمیوم' : 'کپی همه'; copyBtn.textContent='کپی شد ✓'; setTimeout(function(){ copyBtn.textContent=prevLabel; },1500); }).catch(function(){ fallbackCopy(text); });
       } else { fallbackCopy(text); }
     });
 
     listeners.push(function(entry){
-      if (panel.style.display === 'flex') { listEl.insertAdjacentHTML('beforeend', rowHtml(entry)); listEl.scrollTop = listEl.scrollHeight; }
+      if (panel.style.display === 'flex' && (!premFilterOn || isPremiumEntry(entry))) { listEl.insertAdjacentHTML('beforeend', rowHtml(entry)); listEl.scrollTop = listEl.scrollHeight; }
     });
 
+
     addLog('mark', 'debug-panel', 'پنل دیباگ آماده‌ست — برای باز کردن، ۷ بار سریع رو نقطه‌ی کم‌رنگ گوشه‌ی پایین-چپ بزن، یا #debugpanel رو به آدرس اضافه کن.', '');
+
+    /* ============================================================
+       تب‌های اضافی: Supabase / پرمیوم-IAP / Storage.
+       اینا برخلاف تب «لاگ زنده» یه استریم رویداد نیستن، بلکه یه
+       «عکس لحظه‌ای» (snapshot) از وضعیت فعلی اپن — هر بار که تب باز
+       می‌شه یا دکمه‌ی رفرش زده می‌شه دوباره محاسبه می‌شن. چون این
+       اسکریپت خیلی زودتر از app.js اجرا می‌شه، متغیرهای اپ (storeData،
+       sb، isAppOwner و...) رو مستقیم به اسم صدا نمی‌زنیم — چون در
+       زمان نوشتنِ این خطوط هنوز تعریف نشدن؛ به‌جاش با eval محافظت‌شده
+       (safeGlobal) در لحظه‌ی *باز شدنِ* تب (که قطعاً بعد از اجرای کامل
+       app.js اتفاق می‌افته) می‌خونیمشون. اگه چیزی هنوز تعریف نشده باشه
+       یا اسمش عوض شده باشه، فقط "—" نشون داده می‌شه، هیچی نمی‌شکنه. */
+    function safeGlobal(expr, fallback){
+      try{
+        var v = (0, eval)(expr);
+        return (v === undefined) ? fallback : v;
+      }catch(e){ return fallback; }
+    }
+    function esc(s){ return String(s==null?'—':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function fmtJson(v){
+      try{ return esc(JSON.stringify(v, null, 2)); }catch(e){ return esc(String(v)); }
+    }
+    function boxRow(label, valueHtml){
+      return '<div style="padding:8px 10px;border-bottom:1px solid #ffffff14;">'+
+        '<div style="font-size:10.5px;color:#9ca3af;margin-bottom:3px;">'+esc(label)+'</div>'+
+        '<div style="font-size:12px;color:#f3f4f6;word-break:break-all;white-space:pre-wrap;">'+valueHtml+'</div>'+
+      '</div>';
+    }
+    function actionBtnHtml(id, label, bg){
+      return '<button id="'+id+'" style="margin:8px 6px 4px 0;padding:7px 12px;border-radius:8px;border:none;background:'+(bg||'#2563eb')+';color:#fff;font-size:12px;">'+esc(label)+'</button>';
+    }
+
+    /* ---------------- Supabase ---------------- */
+    var supEl = document.getElementById('__debugPanelSupabase');
+    function renderSupabaseTab(){
+      if(!supEl) return;
+      var configured = safeGlobal('typeof chatConfigured==="function" && chatConfigured()', false);
+      var sbReady = safeGlobal('!!sb', false);
+      var url = safeGlobal('SUPABASE_URL', '—');
+      var owner = safeGlobal('isAppOwner', '—');
+      var chatAdmin = safeGlobal('isChatAdmin', '—');
+      var suspendedUntil = safeGlobal('mySuspendedUntil', null);
+      var mutedUntil = safeGlobal('myMutedUntil', null);
+      var chatSettingsV = safeGlobal('chatSettings', null);
+      var hasStoredSession = safeGlobal('typeof _hasStoredSupabaseSession==="function" && _hasStoredSupabaseSession()', '—');
+      var html = '';
+      html += boxRow('آدرس پروژه‌ی Supabase', esc(url));
+      html += boxRow('وضعیت اتصال', 'configured='+esc(configured)+' | sb client آماده = '+esc(sbReady)+' | سشن ذخیره‌شده روی دستگاه = '+esc(hasStoredSession));
+      html += boxRow('مالک/ادمین اپ (این کلاینت)', 'isAppOwner='+esc(owner)+' | isChatAdmin='+esc(chatAdmin));
+      html += boxRow('تعلیق/میوت این حساب', 'suspendedUntil='+esc(suspendedUntil)+' | mutedUntil='+esc(mutedUntil));
+      html += boxRow('تنظیمات سراسری چت', fmtJson(chatSettingsV));
+      html += '<div style="padding:10px;">'+
+        actionBtnHtml('__dbgSbSession','گرفتن سشن فعلی (getSession)')+
+        actionBtnHtml('__dbgSbUser','گرفتن کاربر فعلی (getUser)','#059669')+
+        actionBtnHtml('__dbgSbProfile','خوندن ردیف profiles خودم','#7c3aed')+
+        actionBtnHtml('__dbgSbLsToken','نمایش خام sb-*-auth-token از localStorage','#374151')+
+      '</div>';
+      html += '<div id="__dbgSbResult" style="padding:0 10px 10px;"></div>';
+      supEl.innerHTML = html;
+      function showResult(label, data){
+        var r = document.getElementById('__dbgSbResult');
+        if(r) r.innerHTML = boxRow(label, fmtJson(data));
+      }
+      var btnSession = document.getElementById('__dbgSbSession');
+      if(btnSession) btnSession.addEventListener('click', function(){
+        var sbc = safeGlobal('sb', null);
+        if(!sbc){ showResult('getSession()', 'sb client هنوز آماده نیست'); return; }
+        sbc.auth.getSession().then(function(res){
+          var s = res && res.data && res.data.session;
+          showResult('getSession()', s ? {
+            user_id: s.user && s.user.id, email: s.user && s.user.email,
+            expires_at: s.expires_at, token_type: s.token_type,
+            access_token_masked: s.access_token ? (s.access_token.slice(0,12)+'…[JWT]…'+s.access_token.slice(-6)) : null,
+            refresh_token_masked: s.refresh_token ? (s.refresh_token.slice(0,6)+'…[masked]…'+s.refresh_token.slice(-4)) : null
+          } : { session: null, error: res && res.error });
+        }).catch(function(e){ showResult('getSession() خطا', String(e)); });
+      });
+      var btnUser = document.getElementById('__dbgSbUser');
+      if(btnUser) btnUser.addEventListener('click', function(){
+        var sbc = safeGlobal('sb', null);
+        if(!sbc){ showResult('getUser()', 'sb client هنوز آماده نیست'); return; }
+        sbc.auth.getUser().then(function(res){ showResult('getUser()', res); }).catch(function(e){ showResult('getUser() خطا', String(e)); });
+      });
+      var btnProfile = document.getElementById('__dbgSbProfile');
+      if(btnProfile) btnProfile.addEventListener('click', function(){
+        var sbc = safeGlobal('sb', null);
+        if(!sbc){ showResult('profiles', 'sb client هنوز آماده نیست'); return; }
+        sbc.auth.getUser().then(function(ures){
+          var uid = ures && ures.data && ures.data.user && ures.data.user.id;
+          if(!uid){ showResult('profiles', 'کاربر لاگین نیست'); return; }
+          return sbc.from('profiles').select('*').eq('id', uid).single().then(function(pres){ showResult('profiles (ردیف خودم)', pres); });
+        }).catch(function(e){ showResult('profiles خطا', String(e)); });
+      });
+      var btnLsToken = document.getElementById('__dbgSbLsToken');
+      if(btnLsToken) btnLsToken.addEventListener('click', function(){
+        var out = {};
+        try{
+          for(var i=0;i<localStorage.length;i++){
+            var k = localStorage.key(i);
+            if(k && k.indexOf('sb-')===0) out[k] = maskSecrets(localStorage.getItem(k));
+          }
+        }catch(e){}
+        showResult('کلیدهای sb-* در localStorage', out);
+      });
+    }
+
+    /* ---------------- پرمیوم / IAP ---------------- */
+    var premEl = document.getElementById('__debugPanelPremium');
+    function renderPremiumTab(){
+      if(!premEl) return;
+      var premium = safeGlobal('storeData && storeData.premium', '—');
+      var premiumPhone = safeGlobal('storeData && storeData.premiumPhone', '—');
+      var inTrial = safeGlobal('typeof isInTrial==="function" && isInTrial()', '—');
+      var owner = safeGlobal('isAppOwner', '—');
+      var appVersion = safeGlobal('APP_VERSION', '—');
+      var hasCapacitor = safeGlobal('!!window.Capacitor', false);
+      var pluginNames = safeGlobal('(window.Capacitor && Capacitor.Plugins) ? Object.keys(Capacitor.Plugins) : []', []);
+      var hasBilling = safeGlobal('!!(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.MarketBilling)', false);
+      var platform = safeGlobal('(window.Capacitor && Capacitor.getPlatform) ? Capacitor.getPlatform() : "?"', '?');
+      var isNative = safeGlobal('(window.Capacitor && Capacitor.isNativePlatform) ? Capacitor.isNativePlatform() : "?"', '?');
+      var loggedIn = safeGlobal('typeof isLoggedIn==="function" && isLoggedIn()', '—');
+      var myUid = safeGlobal('publicChatUser && publicChatUser.id', null);
+      var myEmail = safeGlobal('publicChatUser && publicChatUser.email', null);
+      var workerBase = safeGlobal('WORKER_BASE', '—');
+      var skuMap = safeGlobal('PREMIUM_SKU_BY_DISCOUNT', null);
+      var curSku = safeGlobal('typeof currentPremiumSku==="function" && currentPremiumSku()', '—');
+      var discount = safeGlobal('myDiscount', null);
+      var html = '';
+      html += boxRow('وضعیت پرمیوم (storeData)', 'premium='+esc(premium)+' | isInTrial()='+esc(inTrial)+' | isAppOwner='+esc(owner));
+      html += boxRow('لاگین', 'isLoggedIn()='+esc(loggedIn)+' | uid='+esc(myUid)+' | email='+esc(myEmail));
+      html += boxRow('شماره‌ی ثبت‌شده‌ی پرمیوم', esc(premiumPhone));
+      html += boxRow('نسخه‌ی اپ', esc(appVersion));
+      html += boxRow('محیط اجرا', 'platform='+esc(platform)+' | native='+esc(isNative)+' | Capacitor موجوده='+esc(hasCapacitor));
+      html += boxRow('پلاگین بیلینگ مایکت (MarketBilling)', 'موجوده='+esc(hasBilling));
+      html += boxRow('همه‌ی پلاگین‌های Capacitor رجیسترشده', esc(pluginNames.join(', ') || '—'));
+      html += boxRow('آدرس Worker (تایید خرید سمت سرور)', esc(workerBase));
+      html += boxRow('SKU فعلی انتخاب‌شده / نقشه‌ی تخفیف‌ها', 'currentPremiumSku()='+esc(curSku)+' | myDiscount='+fmtJson(discount)+' | PREMIUM_SKU_BY_DISCOUNT='+fmtJson(skuMap));
+      html += '<div style="padding:10px;">'+
+        actionBtnHtml('__dbgIabPurchases','دریافت خریدهای واقعی ثبت‌شده (getPurchases)')+
+        actionBtnHtml('__dbgIabActivate','چک و فعال‌سازی پرمیوم از خرید موجود','#059669')+
+        actionBtnHtml('__dbgIabStore','گرفتن نام استور (getStore)','#374151')+
+      '</div>';
+      html += '<div style="padding:0 10px 10px;">'+
+        actionBtnHtml('__dbgIabFullDiag','🩺 تشخیص کامل مشکل خرید (همه‌ی مراحل رو یکی‌یکی چک کن)','#dc2626')+
+      '</div>';
+      html += '<div id="__dbgIabResult" style="padding:0 10px 10px;"></div>';
+      html += '<div id="__dbgIabDiagResult" style="padding:0 10px 16px;"></div>';
+      premEl.innerHTML = html;
+      function showResult(label, data){
+        var r = document.getElementById('__dbgIabResult');
+        if(r) r.innerHTML = boxRow(label, fmtJson(data));
+      }
+      var plugin = safeGlobal('(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.MarketBilling) || null', null);
+      var btnP = document.getElementById('__dbgIabPurchases');
+      if(btnP) btnP.addEventListener('click', function(){
+        if(!plugin){ showResult('getPurchases()', 'پلاگین MarketBilling موجود نیست (احتمالاً روی وب/شبیه‌ساز مرورگر هستی، نه اپ نصب‌شده روی اندروید)'); return; }
+        plugin.getPurchases().then(function(res){ showResult('getPurchases()', res); }).catch(function(e){ showResult('getPurchases() خطا', (e&&e.message)||String(e)); });
+      });
+      var btnA = document.getElementById('__dbgIabActivate');
+      if(btnA) btnA.addEventListener('click', function(){
+        var fn = safeGlobal('(typeof activateOwnedPremiumIfAny==="function") ? activateOwnedPremiumIfAny : null', null);
+        if(!fn){ showResult('activateOwnedPremiumIfAny()', 'تابع پیدا نشد'); return; }
+        fn({ silent:true }).then(function(res){ showResult('activateOwnedPremiumIfAny() نتیجه', res); }).catch(function(e){ showResult('activateOwnedPremiumIfAny() خطا', (e&&e.message)||String(e)); });
+      });
+      var btnS = document.getElementById('__dbgIabStore');
+      if(btnS) btnS.addEventListener('click', function(){
+        if(!plugin || typeof plugin.getStore !== 'function'){ showResult('getStore()', 'پلاگین یا متد getStore موجود نیست'); return; }
+        plugin.getStore().then(function(res){ showResult('getStore()', res); }).catch(function(e){ showResult('getStore() خطا', (e&&e.message)||String(e)); });
+      });
+
+      /* ---- تشخیص کامل: کل زنجیره‌ی خرید→تایید سرور→تایید نهایی رو قدم‌به‌قدم
+         طی می‌کنه و هر قدم رو با ✅/⚠️/❌ + یه توضیح ساده نشون می‌ده، تا مشخص شه
+         دقیقاً کدوم حلقه از زنجیره شکسته (پلاگین نیتیو؟ لاگین/توکن؟ SKU اشتباه؟
+         شبکه تا Worker؟ خودِ Worker (verify سمت مایکت)؟ یا نوشتن روی Supabase؟). */
+      var btnDiag = document.getElementById('__dbgIabFullDiag');
+      if(btnDiag) btnDiag.addEventListener('click', function(){
+        runFullIabDiagnosis();
+      });
+      function diagLine(status, title, detail){
+        var color = status==='ok' ? '#34d399' : (status==='fail' ? '#f87171' : '#fbbf24');
+        var icon = status==='ok' ? '✅' : (status==='fail' ? '❌' : '⚠️');
+        return '<div style="padding:7px 0;border-bottom:1px solid #ffffff14;">'+
+          '<div style="font-size:12.5px;color:'+color+';font-weight:700;">'+icon+' '+esc(title)+'</div>'+
+          (detail!=null ? ('<div style="font-size:11px;color:#d1d5db;margin-top:2px;white-space:pre-wrap;word-break:break-all;">'+ (typeof detail==='string'?esc(detail):fmtJson(detail)) +'</div>') : '')+
+        '</div>';
+      }
+      async function runFullIabDiagnosis(){
+        var out = document.getElementById('__dbgIabDiagResult');
+        if(!out) return;
+        var lines = [];
+        function push(status, title, detail){ lines.push(diagLine(status, title, detail)); out.innerHTML = '<div style="border:1px solid #374151;border-radius:8px;padding:8px 10px;margin-top:4px;">'+lines.join('')+'</div>'; }
+        out.innerHTML = '<div style="padding:8px;color:#9ca3af;font-size:12px;">در حال اجرا…</div>';
+
+        // ۱) لاگین
+        var isLogin = safeGlobal('typeof isLoggedIn==="function" && isLoggedIn()', false);
+        if(!isLogin){ push('fail','۱) لاگین','کاربر لاگین نیست. بدون لاگین، iab/verify هیچ Authorization ای نداره و confirmPremiumOnServer همیشه false برمی‌گرده — یعنی حتی اگه پول کم بشه، پرمیوم هیچ‌وقت فعال نمی‌شه. اول باید وارد حساب بشی.'); return; }
+        push('ok','۱) لاگین', 'uid='+safeGlobal('publicChatUser.id','?')+' | email='+safeGlobal('publicChatUser.email','?'));
+
+        // ۲) سشن/توکن
+        var sbc = safeGlobal('sb', null);
+        var sessionInfo = null, hasToken = false;
+        if(sbc){
+          try{
+            var sres = await sbc.auth.getSession();
+            var s = sres && sres.data && sres.data.session;
+            hasToken = !!(s && s.access_token);
+            sessionInfo = s ? { expires_at: s.expires_at, has_access_token: hasToken } : null;
+          }catch(e){ sessionInfo = 'خطا: '+((e&&e.message)||String(e)); }
+        }
+        if(!hasToken) push('fail','۲) سشن Supabase / access token', 'sb client یا access_token موجود نیست: '+fmtJson(sessionInfo)+' — بدون این توکن، Worker نمی‌تونه بفهمه این درخواست مال کدوم کاربره و iab/verify رو رد می‌کنه.');
+        else push('ok','۲) سشن Supabase / access token', sessionInfo);
+
+        // ۳) محیط نیتیو / پلاگین بیلینگ
+        var hasNative = safeGlobal('(window.Capacitor && Capacitor.isNativePlatform) ? Capacitor.isNativePlatform() : false', false);
+        var pluginNow = safeGlobal('(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.MarketBilling) || null', null);
+        if(!hasNative) push('warn','۳) محیط اجرا', 'روی وب/مرورگر هستی نه اپ نصب‌شده‌ی اندروید (isNativePlatform=false) — خرید واقعی مایکت اصلاً از این محیط ممکن نیست؛ باید رو گوشی با اپ نصب‌شده تست کنی.');
+        if(!pluginNow){ push('fail','۳) پلاگین MarketBilling', 'پلاگین نیتیو پیدا نشد. یعنی یا اپ با نسخه‌ی درست بیلد نشده (native-billing/MarketBillingPlugin.java تو پروژه نیست/رجیستر نشده)، یا داری رو محیطی تست می‌کنی که Capacitor کامل لود نشده.'); return; }
+        push('ok','۳) پلاگین MarketBilling', 'پیدا شد');
+
+        // ۴) خریدهای واقعاً مالکیت‌شده رو مارکت
+        var owned = null;
+        try{ owned = await pluginNow.getPurchases(); }catch(e){ push('fail','۴) getPurchases() از مایکت', (e&&e.message)||String(e)); return; }
+        var skuMapNow = safeGlobal('PREMIUM_SKU_BY_DISCOUNT', {});
+        var premiumSkus = Object.values(skuMapNow || {});
+        var list = (owned && owned.purchases) || [];
+        var ownedPremium = list.find(function(p){ return premiumSkus.indexOf(p.sku) !== -1; });
+        push(list.length ? 'ok':'warn','۴) خریدهای ثبت‌شده رو مایکت (getPurchases)', { تعداد: list.length, لیست: list, 'SKUهای پرمیوم مورد انتظار': premiumSkus });
+        if(!ownedPremium){
+          push('fail','۵) تطبیق SKU', 'هیچ‌کدوم از خریدهای مالکیت‌شده با SKUهای پرمیوم مورد انتظار ('+premiumSkus.join(', ')+') تطبیق نداره. یا اصلاً خریدی انجام نشده، یا SKU ثبت‌شده تو پنل مایکت با چیزی که این نسخه از اپ می‌فرسته فرق داره (مثلاً بعد از اضافه کردن sku تخفیف‌دار جدید تو پنل مایکت ثبتش نکردی), یا خرید قبلاً consume شده و دیگه owned حساب نمی‌شه.');
+          return;
+        }
+        push('ok','۵) تطبیق SKU', ownedPremium);
+
+        // ۶) تایید سمت سرور (Worker -> iab/verify)
+        var verifyFn = safeGlobal('typeof iabVerifyOnServer==="function" ? iabVerifyOnServer : null', null);
+        var verifyRes = null;
+        if(!verifyFn){ push('fail','۶) iab/verify (Worker)', 'تابع iabVerifyOnServer پیدا نشد.'); return; }
+        try{ verifyRes = await verifyFn(ownedPremium); }
+        catch(e){ push('fail','۶) iab/verify (Worker)', 'استثنا: '+((e&&e.message)||String(e))); return; }
+        if(!verifyRes || verifyRes.ok !== true){
+          push('fail','۶) iab/verify (Worker)', {نتیجه: verifyRes, توضیح: 'Worker (سمت سرور، آدرس '+safeGlobal('WORKER_BASE','?')+') این خرید رو تایید نکرد. علت‌های محتمل: توکنِ Authorization نرسیده/نامعتبره، Worker نتونسته با API مایکت purchaseToken رو verify کنه (کلید سرویس مایکت رو Worker غلط/منقضیه)، یا SKU/Store نامعتبر فرستاده شده. برای جزئیات بیشتر، تب «لاگ زنده» رو نگاه کن (ردیف‌های IAB) — اونجا HTTP status و بدنه‌ی کامل پاسخ Worker ثبت می‌شه.'});
+          return;
+        }
+        push('ok','۶) iab/verify (Worker)', verifyRes);
+
+        // ۷) تایید نهایی از خودِ Supabase (منبع حقیقت واقعی)
+        var confirmFn = safeGlobal('typeof confirmPremiumOnServer==="function" ? confirmPremiumOnServer : null', null);
+        var confirmed = confirmFn ? await confirmFn() : null;
+        if(!confirmed){
+          push('fail','۷) تایید نهایی از Supabase (profiles.premium_until)', 'Worker گفت ok:true ولی وقتی مستقیم از Supabase profiles.premium_until رو خوندیم، هنوز آپدیت یا منقضی نشده/تاریخش گذشته. یعنی خودِ Worker چیزی رو دیتابیس ننوشته یا اشتباه نوشته (مثلاً service role key غلط، یا تابع/RPC داخل Worker fail می‌شه ولی response موفق برمی‌گردونه). این دقیقاً همون سناریوییه که کاربر می‌بینه "خرید ثبت شد ولی پرمیوم فعال نشد".');
+          return;
+        }
+        push('ok','۷) تایید نهایی از Supabase (profiles.premium_until)', 'تایید شد — پرمیوم واقعاً رو سرور فعاله.');
+        push('ok','نتیجه‌ی کلی', 'کل زنجیره سالمه. اگه با این حال تو UI پرمیوم نشون داده نمی‌شه، مشکل احتمالاً تو finalizePremiumActivationUI/renderPremiumPurchaseUI یا رفرش نشدنِ storeData.premium تو رابط کاربریه، نه تو خودِ فرآیندِ خرید.');
+      }
+    }
+
+    /* ---------------- Storage (localStorage / window.storage) ---------------- */
+    var stoEl = document.getElementById('__debugPanelStorage');
+    function tryParseJson(s){ try{ return JSON.parse(s); }catch(e){ return s; } }
+    function renderStorageTab(){
+      if(!stoEl) return;
+      var html = '<div style="padding:10px;">'+actionBtnHtml('__dbgStoRefresh','رفرش','#374151')+actionBtnHtml('__dbgStoCopy','کپی همه به‌صورت JSON','#2563eb')+'</div>';
+      var entries = [];
+      try{
+        var totalChars = 0;
+        for(var i=0;i<localStorage.length;i++){
+          var k = localStorage.key(i);
+          var v = localStorage.getItem(k);
+          totalChars += (k?k.length:0) + (v?v.length:0);
+          entries.push({ key:k, value:v });
+        }
+        html += boxRow('تعداد کلیدها / حجم تقریبی', entries.length + ' کلید — ~' + Math.round(totalChars/1024) + ' KB (سقف قابل‌اطمینان مرورگر معمولاً ۵ تا ۱۰ مگابایته)');
+      }catch(e){ html += boxRow('خطا در خوندن localStorage', String(e)); }
+      entries.sort(function(a,b){ return a.key < b.key ? -1 : 1; });
+      entries.forEach(function(en){
+        var masked = maskSecrets(en.value);
+        var parsed = tryParseJson(masked);
+        var displayVal = (typeof parsed === 'object' && parsed) ? fmtJson(parsed) : esc(masked);
+        html += boxRow(en.key, displayVal);
+      });
+      stoEl.innerHTML = html;
+      var refreshBtn = document.getElementById('__dbgStoRefresh');
+      if(refreshBtn) refreshBtn.addEventListener('click', renderStorageTab);
+      var copyBtn2 = document.getElementById('__dbgStoCopy');
+      if(copyBtn2) copyBtn2.addEventListener('click', function(){
+        var dump = {};
+        entries.forEach(function(en){ dump[en.key] = maskSecrets(en.value); });
+        var text = JSON.stringify(dump, null, 2);
+        function fallbackCopy(t){ var ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} document.body.removeChild(ta); }
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(function(){ fallbackCopy(text); });
+        else fallbackCopy(text);
+      });
+    }
+
+    /* ---------------- گزارش کامل (برای فرستادن و رفع ایراد) ----------------
+       برخلاف بقیه‌ی تب‌ها که هرکدوم فقط یه بخش رو نشون می‌دن، این تب همه‌چیزو
+       یه‌جا، به‌صورت متن ساده (نه HTML) جمع می‌کنه: اطلاعات نشست، کل لاگ زنده
+       (بدون هیچ بریدگی)، وضعیت Supabase، وضعیت پرمیوم/IAP، و یه خلاصه از
+       Storage. خروجی تو یه <textarea> انتخاب‌پذیره تا راحت کپی و برام
+       فرستاده بشه. چون شامل درخواست‌های async هم هست (گرفتن سشن زنده، پروفایل،
+       خریدهای مایکت)، تولیدش چند لحظه طول می‌کشه — دکمه در حین کار غیرفعال می‌شه. */
+    var repEl = document.getElementById('__debugPanelReport');
+    function renderReportTab(){
+      if(!repEl) return;
+      repEl.innerHTML =
+        '<div style="padding:6px 0 10px;">'+
+          actionBtnHtml('__dbgReportGen','🔄 ساخت گزارشِ تازه (شامل چک‌های زنده)','#dc2626')+
+          actionBtnHtml('__dbgReportCopy','📋 کپی همه‌ی گزارش','#2563eb')+
+        '</div>'+
+        '<div style="font-size:11px;color:#9ca3af;margin-bottom:8px;">این گزارش همه‌ی چیزی که تا الان تو اپ اتفاق افتاده (شبکه، کنسول، خطاها، پلاگین‌ها) رو با وضعیتِ لحظه‌ای Supabase/پرمیوم/Storage یه‌جا جمع می‌کنه. بعد از تولید، از تو باکس پایین کپی کن و همینجا برام بفرست.</div>'+
+        '<textarea id="__dbgReportText" readonly style="width:100%;min-height:50vh;background:#000;color:#d1fae5;font-family:monospace;font-size:11px;line-height:1.6;border:1px solid #374151;border-radius:8px;padding:8px;direction:ltr;white-space:pre;"></textarea>';
+      var genBtn = document.getElementById('__dbgReportGen');
+      var copyBtn3 = document.getElementById('__dbgReportCopy');
+      var textEl = document.getElementById('__dbgReportText');
+      function sep(title){ return '\n\n===================== '+title+' =====================\n'; }
+      async function buildReport(){
+        var lines = [];
+        lines.push('گزارش تشخیصی — ' + new Date().toString());
+        lines.push('نسخه‌ی اپ: ' + safeGlobal('APP_VERSION','?'));
+
+        lines.push(sep('۱) اطلاعات نشست / دستگاه'));
+        try{
+          var conn = navigator.connection || navigator.webkitConnection || navigator.mozConnection;
+          lines.push(JSON.stringify({
+            ua: navigator.userAgent, onLine: navigator.onLine, lang: navigator.language,
+            screen: (window.screen ? (screen.width+'x'+screen.height) : '?'),
+            connection: conn ? (conn.effectiveType+' | downlink:'+conn.downlink+'Mbps | rtt:'+conn.rtt+'ms') : 'نامشخص',
+            platform: safeGlobal('(window.Capacitor && Capacitor.getPlatform) ? Capacitor.getPlatform() : "?"','?'),
+            native: safeGlobal('(window.Capacitor && Capacitor.isNativePlatform) ? Capacitor.isNativePlatform() : "?"','?')
+          }, null, 2));
+        }catch(e){ lines.push('خطا: '+String(e)); }
+
+        lines.push(sep('۲) وضعیت لاگین / Supabase (زنده، همین لحظه)'));
+        lines.push('configured=' + safeGlobal('typeof chatConfigured==="function" && chatConfigured()', '—'));
+        lines.push('isLoggedIn=' + safeGlobal('typeof isLoggedIn==="function" && isLoggedIn()', '—'));
+        lines.push('uid=' + safeGlobal('publicChatUser && publicChatUser.id', '—') + ' | email=' + safeGlobal('publicChatUser && publicChatUser.email', '—'));
+        lines.push('isAppOwner=' + safeGlobal('isAppOwner','—') + ' | isChatAdmin=' + safeGlobal('isChatAdmin','—'));
+        var sbc = safeGlobal('sb', null);
+        if(sbc){
+          try{
+            var sres = await sbc.auth.getSession();
+            var s = sres && sres.data && sres.data.session;
+            lines.push('getSession(): ' + JSON.stringify(s ? {
+              user_id: s.user && s.user.id, email: s.user && s.user.email, expires_at: s.expires_at,
+              access_token_masked: s.access_token ? (s.access_token.slice(0,12)+'…[JWT]…'+s.access_token.slice(-6)) : null
+            } : { session:null, error: sres && sres.error }, null, 2));
+            var uid2 = s && s.user && s.user.id;
+            if(uid2){
+              try{
+                var pres = await sbc.from('profiles').select('*').eq('id', uid2).single();
+                lines.push('profiles (ردیف خودم): ' + JSON.stringify(pres, null, 2));
+              }catch(e2){ lines.push('profiles خطا: ' + String(e2)); }
+            }
+          }catch(e){ lines.push('getSession خطا: ' + String(e)); }
+        } else lines.push('sb client آماده نیست');
+
+        lines.push(sep('۳) وضعیت پرمیوم / IAP (زنده، همین لحظه)'));
+        lines.push('storeData.premium=' + safeGlobal('storeData && storeData.premium','—') + ' | isInTrial=' + safeGlobal('typeof isInTrial==="function" && isInTrial()','—'));
+        lines.push('WORKER_BASE=' + safeGlobal('WORKER_BASE','—'));
+        lines.push('currentPremiumSku=' + safeGlobal('typeof currentPremiumSku==="function" && currentPremiumSku()','—') + ' | myDiscount=' + JSON.stringify(safeGlobal('myDiscount',null)));
+        lines.push('PREMIUM_SKU_BY_DISCOUNT=' + JSON.stringify(safeGlobal('PREMIUM_SKU_BY_DISCOUNT',null)));
+        var plugin = safeGlobal('(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.MarketBilling) || null', null);
+        lines.push('پلاگین MarketBilling موجوده=' + !!plugin);
+        if(plugin){
+          try{ var owned = await plugin.getPurchases(); lines.push('getPurchases(): ' + JSON.stringify(owned, null, 2)); }
+          catch(e){ lines.push('getPurchases خطا: ' + String(e)); }
+        }
+
+        lines.push(sep('۴) Storage (localStorage — کامل، ماسک‌شده)'));
+        try{
+          for(var i=0;i<localStorage.length;i++){
+            var k = localStorage.key(i);
+            var v = maskSecrets(localStorage.getItem(k));
+            lines.push('['+k+']\n' + v);
+          }
+        }catch(e){ lines.push('خطا: ' + String(e)); }
+
+        lines.push(sep('۵) کل لاگ زنده (شبکه/کنسول/خطا/پلاگین/مشکوک) — به ترتیب زمان، بدون هیچ بریدگی'));
+        logs.forEach(function(l){
+          lines.push('['+l.t+'] ('+(labels[l.type]||l.type)+') '+l.source+' — '+l.summary + (l.detail ? ('\n    ' + String(l.detail).split('\n').join('\n    ')) : ''));
+        });
+
+        lines.push(sep('پایان گزارش'));
+        return lines.join('\n');
+      }
+      if(genBtn) genBtn.addEventListener('click', function(){
+        genBtn.disabled = true; genBtn.textContent = 'در حال ساخت گزارش...';
+        buildReport().then(function(text){ if(textEl) textEl.value = text; })
+          .finally(function(){ genBtn.disabled = false; genBtn.textContent = '🔄 ساخت گزارشِ تازه (شامل چک‌های زنده)'; });
+      });
+      if(copyBtn3) copyBtn3.addEventListener('click', function(){
+        var text = textEl ? textEl.value : '';
+        if(!text){ return; }
+        function fallbackCopy(t){ var ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} document.body.removeChild(ta); }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function(){ copyBtn3.textContent='کپی شد ✓'; setTimeout(function(){ copyBtn3.textContent='📋 کپی همه‌ی گزارش'; },1500); }).catch(function(){ fallbackCopy(text); });
+        } else { fallbackCopy(text); }
+      });
+      // اولین بار که تب باز می‌شه، خودکار یه گزارش می‌سازه — لازم نیست حتماً دستی دکمه رو بزنی.
+      if(genBtn) genBtn.click();
+    }
+
+    /* ---------------- تعویض تب‌ها ---------------- */
+    var tabPanes = { log: listEl, supabase: supEl, premium: premEl, storage: stoEl, report: repEl };
+    var tabRenderers = { supabase: renderSupabaseTab, premium: renderPremiumTab, storage: renderStorageTab, report: renderReportTab };
+    var tabBtns = Array.prototype.slice.call(document.querySelectorAll('.__debugTabBtn'));
+    function activateTab(name){
+      tabBtns.forEach(function(b){
+        var active = b.getAttribute('data-tab') === name;
+        b.style.background = active ? '#1f2937' : '#0b0f1a';
+        b.style.color = active ? '#fff' : '#9ca3af';
+      });
+      Object.keys(tabPanes).forEach(function(k){
+        var el = tabPanes[k];
+        if(el) el.style.display = (k === name) ? (k==='log' ? 'block' : 'block') : 'none';
+      });
+      if (tabRenderers[name]) tabRenderers[name]();
+    }
+    tabBtns.forEach(function(b){
+      b.addEventListener('click', function(){ activateTab(b.getAttribute('data-tab')); });
+    });
   });
 })();
 </script>
@@ -860,6 +1310,24 @@
   .reset-date-confirm-btn{flex:2;padding:11px;border-radius:12px;border:none;background:var(--accent);
     color:var(--accent-text);font-size:12.5px;font-weight:700;font-family:inherit;}
   .reset-date-back-btn:active,.reset-date-chip:active{background:var(--accent-soft);border-color:var(--accent);}
+
+  /* ---- پنلِ مدیریتِ روزشمارها (streakAdminModal) — فقط OWNER_EMAIL می‌بینتش ---- */
+  .streak-admin-search{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:12px;
+    border:1px solid var(--line);background:var(--card-2);color:var(--text);font-size:13px;
+    font-family:inherit;margin-bottom:10px;}
+  .streak-admin-empty{text-align:center;font-size:11.5px;color:var(--muted);padding:20px 8px;}
+  .streak-admin-row{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:10px 11px;border-radius:13px;background:var(--card-2);margin-bottom:7px;}
+  .streak-admin-row-name{font-size:12.5px;font-weight:700;color:var(--text);}
+  .streak-admin-row-badge{font-size:9.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);
+    border-radius:999px;padding:2px 7px;margin-right:4px;}
+  .streak-admin-row-days{font-size:10.5px;color:var(--muted);margin-top:2px;}
+  .streak-admin-row-actions{display:flex;gap:6px;flex-shrink:0;}
+  .streak-admin-row-btn{padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);
+    color:var(--text);font-size:10.5px;font-weight:700;font-family:inherit;white-space:nowrap;}
+  .streak-admin-row-btn:active{background:var(--accent-soft);border-color:var(--accent);}
+  .streak-admin-edit-panel{margin-top:10px;padding-top:12px;border-top:1px solid var(--line);}
+  .streak-admin-edit-title{font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:10px;text-align:center;}
 
   .tg-clock-warning{display:flex;gap:8px;align-items:flex-start;background:rgba(226,102,90,.12);
     border:1px solid rgba(226,102,90,.4);border-radius:12px;padding:9px 10px;margin:8px 2px 0;
@@ -2072,21 +2540,49 @@
     display:none;box-shadow:0 0 0 2px var(--accent,#c1493d);}
   .header-badges-count.show{display:block;}
 
-  /* ---- notification panel (از کلاس تمام‌صفحه‌ی chat-members-overlay استفاده می‌کنه) ---- */
-  .notif-section-head{padding:14px 14px 6px;font-size:12.5px;font-weight:800;color:var(--muted);}
-  .notif-empty{padding:10px 14px 4px;font-size:12px;color:var(--muted);}
-  .notif-buddy-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);}
-  .notif-buddy-row .notif-go-btn{background:var(--accent-soft);color:var(--accent);border:none;border-radius:14px;
-    padding:6px 12px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;}
-  .notif-sos-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);}
-  .notif-sos-row .notif-sos-name{font-size:12.5px;font-weight:700;}
+  /* ---- notification panel (از کلاس تمام‌صفحه‌ی chat-members-overlay استفاده می‌کنه) — گلس
+     پرمیوم هم‌خانواده‌ی SOS چت/چت عمومی (توکن‌های --pc-* که پایین‌تر رو #tab-chat و بقیه
+     تعریف شدن، اینجا هم رو #notifPanelOverlay اضافه شدن، پس با تعویض تم خودکار رنگ عوض
+     می‌کنن). هر آیتم حالا یه کارتِ جدا با آیکون گرد گرادیانتی و سایه‌ی نرمه، نه یه ردیفِ
+     تخت با خط جداکننده. ---- */
+  #notifPanelOverlay .cm-ov-head{position:relative;overflow:hidden;}
+  #notifPanelOverlay .cm-ov-head::before{content:'';position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(120% 120% at 14% -18%, rgba(255,255,255,.28) 0%, transparent 46%),
+      radial-gradient(120% 120% at 92% 112%, rgba(0,0,0,.16) 0%, transparent 55%);}
+  .notif-section-head{padding:16px 14px 8px;font-size:12px;font-weight:800;color:var(--muted);letter-spacing:.2px;}
+  .notif-empty{padding:16px 14px;margin:0 14px 6px;text-align:center;font-size:12px;color:var(--muted);
+    background:var(--pc-glass,rgba(120,120,120,.06));border:1px dashed var(--pc-border-soft,var(--line));border-radius:14px;}
+  .notif-icon{flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:15px;box-shadow:inset 0 1px 1px rgba(255,255,255,.4), 0 3px 8px -3px rgba(0,0,0,.35);}
+  .notif-icon-buddy{background:linear-gradient(135deg,var(--accent),var(--accent-2));}
+  .notif-icon-sos{background:linear-gradient(135deg,#ff8a7a,var(--avoid));}
+  .notif-row-text{flex:1;font-size:12.5px;font-weight:600;line-height:1.6;}
+  .notif-buddy-row,.notif-sos-row{display:flex;align-items:center;gap:11px;padding:12px 13px;margin:0 14px 9px;
+    border-radius:16px;
+    background:
+      radial-gradient(140% 140% at 12% -20%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 55%),
+      var(--pc-glass-strong, var(--card));
+    border:1px solid var(--pc-border-soft, var(--line));
+    box-shadow:0 8px 18px -14px var(--pc-shadow, rgba(0,0,0,.25)), inset 0 1.5px 0 rgba(255,255,255,.35);
+    transition:transform .15s, box-shadow .15s;}
+  .notif-buddy-row:active,.notif-sos-row:active{transform:scale(.98);}
+  .notif-buddy-row .notif-go-btn,.notif-sos-row .notif-go-btn{flex-shrink:0;border:none;border-radius:14px;
+    padding:7px 13px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;
+    box-shadow:0 4px 10px -3px rgba(0,0,0,.3);}
+  .notif-buddy-row .notif-go-btn{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;}
+  .notif-sos-row{border-color:color-mix(in srgb, var(--avoid) 30%, var(--pc-border-soft, var(--line)));}
+  .notif-sos-row .notif-sos-name{font-size:12.5px;font-weight:800;}
   .notif-sos-row .notif-sos-sub{font-size:11px;color:var(--muted);margin-top:1px;}
-  .notif-sos-row .notif-go-btn{background:linear-gradient(135deg,#ff8a7a,var(--avoid));color:#fff;border:none;
-    border-radius:14px;padding:6px 12px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;}
-  .notif-my-sos-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--accent-soft);
-    border-radius:12px;margin:8px 14px;}
-  .notif-my-sos-row .notif-cancel-btn{background:none;border:1px solid var(--line);border-radius:12px;
-    padding:5px 10px;font-size:11px;font-weight:700;font-family:inherit;cursor:pointer;color:var(--text);}
+  .notif-sos-row .notif-go-btn{background:linear-gradient(135deg,#ff8a7a,var(--avoid));color:#fff;}
+  .notif-my-sos-row{display:flex;align-items:center;gap:11px;padding:12px 13px;margin:4px 14px 10px;border-radius:16px;
+    background:
+      radial-gradient(140% 140% at 10% -20%, color-mix(in srgb, var(--accent) 16%, transparent) 0%, transparent 55%),
+      var(--pc-glass-strong, var(--accent-soft));
+    border:1px solid var(--pc-border-soft, var(--line));
+    box-shadow:0 8px 18px -14px var(--pc-shadow, rgba(0,0,0,.25)), inset 0 1.5px 0 rgba(255,255,255,.3);}
+  .notif-my-sos-row .notif-cancel-btn{flex-shrink:0;background:none;border:1px solid var(--pc-border, var(--line));
+    border-radius:12px;padding:6px 12px;font-size:11px;font-weight:700;font-family:inherit;cursor:pointer;color:var(--text);}
 
   /* ---- تب مستقل «SOS چت» — هم‌رنگ تم ولی با لهجه‌ی هشداردهنده‌ی var(--avoid) ---- */
   #sosBackBtn{display:none;}
@@ -2401,7 +2897,14 @@
   .mode-btn.active{background:var(--accent-soft);color:#c96b1a;box-shadow:0 4px 12px -4px var(--accent);}
   body.subpage-open .mode-bar{display:none;}
   /* عمومی دو برابر سهم می‌گیره تا برنامه‌ریزی+رشد فردی روی هم برابر عمومی بشن و دکمه‌ی «حالت» بینشون دقیقاً وسط بیفته */
-  #modePublicBtn{flex:2 1 0;}
+  #modePublicBtn{flex:2 1 0;position:relative;}
+  /* بجِ شماره‌ی پیام‌های نخونده — وقتی پیامِ چتِ عمومی می‌رسه ولی خودِ تبِ چت باز نیست
+     (چه یه تبِ دیگه‌ی بخش عمومی، چه کلِ بخش خصوصی)، به‌جای نوتیفِ پوش همین‌جا شماره
+     می‌شینه؛ همون استایلِ csd-badge (بجِ دکمه‌ی اسکرول-به-پایینِ خودِ چت) برای یکدستی. */
+  .mode-public-badge{position:absolute;top:2px;right:14px;min-width:17px;height:17px;padding:0 4px;
+    border-radius:9px;background:#e6231e;color:#fff;font-size:9.5px;font-weight:800;
+    display:none;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.25);}
+  .mode-public-badge.show{display:flex;}
 
   /* ---- دکمه‌ی دایره‌ای لوکسِ «حالت» — بین عمومی و خصوصی، کمی از نوار پایین بیرون‌زده ---- */
   .mode-fab-btn{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
@@ -3355,7 +3858,10 @@
   .chat-msg.own{align-self:flex-start;background:var(--accent-soft);border-color:var(--accent);}
   .chat-msg.cm-pending{opacity:.62;}
   .chat-msg.swiping{transition:none;}
-  .chat-msg.grouped{margin-top:-4px;}
+  /* spacing for consecutive same-sender bubbles is handled purely via the flex gap
+     on .cm-group-messages (see #tab-chat below) — no negative margin here anymore,
+     since stacking it with that gap was squeezing grouped bubbles down to ~1px apart
+     and made them look like they were overlapping/sticking together. */
   /* Long-press feedback: quick pulse so the finger lift feels connected to the filter action */
   @keyframes cmLongPressPulse{0%{transform:scale(1);}45%{transform:scale(.96);}100%{transform:scale(1);}}
   .chat-msg.long-press-active{box-shadow:0 0 0 2px var(--accent);animation:cmLongPressPulse .26s ease;}
@@ -3416,7 +3922,7 @@
     box-shadow:0 2px 6px rgba(13,148,136,.4);}
   .chat-msg.admin-msg{border-color:#0d9488;box-shadow:0 0 0 1px rgba(13,148,136,.25);}
   .chat-msg .cm-time{font-size:calc(9.5px * var(--chat-zoom,1));color:var(--muted);}
-  .chat-msg .cm-bottom-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px;}
+  .chat-msg .cm-bottom-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;}
   .chat-msg .cm-action{font-size:calc(9.5px * var(--chat-zoom,1));color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap;}
   .chat-msg .cm-action.cm-delete:hover{color:var(--avoid);}
   .chat-msg .cm-action.cm-report:hover{color:#c98a1a;}
@@ -3623,12 +4129,12 @@
 
   /* =====================================================================
      PREMIUM GLASS DESIGN — shared across the whole «بخش عمومی»
-     (چت / لیدربورد / هم‌مسیر / پروفایل). Every color token below (--pc-*)
+     (چت / لیدربورد / هم‌مسیر / پروفایل / پنل اعلان‌ها). Every color token below (--pc-*)
      is derived from the app's live theme variables via color-mix(), so
      switching theme / dark-mode instantly re-colors all four screens —
      nothing here is a hardcoded brand color.
      ===================================================================== */
-  #tab-chat, #tab-leaderboard, #tab-buddy, #tab-profile, #tab-premium, #tab-sos{
+  #tab-chat, #tab-leaderboard, #tab-buddy, #tab-profile, #tab-premium, #tab-sos, #notifPanelOverlay{
     --pc-primary: var(--accent);
     --pc-secondary: var(--accent-2);
     --pc-gold: color-mix(in srgb, var(--accent-2) 25%, #ffc857 75%);
@@ -4196,7 +4702,7 @@
 
   /* ---- scrollable message list ---- */
   #tab-chat .chat-messages{
-    max-height:none;min-height:0;padding:14px 16px 16px;gap:12px;
+    max-height:none;min-height:0;padding:14px 16px 16px;gap:5px;
     scroll-behavior:smooth;scrollbar-width:thin;scrollbar-color:var(--pc-border) transparent;
   }
   #tab-chat .chat-messages::-webkit-scrollbar{width:5px;}
@@ -4227,7 +4733,7 @@
 
   /* ---- message bubbles: floating glass, soft glow ---- */
   #tab-chat .chat-msg{
-    max-width:80%;padding:calc(11px * var(--chat-zoom,1)) calc(14px * var(--chat-zoom,1));border-radius:20px;font-size:calc(12.5px * var(--chat-zoom,1));line-height:1.7;
+    max-width:72%;padding:calc(8px * var(--chat-zoom,1)) calc(12px * var(--chat-zoom,1));border-radius:18px;font-size:calc(12.5px * var(--chat-zoom,1));line-height:1.55;
     background:var(--pc-incoming);border:1px solid var(--pc-border-soft);color:var(--text);
     box-shadow:0 6px 18px -10px var(--pc-shadow);    animation:pcMsgIn .35s cubic-bezier(.22,1,.36,1);
   }
@@ -4245,7 +4751,7 @@
   #tab-chat .chat-msg.own .cm-reply-quote .crq-text{color:rgba(255,255,255,.78);}
   #tab-chat .chat-msg .cm-name{font-size:calc(10.5px * var(--chat-zoom,1));font-weight:800;color:var(--pc-primary);}
   #tab-chat .chat-msg .cm-time{font-size:calc(9px * var(--chat-zoom,1));}
-  #tab-chat .cm-head{gap:7px;}
+  #tab-chat .cm-head{gap:7px;margin-bottom:2px;}
   /* ---- Telegram-style grouped avatar: bottom-aligned by default, sticky while scrolling ----
      Consecutive messages from the same sender — received OR own — are wrapped in a
      .cm-group: an avatar column + a message column, laid out side by side via flexbox.
@@ -4282,7 +4788,7 @@
      the avatar at the true left edge instead, bubble toward the center — matching
      Telegram. Own groups mirror this to the right edge via .cm-group.own below. ---- */
   #tab-chat .cm-group{display:flex;flex-direction:row-reverse;align-items:stretch;
-    gap:calc(8px * var(--chat-zoom,1));align-self:flex-end;max-width:80%;}
+    gap:calc(8px * var(--chat-zoom,1));align-self:flex-end;max-width:66%;}
   #tab-chat .cm-group.own{flex-direction:row;align-self:flex-start;}
   /* پیام‌های خودمون (سمت راست) آواتار نمی‌خوان — چون display:none کاملاً از فلکس حذفش
      می‌کنه، gap کنارش هم خودکار جمع می‌شه و باکس پیام درست از لبه‌ی صفحه شروع می‌شه،
@@ -4290,7 +4796,7 @@
   #tab-chat .cm-group.own .cm-group-avatar{display:none;}
   #tab-chat .cm-group-avatar{flex-shrink:0;position:relative;width:calc(30px * var(--chat-zoom,1));
     display:flex;flex-direction:column;}
-  #tab-chat .cm-group-messages{display:flex;flex-direction:column;gap:6px;min-width:0;flex:0 1 auto;}
+  #tab-chat .cm-group-messages{display:flex;flex-direction:column;gap:3px;min-width:0;flex:0 1 auto;}
   #tab-chat .cm-group-messages .chat-msg{max-width:100% !important;}
   #tab-chat .cm-group.cm-filtered-out{display:none;}
   #tab-chat .cm-group.cm-gender-filtered-out{display:none;}
@@ -6446,26 +6952,48 @@ overflow:hidden;
        می‌کنن (عیناً هم‌الگو با dayDetailModal، بالاتر تو همین فایل)؛ اینجا فقط ریزه‌کاری‌های
        خودِ اسم‌فامیل. ردیف‌های اسکوربوردِ efHistoryDetailModal از همون کلاس‌های
        ef-gameend-row/rank/name/score (بالاتر) استفاده می‌کنن، نه کلاسِ جدا — منطقشون تو
-       app.js، ماژولِ «ESMFAMIL — STAGE 9، نیمه‌ی دوم». ---- */
-  .ef-history-btn{width:100%;margin-bottom:10px;background:var(--card-2);border:1.5px solid var(--line);
-    border-radius:14px;padding:11px;font-family:inherit;font-weight:700;font-size:13px;color:var(--text);}
-  .ef-history-btn:active{transform:scale(.98);}
-  .ef-history-card{max-width:380px;max-height:82vh;}
-  .ef-history-stats{display:flex;gap:8px;margin-bottom:12px;}
-  .ef-history-stat{flex:1;background:var(--card-2);border-radius:13px;padding:10px 6px;text-align:center;}
-  .ef-history-stat-num{font-size:17px;font-weight:800;color:var(--accent);}
-  .ef-history-stat-label{font-size:10.5px;color:var(--muted);margin-top:2px;}
-  .ef-history-empty{text-align:center;font-size:11.5px;color:var(--muted);padding:20px 8px;}
-  .ef-history-row{display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:13px;width:100%;
-    background:var(--card-2);cursor:pointer;transition:transform .12s;}
-  .ef-history-row:active{transform:scale(.98);}
-  .ef-history-row-rank{font-size:17px;flex-shrink:0;width:24px;text-align:center;}
-  .ef-history-row-info{flex:1;min-width:0;}
-  .ef-history-row-cats{font-size:11.5px;font-weight:700;color:var(--text);overflow:hidden;
-    text-overflow:ellipsis;white-space:nowrap;}
-  .ef-history-row-meta{font-size:10.5px;color:var(--muted);margin-top:1px;}
-  .ef-history-row-score{font-size:13px;font-weight:800;color:var(--accent);flex-shrink:0;}
-  .ef-history-detail-card{max-width:340px;text-align:center;}
+       app.js، ماژولِ «ESMFAMIL — STAGE 9، نیمه‌ی دوم».
+
+       یکسان‌سازیِ استایل (حکم/اسم‌فامیل/دابل): همون الگویی که دکمه‌ی «ساخت میز» هر سه بازی
+       از اول داشت (سه کلاسِ جداگونه‌یِ hk-lobby-create-btn/ef-create-btn/dbl-create-btn، با
+       بدنه‌ی CSSِ عیناً یکی) این‌جا هم برایِ تاریخچه تکرار شده — هر سه سلکتور زیر مقادیرِ
+       کاملاً یکسان دارن، فقط پیشوندشون فرق می‌کنه (برایِ سازگاری با querySelectorهایِ
+       اختصاصیِ هر ماژول تو app.js). ---- */
+  .ef-history-btn, .hk-history-btn, .dbl-history-btn{width:100%;margin-bottom:10px;background:var(--card-2);
+    border:1.5px solid var(--line);border-radius:14px;padding:11px;font-family:inherit;font-weight:700;
+    font-size:13px;color:var(--text);}
+  .ef-history-btn:active, .hk-history-btn:active, .dbl-history-btn:active{transform:scale(.98);}
+  .ef-history-card, .hk-history-card, .dbl-history-card{max-width:380px;max-height:82vh;}
+  .ef-history-stats, .hk-history-stats, .dbl-history-stats{display:flex;gap:8px;margin-bottom:12px;}
+  .ef-history-stat, .hk-history-stat, .dbl-history-stat{flex:1;background:var(--card-2);border-radius:13px;
+    padding:10px 6px;text-align:center;}
+  .ef-history-stat-num, .hk-history-stat-num, .dbl-history-stat-num{font-size:17px;font-weight:800;color:var(--accent);}
+  .ef-history-stat-label, .hk-history-stat-label, .dbl-history-stat-label{font-size:10.5px;color:var(--muted);margin-top:2px;}
+  .ef-history-empty, .hk-history-empty, .dbl-history-empty{text-align:center;font-size:11.5px;color:var(--muted);padding:20px 8px;}
+  .ef-history-row, .hk-history-row, .dbl-history-row{display:flex;align-items:center;gap:10px;padding:10px 11px;
+    border-radius:13px;width:100%;background:var(--card-2);cursor:pointer;transition:transform .12s;}
+  .ef-history-row:active, .hk-history-row:active, .dbl-history-row:active{transform:scale(.98);}
+  .ef-history-row-rank, .hk-history-row-rank, .dbl-history-row-rank{font-size:17px;flex-shrink:0;width:24px;text-align:center;}
+  .ef-history-row-info, .hk-history-row-info, .dbl-history-row-info{flex:1;min-width:0;}
+  .ef-history-row-cats, .hk-history-row-cats, .dbl-history-row-cats{font-size:11.5px;font-weight:700;color:var(--text);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ef-history-row-meta, .hk-history-row-meta, .dbl-history-row-meta{font-size:10.5px;color:var(--muted);margin-top:1px;}
+  .ef-history-row-score, .hk-history-row-score, .dbl-history-row-score{font-size:13px;font-weight:800;color:var(--accent);flex-shrink:0;}
+  .ef-history-detail-card, .hk-history-detail-card, .dbl-history-detail-card{max-width:340px;text-align:center;}
+
+  /* حکم بازیِ دوتیمی‌ست (نه امتیازِ فردی مثلِ اسم‌فامیل/دابل) — ردیفِ تاریخچه‌ای که بردید
+     یه نوارِ باریکِ رنگیِ سمتِ راست می‌گیره، تا فرقِ برد/باخت تو یه نگاه معلوم باشه. */
+  .hk-history-row-won{box-shadow:inset -3px 0 0 var(--accent);}
+
+  /* جزئیاتِ دست‌به‌دستِ یه مسابقه‌ی حکم (hkOpenHistoryDetail) — تنها بازی‌ای که فعلاً به این
+     ریزه‌کاری نیاز داره؛ اسمِ کلاس‌ها عمداً بدونِ پیشوندِ hk/ef/dbl (game-history-hand-*)
+     تا اگه بعداً بازیِ دیگه‌ای هم به یه لیستِ ریزه‌کاریِ مشابه نیاز داشت، دوباره‌نویسی نشه. */
+  .game-history-hand-row{display:flex;align-items:center;justify-content:space-between;gap:6px;
+    padding:8px 10px;border-radius:11px;background:var(--card-2);font-size:11px;margin-bottom:6px;}
+  .game-history-hand-num{font-weight:700;color:var(--text);flex-shrink:0;}
+  .game-history-hand-trump{color:var(--muted);flex-shrink:0;}
+  .game-history-hand-tricks{color:var(--text);flex-shrink:0;}
+  .game-history-hand-result{color:var(--accent);font-weight:700;flex-shrink:0;text-align:left;}
 
 </style>
 <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7"></script>
@@ -6476,13 +7004,25 @@ overflow:hidden;
 
 <div id="__debugPanel" style="display:none;position:fixed;inset:0;z-index:9999999;background:#0b0f1a;flex-direction:column;font-family:monospace;direction:ltr;">
   <div style="display:flex;align-items:center;gap:8px;padding:10px;background:#111827;border-bottom:1px solid #374151;flex-wrap:wrap;">
-    <strong style="color:#f9fafb;font-size:13px;direction:rtl;">پنل دیباگ (شبکه / کنسول / پلاگین)</strong>
+    <strong style="color:#f9fafb;font-size:13px;direction:rtl;">پنل دیباگ (شبکه / کنسول / پلاگین / Supabase / پرمیوم / Storage)</strong>
     <span style="flex:1"></span>
+    <button id="__debugPanelPremFilter" style="padding:6px 10px;border-radius:6px;border:1px solid #8b5cf6;background:#0b0f1a;color:#a78bfa;font-size:12px;direction:rtl;">فقط پرمیوم</button>
     <button id="__debugPanelCopy" style="padding:6px 10px;border-radius:6px;border:none;background:#2563eb;color:#fff;font-size:12px;">کپی همه</button>
     <button id="__debugPanelClear" style="padding:6px 10px;border-radius:6px;border:none;background:#374151;color:#fff;font-size:12px;">پاک کردن</button>
     <button id="__debugPanelClose" style="padding:6px 10px;border-radius:6px;border:none;background:#dc2626;color:#fff;font-size:12px;">بستن</button>
   </div>
+  <div style="display:flex;gap:4px;padding:6px 10px 0;background:#111827;border-bottom:1px solid #374151;overflow-x:auto;">
+    <button class="__debugTabBtn" data-tab="log" style="padding:7px 12px;border-radius:8px 8px 0 0;border:none;background:#1f2937;color:#fff;font-size:12px;direction:rtl;white-space:nowrap;">لاگ زنده</button>
+    <button class="__debugTabBtn" data-tab="supabase" style="padding:7px 12px;border-radius:8px 8px 0 0;border:none;background:#0b0f1a;color:#9ca3af;font-size:12px;direction:rtl;white-space:nowrap;">Supabase</button>
+    <button class="__debugTabBtn" data-tab="premium" style="padding:7px 12px;border-radius:8px 8px 0 0;border:none;background:#0b0f1a;color:#9ca3af;font-size:12px;direction:rtl;white-space:nowrap;">پرمیوم / IAP</button>
+    <button class="__debugTabBtn" data-tab="storage" style="padding:7px 12px;border-radius:8px 8px 0 0;border:none;background:#0b0f1a;color:#9ca3af;font-size:12px;direction:rtl;white-space:nowrap;">Storage</button>
+    <button class="__debugTabBtn" data-tab="report" style="padding:7px 12px;border-radius:8px 8px 0 0;border:none;background:#0b0f1a;color:#9ca3af;font-size:12px;direction:rtl;white-space:nowrap;">📋 گزارش کامل</button>
+  </div>
   <div id="__debugPanelList" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;"></div>
+  <div id="__debugPanelSupabase" style="display:none;flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px;direction:rtl;color:#e5e7eb;font-size:12px;"></div>
+  <div id="__debugPanelPremium" style="display:none;flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px;direction:rtl;color:#e5e7eb;font-size:12px;"></div>
+  <div id="__debugPanelStorage" style="display:none;flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px;direction:rtl;color:#e5e7eb;font-size:12px;"></div>
+  <div id="__debugPanelReport" style="display:none;flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px;direction:rtl;color:#e5e7eb;font-size:12px;"></div>
 </div>
 
 <div class="bg-decor" aria-hidden="true">
@@ -6924,6 +7464,62 @@ overflow:hidden;
   </div>
 </div>
 
+<!-- ===================== انتخابِ تاریخِ شروعِ روزشمار — اولین‌بار، برایِ همه =====================
+     یه‌بار، درست همون لحظه‌ای که روزشمار برایِ اولین‌بار خودکار از «همین الان» شروع می‌شه
+     (پایانِ ویزارد/ردکردنش/«بدون برنامه»/«دستی») نشون داده می‌شه — بدونِ محدودیتِ
+     owner/backdateUnlocked (STAGE 9)، چون این یه روزشمارِ تازه‌ست، نه تمدیدِ یکیِ فعلی.
+     منطقش تو app.js، STAGE 10، maybeOfferStartDateBackdate/openStartDateChoiceModal. -->
+<div class="recovery-modal" id="startDateChoiceModal">
+  <div class="recovery-modal-card">
+    <div class="recovery-modal-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v4.8l3.3 2"/></svg></div>
+    <div class="recovery-modal-title">روزشمارت رو از کِی حساب کنیم؟ 🌱</div>
+    <div class="recovery-modal-sub">اگه از قبل شروع کرده بودی، تاریخِ واقعیِ شروعت رو انتخاب کن — وگرنه از همین الان حساب می‌کنیم.</div>
+    <div class="reset-date-chips" id="startDateChoiceChips">
+      <button type="button" class="reset-date-chip active" data-days="0">همین الان</button>
+      <button type="button" class="reset-date-chip" data-days="1">۱ روز پیش</button>
+      <button type="button" class="reset-date-chip" data-days="3">۳ روز پیش</button>
+      <button type="button" class="reset-date-chip" data-days="7">۱ هفته پیش</button>
+      <button type="button" class="reset-date-chip" data-days="30">۱ ماه پیش</button>
+    </div>
+    <div class="reset-date-custom-label">یا تاریخِ دقیق:</div>
+    <input type="datetime-local" id="startDateChoiceInput" class="reset-date-input" />
+    <div class="reset-date-actions">
+      <button type="button" class="reset-date-confirm-btn" id="startDateChoiceConfirmBtn" style="flex:1;">ثبت و شروع 🚀</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== پنلِ مدیریتِ روزشمارها — فقط OWNER_EMAIL =====================
+     جست‌وجویِ هر کاربری، دیدنِ روزشمارِ فعلیش، و تغییر/صفرکردنِ تاریخِ شروعش. خودِ
+     OWNER_EMAIL هم می‌تونه با جست‌وجویِ خودش، روزشمارِ اکانتِ خودشو از همین‌جا عوض کنه —
+     تفاوتی با بقیه نداره. منطقش تو app.js، STAGE 10 (streak_admin_set_start_date/
+     streak_admin_reset/streak_admin_list_users، games_streak_admin.sql). -->
+<div class="wo-swap-modal" id="streakAdminModal">
+  <div class="wo-swap-card" style="max-width:380px;max-height:85vh;">
+    <div class="wo-swap-head">
+      <div class="wo-swap-title">🛠 مدیریتِ روزشمارها</div>
+      <button type="button" class="wo-swap-close" id="streakAdminCloseBtn">✕</button>
+    </div>
+    <input type="text" id="streakAdminSearchInput" placeholder="جست‌وجو با نامِ کاربری..." class="streak-admin-search" />
+    <div class="wo-swap-list" id="streakAdminList"></div>
+    <div id="streakAdminEditPanel" class="streak-admin-edit-panel" style="display:none;">
+      <div class="streak-admin-edit-title" id="streakAdminEditTitle">—</div>
+      <div class="reset-date-chips" id="streakAdminEditChips">
+        <button type="button" class="reset-date-chip" data-days="0">امروز</button>
+        <button type="button" class="reset-date-chip" data-days="3">۳ روز پیش</button>
+        <button type="button" class="reset-date-chip" data-days="7">۱ هفته پیش</button>
+        <button type="button" class="reset-date-chip" data-days="30">۱ ماه پیش</button>
+        <button type="button" class="reset-date-chip" data-days="90">۳ ماه پیش</button>
+      </div>
+      <input type="date" id="streakAdminEditDateInput" class="reset-date-input" />
+      <div class="reset-date-actions">
+        <button type="button" class="reset-date-back-btn" id="streakAdminEditCancelBtn">انصراف</button>
+        <button type="button" class="reset-date-confirm-btn" id="streakAdminEditApplyBtn">اعمال</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ===================== ACCOUNT CREATION GATE (mandatory, shown before onboarding) ===================== -->
 <div class="onboard-overlay" id="accountCreateOverlay">
   <div class="onboard-header">
@@ -7352,7 +7948,7 @@ overflow:hidden;
 </button>
 
 <div class="mode-bar" id="modeBar">
-  <button id="modePublicBtn" class="mode-btn" data-mode="public"><span class="mode-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.3"/><path d="M3.7 12h16.6M12 3.7c2.6 2.2 4 5.1 4 8.3s-1.4 6.1-4 8.3c-2.6-2.2-4-5.1-4-8.3s1.4-6.1 4-8.3z"/></svg></span>عمومی</button>
+  <button id="modePublicBtn" class="mode-btn" data-mode="public"><span class="mode-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.3"/><path d="M3.7 12h16.6M12 3.7c2.6 2.2 4 5.1 4 8.3s-1.4 6.1-4 8.3c-2.6-2.2-4-5.1-4-8.3s1.4-6.1 4-8.3z"/></svg></span>عمومی<span class="mode-public-badge" id="modePublicChatBadge"></span></button>
   <button class="mode-fab-btn" id="modeFocusBtn" data-tab="focusmode" title="حالت">
     <span class="mode-fab-circle">
       <span class="mode-fab-flame" id="modeFabFlame" aria-hidden="true"></span>
@@ -7556,6 +8152,58 @@ overflow:hidden;
       <button type="button" class="wo-swap-close" id="efHistoryDetailCloseBtn">✕</button>
     </div>
     <div class="ef-gameend-rows" id="efHistoryDetailRows"></div>
+  </div>
+</div>
+
+<!-- تاریخچه‌ی حکم — عیناً هم‌الگو با efHistoryModal/efHistoryDetailModal (بالاتر)؛ فقط
+     چون حکم دوتیمی‌ست نه چندنفره‌یِ امتیازِ فردی، جزئیاتش (hkHistoryDetailModal) دست‌به‌دستِ
+     خودِ مسابقه‌ست (hokm_match_detail)، نه اسکوربوردِ بازیکن‌ها. منطقش تو app.js، ماژولِ
+     «HOKM — لابیِ واقعی»، hkOpenHistory/hkLoadHistory/hkOpenHistoryDetail. -->
+<div class="wo-swap-modal" id="hkHistoryModal">
+  <div class="wo-swap-card hk-history-card">
+    <div class="wo-swap-head">
+      <div class="wo-swap-title">🗂 تاریخچه‌ی بازی‌های من</div>
+      <button type="button" class="wo-swap-close" id="hkHistoryCloseBtn">✕</button>
+    </div>
+    <div class="hk-history-stats" id="hkHistoryStats"></div>
+    <div class="wo-swap-list" id="hkHistoryList"></div>
+  </div>
+</div>
+
+<div class="wo-swap-modal" id="hkHistoryDetailModal">
+  <div class="wo-swap-card hk-history-detail-card">
+    <div class="wo-swap-head">
+      <div class="wo-swap-title" id="hkHistoryDetailTitle">—</div>
+      <button type="button" class="wo-swap-close" id="hkHistoryDetailCloseBtn">✕</button>
+    </div>
+    <div class="wo-swap-list" id="hkHistoryDetailRows"></div>
+  </div>
+</div>
+
+<!-- تاریخچه‌ی دابل — عیناً هم‌الگو با efHistoryModal/efHistoryDetailModal. جزئیاتش
+     (dblHistoryDetailModal) از همون dobble_room_scoreboard + dblScoreRowsHtml استفاده
+     می‌کنه (کلاسِ ef-gameend-rows/row همون کلاسِ اسکوربوردِ زنده‌ی خودِ دابله، نه کلاسِ
+     جدا — عیناً هم‌الگو با efHistoryDetailRows که از ef-gameend-row استفاده می‌کنه).
+     منطقش تو app.js، ماژولِ «DOBBLE — STAGE ۳...»، dblOpenHistory/dblLoadHistory/
+     dblOpenHistoryDetail. -->
+<div class="wo-swap-modal" id="dblHistoryModal">
+  <div class="wo-swap-card dbl-history-card">
+    <div class="wo-swap-head">
+      <div class="wo-swap-title">🗂 تاریخچه‌ی بازی‌های من</div>
+      <button type="button" class="wo-swap-close" id="dblHistoryCloseBtn">✕</button>
+    </div>
+    <div class="dbl-history-stats" id="dblHistoryStats"></div>
+    <div class="wo-swap-list" id="dblHistoryList"></div>
+  </div>
+</div>
+
+<div class="wo-swap-modal" id="dblHistoryDetailModal">
+  <div class="wo-swap-card dbl-history-detail-card">
+    <div class="wo-swap-head">
+      <div class="wo-swap-title" id="dblHistoryDetailTitle">—</div>
+      <button type="button" class="wo-swap-close" id="dblHistoryDetailCloseBtn">✕</button>
+    </div>
+    <div class="dbl-gameend-rows" id="dblHistoryDetailRows"></div>
   </div>
 </div>
 
@@ -9537,6 +10185,7 @@ overflow:hidden;
               <div class="cm-action-menu-backdrop" id="chatMoreMenuBackdrop"></div>
               <div class="chat-more-menu" id="chatMoreMenu">
                 <button type="button" class="chat-more-option" id="chatSearchOpenBtn"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg></span>جستجو در پیام‌ها</button>
+                <button type="button" class="chat-more-option" id="streakAdminMenuOpenBtn" style="display:none;"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v4.8l3.3 2"/></svg></span>مدیریتِ روزشمارها</button>
               </div>
             </div>
           </div>
@@ -10288,6 +10937,7 @@ overflow:hidden;
       <!-- وقتی کاربر تو هیچ میزی نیست: ساخت میز جدید یا پیوستن به یکی از میزهای باز -->
       <div class="hk-lobby-browse" id="hkLobbyBrowse" style="display:none;">
         <button type="button" class="hk-lobby-create-btn" id="hkCreateRoomBtn">+ ساخت میز جدید</button>
+        <button type="button" class="hk-history-btn" id="hkHistoryBtn">🗂 تاریخچه‌ی بازی‌های من</button>
         <div class="hk-lobby-list-head">میزهای باز</div>
         <div class="hk-lobby-list" id="hkLobbyList"></div>
         <div class="hk-lobby-empty" id="hkLobbyEmpty" style="display:none;">فعلاً میز بازی در انتظار نیست — اولین نفر باش! 🃏</div>
@@ -10558,6 +11208,7 @@ overflow:hidden;
         <!-- وقتی کاربر تو هیچ میزی نیست: لیستِ میزهای باز یا ساختِ میزِ جدید -->
         <div class="dbl-lobby-browse" id="dblLobbyBrowse" style="display:none;">
           <button type="button" class="dbl-create-btn" id="dblCreateRoomBtn">+ ساخت میز جدید</button>
+          <button type="button" class="dbl-history-btn" id="dblHistoryBtn">🗂 تاریخچه‌ی بازی‌های من</button>
           <div class="dbl-lobby-list-head">میزهای باز</div>
           <div class="dbl-lobby-list" id="dblLobbyList"></div>
           <div class="dbl-lobby-empty" id="dblLobbyEmpty" style="display:none;">فعلاً میز بازی در انتظار نیست — اولین نفر باش! 🔍</div>
